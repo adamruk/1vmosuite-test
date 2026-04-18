@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Optional
 import tempfile
 import requests
 import shutil
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QTreeWidget, QTreeWidgetItem, QSpinBox, QFileDialog, QTextEdit, QFrame, QMessageBox, QDialog, QDialogButtonBox, QLineEdit, QComboBox, QRadioButton
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QTreeWidget, QTreeWidgetItem, QSpinBox, QFileDialog, QTextEdit, QFrame, QMessageBox, QDialog, QDialogButtonBox, QLineEdit, QComboBox, QRadioButton, QSizePolicy
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
 from PyQt5.QtGui import QIcon
 from help_dialog import HelpDialog
@@ -226,13 +226,15 @@ class VideoRendererTool(QMainWindow):
         top_layout.setSpacing(5)
         input_frame = QFrame(objectName='input_frame')
         input_frame.setFrameStyle(QFrame.StyledPanel)
-        input_frame.setFixedWidth(780)
+        input_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        input_frame.setMinimumWidth(780)
         input_layout = QVBoxLayout(input_frame)
         input_layout.setSpacing(2)
         input_layout.setContentsMargins(5, 2, 5, 2)
         config_frame = QFrame(objectName='config_frame')
         config_frame.setFrameStyle(QFrame.StyledPanel)
-        config_frame.setFixedWidth(780)
+        config_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        config_frame.setMinimumWidth(780)
         config_layout = QVBoxLayout(config_frame)
         config_layout.setSpacing(2)
         config_layout.setContentsMargins(5, 2, 5, 2)
@@ -240,19 +242,22 @@ class VideoRendererTool(QMainWindow):
         top_layout.addWidget(config_frame)
         bottom_frame = QFrame(objectName='bottom_frame')
         bottom_frame.setFrameStyle(QFrame.StyledPanel)
-        bottom_frame.setFixedHeight(450)
+        bottom_frame.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        bottom_frame.setMinimumHeight(450)
         bottom_layout = QHBoxLayout(bottom_frame)
         bottom_layout.setContentsMargins(5, 5, 5, 5)
         bottom_layout.setSpacing(5)
         progress_frame = QFrame(objectName='progress_frame')
         progress_frame.setFrameStyle(QFrame.StyledPanel)
-        progress_frame.setFixedWidth(780)
+        progress_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        progress_frame.setMinimumWidth(780)
         progress_layout = QVBoxLayout(progress_frame)
         progress_layout.setSpacing(2)
         progress_layout.setContentsMargins(5, 2, 5, 2)
         output_frame = QFrame(objectName='output_frame')
         output_frame.setFrameStyle(QFrame.StyledPanel)
-        output_frame.setFixedWidth(780)
+        output_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        output_frame.setMinimumWidth(780)
         output_layout = QVBoxLayout(output_frame)
         output_layout.setSpacing(5)
         output_layout.setContentsMargins(5, 5, 5, 5)
