@@ -26,6 +26,7 @@ from PyQt5.QtCore import Qt, QThreadPool, QRunnable, pyqtSignal, QObject, QThrea
 from PyQt5.QtGui import QIcon, QColor, QPainter, QPen, QBrush
 from updater import DriveUpdater
 from help_dialog import HelpDialog
+from core import config as core_config
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
 FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
@@ -834,21 +835,21 @@ class VideoMergeTool(QMainWindow):
     def setup_style(self):
         self.setStyleSheet('\n            QMainWindow { background-color: #f8f9fa; }\n            QFrame#top_frame, QFrame#bottom_frame { background-color: transparent; border: none; }\n            QFrame#input_frame, QFrame#config_frame, QFrame#progress_frame, QFrame#output_frame {\n                background-color: white; border: 2px solid #dee2e6; border-radius: 8px;\n            }\n            QFrame#sub_frame { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; }\n            QLabel#sub_title { color: #495057; font-size: 14px; font-weight: bold; padding: 5px; }\n            QLabel { padding: 5px; }\n            QLabel#dir_label { padding-left: 10px; padding-right: 10px; }\n            QLabel.status_label { \n                color: #1976d2; \n                font-weight: bold; \n                background-color: #e3f2fd; \n                border: 1px solid #bbdefb; \n                border-radius: 4px; \n                padding: 4px 8px; \n            }\n            QLabel.config_label {\n                color: #1976d2;\n                font-weight: bold;\n                font-size: 11px;\n                padding: 2px 4px;\n                background-color: #e3f2fd;\n                border: 1px solid #bbdefb;\n                border-radius: 3px;\n            }\n            QPushButton {\n                background-color: #007bff; color: white; border: none; border-radius: 4px; padding: 5px 10px;\n                min-width: 100px; max-width: 120px; font-weight: bold; font-size: 12px;\n            }\n            QPushButton:hover { background-color: #0056b3; }\n            QPushButton:disabled { background-color: #6c757d; }\n            QPushButton[delete=\"true\"] { background-color: #dc3545; }\n            QPushButton[delete=\"true\"]:hover { background-color: #c82333; }\n            QTreeWidget { border: 1px solid #dee2e6; border-radius: 4px; }\n            QTreeWidget::item { padding: 5px; border-bottom: 1px solid #dee2e6; }\n            QTreeWidget::item:selected { background-color: #007bff; color: white; }\n            QHeaderView::section { \n                background-color: #e3f2fd; \n                padding: 5px; \n                border: 1px solid #bbdefb; \n                font-weight: bold; \n                text-align: center; \n                color: #1976d2; \n            }\n            QProgressBar { \n                border: 1px solid #dee2e6; \n                border-radius: 4px; \n                text-align: center; \n                background-color: #f8f9fa; \n                font-weight: bold; \n            }\n            QProgressBar::chunk { background-color: #e3f2fd; border-radius: 3px; }\n            QTextEdit { background-color: black; color: white; font-family: Consolas; border-radius: 4px; }\n            QFrame#progress_info_frame { background-color: #e3f2fd; border: 1px solid #bbdefb; border-radius: 4px; }\n            QFrame#canvas { background-color: #f0f0f0; border: none; }\n            QComboBox {\n                border: 1px solid #bdc3c7;\n                border-radius: 3px;\n                padding: 1px 12px 1px 3px;\n                background: white;\n                min-height: 20px;\n                font-size: 11px;\n            }\n            QComboBox:hover { \n                border-color: #3498db; \n            }\n            QComboBox:focus { \n                border-color: #2980b9; \n            }\n            QComboBox::drop-down {\n                border: none;\n                width: 12px;\n            }\n            QComboBox::down-arrow {\n                width: 4px;\n                height: 4px;\n                margin-right: 4px;\n                image: none;\n                border: none;\n                border-radius: 2px;\n                background-color: #3498db;\n                opacity: 0.7;\n            }\n            QComboBox::down-arrow:hover {\n                background-color: #2980b9;\n                opacity: 1;\n            }\n            QComboBox::down-arrow:on {\n                background-color: #2980b9;\n                opacity: 1;\n            }\n            QComboBox QAbstractItemView {\n                border: 1px solid #bdc3c7;\n                selection-background-color: #3498db;\n                selection-color: white;\n                background: white;\n                font-size: 11px;\n            }\n            QSlider::groove:horizontal {\n                border: 1px solid #bdc3c7;\n                height: 8px;\n                background: #f0f0f0;\n                margin: 2px 0;\n                border-radius: 4px;\n            }\n            QSlider::handle:horizontal {\n                background: #007bff;\n                border: 1px solid #0056b3;\n                width: 18px;\n                margin: -5px 0;\n                border-radius: 9px;\n            }\n        ')
     def load_config(self) -> dict:
+        default_config = {'version': 1}
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-                    return config if config.get('version', 1) == 1 else {'version': 1}
+                    json.load(f)
             except json.JSONDecodeError:
                 QMessageBox.warning(self, 'Warning', 'Configuration file corrupted. Using default.')
-                return {'version': 1}
-        return {'version': 1}
+                return default_config
+        config = core_config.load(Path(CONFIG_FILE), default=default_config)
+        return config if config.get('version', 1) == 1 else default_config
     def save_config(self):
         try:
             config = {'version': 1, 'last_output_dir': self.output_directory, 'group1_videos': self.group1_videos, 'group2_videos': self.group2_videos, 'group3_videos': self.group3_videos, 'group4_videos': self.group4_videos, 'audio_files': self.audio_files, 'num_videos': self.combo_num_videos.currentText(), 'layout_mode': self.combo_layout.currentText(), 'audio_source': self.combo_audio.currentText(), 'opacity': self.combo_overlay_group.currentText() if hasattr(self, 'slider_opacity') else 50, 'overlay_group': self.combo_overlay_group.currentText() if hasattr(self, 'combo_overlay_group') else 'Group 1'}
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=4)
-        except Exception as e:
+            core_config.save(Path(CONFIG_FILE), config)
+        except (OSError, TypeError) as e:
             error_msg = f'Cannot save configuration: {str(e)}\n{traceback.format_exc()}'
             print(f'Config Error: {error_msg}')
             QMessageBox.warning(self, 'Warning', f'Cannot save configuration: {str(e)}')

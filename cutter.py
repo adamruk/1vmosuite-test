@@ -23,6 +23,7 @@ from PyQt5.QtCore import Qt, QThreadPool, QRunnable, pyqtSignal, QObject, QThrea
 from PyQt5.QtGui import QIcon, QColor
 from updater import DriveUpdater
 from help_dialog import HelpDialog
+from core import config as core_config
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
 FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
@@ -564,22 +565,21 @@ class VideoCutterTool(QMainWindow):
         self.setStyleSheet(style)
     def load_config(self) -> dict:
         default_config = {'version': 1}
-        if not CONFIG_FILE.exists():
-            return default_config
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                return config if config.get('version', 1) == 1 else default_config
-        except (json.JSONDecodeError, IOError) as e:
-            self.logger.warning(f'Failed to load config: {str(e)}')
-            QMessageBox.warning(self, 'Warning', 'Configuration file corrupted. Using default.')
-            return default_config
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                self.logger.warning(f'Failed to load config: {str(e)}')
+                QMessageBox.warning(self, 'Warning', 'Configuration file corrupted. Using default.')
+                return default_config
+        config = core_config.load(Path(CONFIG_FILE), default=default_config)
+        return config if config.get('version', 1) == 1 else default_config
     def save_config(self):
         try:
             config = {'version': 1, 'last_output_dir': self.output_directory, 'last_videos_dir': os.path.dirname(self.video_list[0]) if self.video_list else '', 'last_videos': self.video_list, 'cut_mode': self.combo_cut_mode.currentText()}
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(config, f, indent=4)
-        except IOError as e:
+            core_config.save(Path(CONFIG_FILE), config)
+        except (OSError, TypeError) as e:
             self.logger.warning(f'Failed to save config: {str(e)}')
             QMessageBox.warning(self, 'Warning', f'Cannot save configuration: {str(e)}')
     def update_video_counts(self):

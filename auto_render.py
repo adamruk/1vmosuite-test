@@ -20,6 +20,7 @@ from PyQt5.QtGui import QIcon
 from help_dialog import HelpDialog
 from updater import DriveUpdater
 import gpu_detect
+from core import config as core_config
 def resource_path(relative_path):
     """Lấy đường dẫn tuyệt đối cho tài nguyên, hoạt động cả khi chạy từ source và từ file exe"""
     try:
@@ -503,19 +504,18 @@ class VideoRendererTool(QMainWindow):
         """Tải cấu hình từ config_video_renderer.json nếu tồn tại."""
         if self.CONFIG_FILE.exists():
             try:
-                with open(self.CONFIG_FILE, 'r') as f:
-                    return json.load(f)
+                with open(self.CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    json.load(f)
             except json.JSONDecodeError:
                 QMessageBox.warning(self, 'Error', 'Configuration file is corrupted. Loading default settings.')
                 return {}
-        return {}
+        return core_config.load(Path(self.CONFIG_FILE), default={})
     def save_config(self) -> None:
         """Lưu cấu hình vào config_video_renderer.json."""
         try:
             config = {'input_files': self.videos, 'output_dir': self.output_directory, 'encoder_options': self.selected_encoders, 'num_threads': self.num_threads}
-            with open(self.CONFIG_FILE, 'w') as f:
-                json.dump(config, f, indent=4)
-        except Exception as e:
+            core_config.save(Path(self.CONFIG_FILE), config)
+        except (OSError, TypeError) as e:
             QMessageBox.warning(self, 'Error', f'Failed to save configuration: {str(e)}')
     def load_encoder_options(self) -> List[Dict[str, Any]]:
         """Đọc các tùy chọn render từ file Encoder.txt và bỏ qua các dòng lỗi."""
