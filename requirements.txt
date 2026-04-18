@@ -1,0 +1,9 @@
+PyQt5>=5.15,<6
+requests>=2.31
+# nvidia-ml-py 12.x+ for NVENC hardware detection (gpu_detect.py).
+# Safe to remove on non-NVIDIA systems — gpu_detect falls back gracefully.
+# Note: the package is 'nvidia-ml-py' on PyPI but imports as 'pynvml'.
+# v13.x removed nvmlInit_v2; our code uses bare nvmlInit() which is correct
+# for both v12 and v13+. See FFMPEG_CPU_TO_NVENC_REFERENCE.md §9.
+nvidia-ml-py>=12.0
+Pillow>=10.0

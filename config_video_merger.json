@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "last_output_dir": "",
+    "last_videos_dir": "",
+    "last_intro_video_dir": "",
+    "last_outro_video_dir": "",
+    "last_videos": [],
+    "last_intro_videos": [],
+    "last_outro_videos": [],
+    "merge_mode_main": "Random",
+    "merge_mode_intro": "Random",
+    "merge_mode_outro": "Random",
+    "output_naming": "Time + Index"
+}

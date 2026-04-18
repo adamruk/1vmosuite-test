@@ -1,0 +1,72 @@
+# Changelog
+
+All notable changes to **1vmo Suite** are documented in this file.
+
+Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
+Versioning: [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## Maintenance rules
+
+These are non-negotiable. The changelog is an audit artifact, not marketing copy.
+
+1. **Shipped version entries are IMMUTABLE.** Never edit a released version block — add a new patch/minor version instead. Retroactive edits destroy the audit trail.
+2. **Measurable claims require evidence on disk.** Any entry asserting size, time, count, percentage, speed, or quality must link to a file under `benchmarks/`, `tests/`, `docs/decisions/`, or a commit hash.
+3. **`[Unreleased]` holds in-progress work.** It graduates to a numbered version only when shipped. Empty subsections may be omitted entirely.
+4. **Date = ship date.** Not the date work started, not the date the PR merged — the date users received it.
+5. **No marketing language.** Write "Fixed race condition in session cleanup," not "improved stability." Write "hevc_nvenc encodes 3.2× faster than libx264 at VMAF 94 [bench/2026-04-18-nvenc-vmaf.md]," not "blazing-fast GPU encoding."
+6. **Six-month test.** Will someone six months from now need to know this? If no, skip it.
+7. **Internal refactors don't belong here.** No user-visible behavior change = git log territory, not changelog.
+
+---
+
+## Traceability
+
+Every entry making a disputable claim ("faster," "fixes X," quantitative measurements) must link to at least one evidence source. Pure refactors and cosmetic changes get a bare commit hash only.
+
+| Evidence type | Location | Reference format | When to use |
+|---|---|---|---|
+| Commit hash | git | `[abc1234]` (7 chars, multiple allowed: `[abc1234, def5678]`) | Every code change |
+| Architecture Decision Record | `docs/decisions/` | `[ADR-0003]` | Framework migrations, encoder strategy, distribution model, API surface |
+| Benchmark result | `benchmarks/` | `[bench/2026-04-18-nvenc-vmaf.md]` | Performance or quality claims |
+| Test log | `tests/` | `[tests/e2e-cutter-20260418.log]` | Restored or new functional coverage |
+
+Naming conventions:
+- ADRs: `ADR-NNNN-slug.md` (4-digit zero-padded, never renumbered; superseded ADRs keep their number and add `Status: Superseded by ADR-NNNN`).
+- Benchmarks: `YYYY-MM-DD-slug.md` (ISO date prefix).
+- Test logs: `<test-name>-YYYYMMDD.log` or `.md` (compact date).
+
+---
+
+## Example entry format
+
+This block is illustrative, not part of the project history. It shows the shape a good entry should take.
+
+```
+### Changed
+- Default HEVC encoder switched from libx265 to hevc_nvenc on CUDA-capable systems — encodes 3.2× faster at matched VMAF ≥ 94 on the reference RTX 4070 preset sweep. Fallback to libx265 on CPU-only hosts unchanged. [bench/2026-04-18-nvenc-preset-vmaf-audit.md] [ADR-0001-nvenc-migration] [a1b2c3d, e4f5g6h]
+```
+
+What makes it a good entry: one concrete user-visible change, a measurable claim tied to a specific benchmark file, the architectural decision recorded separately as an ADR, and the exact commits that delivered it.
+
+---
+
+## [Unreleased] — v2.0.0
+
+First release of the revived codebase. Covers the decompile-and-restore effort and Phase 1 modernization work in progress.
+
+### Added
+- GPU encoding pipeline via NVENC — **in progress, Phase 1 (detection).** Will ship with hardware capability probing, encoder auto-selection, and CPU fallback. Entry will be finalized with benchmark and ADR links before v2.0.0 is cut.
+- `docs/PHASE_1_STOP_CONDITIONS.md` — lightweight Phase 1 stop-condition document (time budget, 3 hard stops, 3 soft stops) with a binding verification-and-permission protocol. Protocol prohibits automated helpers from rolling back, disabling features, or declaring phase halts autonomously — they must verify signals, produce a structured report, and wait for Adam's explicit decision before proceeding. References `FFMPEG_CPU_TO_NVENC_REFERENCE.md` §1/§6/§7.
+- `bench.py` — standalone benchmark tool for measuring ffmpeg commands. Two modes: quick (wall-clock + file size, ~10s overhead) and full (adds VMAF mean and 5th-percentile, ~60s overhead). Outputs structured JSON to `bench_results/`. Used to produce the libx264 baseline measurements that drive Phase 1 NVENC migration decisions. Documentation: `benchmarks/README_BENCH_TOOL.md`.
+- `benchmarks/METHODOLOGY.md` — defines how to run reproducible Phase 1 benchmarks. Encodes the cold-vs-sustained distinction (laptop NVENC throttles under load), the 20-minute warmup protocol for sustained measurements, the 3-clip diversity requirement, and standard `bench.py` invocations for CPU and GPU comparisons. Stop-condition H-3 throughput floor is defined against the sustained number, not the cold number.
+- `docs/PHASE_2_ROADMAP.md` — parking-lot document recording planned modernization work for after Phase 1 ships. Captures sub-phases for shared `core/` module extraction, updater migration to GitHub Releases, Encoder.txt JSON migration, and PyQt5→PySide6 upgrade. No work begins until Phase 1 is shipped and validated.
+
+### Fixed
+- Restored source readability after pylingual decompile: 43 control-flow reconstruction artifacts corrected across the four apps (`auto_render.py`, `cutter.py`, `merge.py`, `mixer.py`) — indentation cascades from `# irreducible cflow, using cdg fallback` blocks, broken try/except nesting, and orphaned return statements. All four apps now launch and pass end-to-end smoke tests against the reference config files. *Evidence links pending:* `[tests/smoke-all-apps-YYYYMMDD.log] [<commit>]`
+- `requirements.txt` — declared `Pillow>=10.0` as an explicit dependency. `merge.py` uses Pillow (function-level imports at lines 87 and 934) but it was not previously declared, meaning a fresh install strictly from `requirements.txt` would crash on image-handling code paths. Pre-existing condition from the original decompile; surfaced by repo verification on 2026-04-18.
+
+---
+
+_Pre-2.0 history: the suite originally shipped as four separate compiled `.exe` files (Auto Render v3.5, Cutter v3.5, Merge v3.7, Mixer v3.5). Original source was not preserved; v2.0.0 is a clean-break revival reconstructed via pylingual decompile. No retroactive changelog entries are maintained for the pre-revival generation._

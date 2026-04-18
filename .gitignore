@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Bundled ffmpeg binaries (huge, reproducible from your bundling setup)
+ffmpeg/ffmpeg.exe
+ffmpeg/ffprobe.exe
+
+# Runtime logs / user data
+*.log

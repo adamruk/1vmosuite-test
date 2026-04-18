@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "last_output_dir": "",
+    "group1_videos": [],
+    "group2_videos": [],
+    "group3_videos": [],
+    "group4_videos": [],
+    "audio_files": [],
+    "num_videos": "2",
+    "layout_mode": "Horizontal",
+    "audio_source": "Longest",
+    "opacity": 50,
+    "overlay_group": "Group 1"
+}
