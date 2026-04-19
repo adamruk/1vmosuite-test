@@ -71,51 +71,37 @@ class MergeWorker(QRunnable):
             os.chmod(temp_file_path, 438)
             command = [str(self.ffmpeg_path), '-y', '-f', 'concat', '-safe', '0', '-i', temp_file_path, '-c', 'copy', str(self.output_path)]
             self.signals.output_updated.emit(f"Lệnh thực thi: {' '.join((str(x) for x in command))}\n\n")
-            startupinfo = core_ffmpeg_runner.hidden_startupinfo()
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), text=True, encoding='utf-8', errors='replace')
-            duration, time = (None, 0)
             error_output = []
-            while True:
-                if self.is_cancelled:
-                    process.terminate()
-                    process.wait()
-                    self.signals.status_updated.emit(self.thread_index, 'Đã hủy')
-                    self.signals.progress_updated.emit(self.thread_index, 0)
-                    try:
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                    except Exception as e:
-                        self.logger.warning(f'Không thể xóa file tạm {temp_file_path}: {str(e)}')
-                    return
-                line = process.stderr.readline()
-                if not line and process.poll() is not None:
-                    return_code = process.wait()
-                    if return_code == 0 and (not self.is_cancelled):
-                        if os.path.exists(self.output_path) and os.path.getsize(self.output_path) > 0:
-                            self.signals.status_updated.emit(self.thread_index, 'Hoàn thành')
-                            self.signals.progress_updated.emit(self.thread_index, 100)
-                            self.signals.output_updated.emit(f'\n[Thread {self.thread_index + 1}] Hoàn thành: {os.path.basename(self.output_path)}\n')
-                            self.signals.merge_completed.emit(os.path.basename(self.output_path))
-                        else:
-                            raise RuntimeError('File đầu ra không tồn tại hoặc rỗng')
-                    else:
-                        error_msg = '\n'.join(error_output[(-5):])
-                        raise RuntimeError(f'FFmpeg trả về mã lỗi {return_code}\n{error_msg}')
-                    break
-                if line:
-                    error_output.append(line)
-                    self.signals.output_updated.emit(line)
-                    if duration is None and 'Duration:' in line:
-                        duration_match = re.search('Duration: (\\d{2}):(\\d{2}):(\\d{2})', line)
-                        if duration_match:
-                            h, m, s = map(int, duration_match.groups())
-                            duration = h * 3600 + m * 60 + s
-                    time_match = re.search('time=(\\d{2}):(\\d{2}):(\\d{2})', line)
-                    if time_match and duration:
-                        h, m, s = map(int, time_match.groups())
-                        time = h * 3600 + m * 60 + s
-                        progress = min(int(time / duration * 100), 100)
-                        self.signals.progress_updated.emit(self.thread_index, progress)
+            def _on_line(line):
+                error_output.append(line + '\n')
+                self.signals.output_updated.emit(line + '\n')
+            return_code = core_ffmpeg_runner.run_ffmpeg(
+                command,
+                dialect='legacy_stderr',
+                on_progress=lambda pct: self.signals.progress_updated.emit(self.thread_index, pct),
+                on_output_line=_on_line,
+                should_cancel=lambda: self.is_cancelled,
+            )
+            if self.is_cancelled:
+                self.signals.status_updated.emit(self.thread_index, 'Đã hủy')
+                self.signals.progress_updated.emit(self.thread_index, 0)
+                try:
+                    if os.path.exists(temp_file_path):
+                        os.remove(temp_file_path)
+                except Exception as e:
+                    self.logger.warning(f'Không thể xóa file tạm {temp_file_path}: {str(e)}')
+                return
+            if return_code == 0:
+                if os.path.exists(self.output_path) and os.path.getsize(self.output_path) > 0:
+                    self.signals.status_updated.emit(self.thread_index, 'Hoàn thành')
+                    self.signals.progress_updated.emit(self.thread_index, 100)
+                    self.signals.output_updated.emit(f'\n[Thread {self.thread_index + 1}] Hoàn thành: {os.path.basename(self.output_path)}\n')
+                    self.signals.merge_completed.emit(os.path.basename(self.output_path))
+                else:
+                    raise RuntimeError('File đầu ra không tồn tại hoặc rỗng')
+            else:
+                error_msg = '\n'.join(error_output[(-5):])
+                raise RuntimeError(f'FFmpeg trả về mã lỗi {return_code}\n{error_msg}')
             try:
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)

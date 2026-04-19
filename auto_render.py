@@ -82,52 +82,36 @@ class RenderWorker(QObject):
                 command.extend(['-y', str(Path(output_file))])
                 self.output_updated.emit(f'\n[Thread {self.thread_index + 1}] {progress_info}: Processing {os.path.basename(current_input)} with {encoder_name}\n')
                 self.output_updated.emit(f"Command: {' '.join((str(x) for x in command))}\n\n")
-                startupinfo = core_ffmpeg_runner.hidden_startupinfo()
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
-                duration = None
-                time = 0
-                while True:
-                    if self.is_cancelled:
-                        process.terminate()
-                        process.wait()
-                        self.status_updated.emit(self.thread_index, 'Cancelled')
-                        self.progress_updated.emit(self.thread_index, 0)
-                        return
-                    line = process.stderr.readline()
-                    if not line and process.poll() is not None:
-                        if process.returncode == 0 and (not self.is_cancelled):
-                            self.status_updated.emit(self.thread_index, f'Completed Step {i + 1}/{len(self.encoder_names)}')
-                            self.progress_updated.emit(self.thread_index, 100)
-                            self.output_updated.emit(f'\n[Thread {self.thread_index + 1}] Completed Step {i + 1}/{len(self.encoder_names)}: {os.path.basename(current_input)} with {encoder_name}\n')
-                            if current_input!= self.video_path:
-                                try:
-                                    os.remove(current_input)
-                                except:
-                                    pass
-                            current_input = output_file
-                            current_output = output_file
-                            if i == len(self.encoder_names) - 1:
-                                final_output = output_filename
-                        else:
-                            error_msg = f'Error processing {os.path.basename(current_input)} with {encoder_name} (Step {i + 1}/{len(self.encoder_names)}): Return code {process.returncode}'
-                            self.error_occurred.emit(error_msg)
-                            self.status_updated.emit(self.thread_index, 'Error')
-                            self.progress_updated.emit(self.thread_index, 0)
-                            return
-                        break
-                    if line:
-                        self.output_updated.emit(line)
-                        if duration is None and 'Duration:' in line:
-                            duration_match = re.search('Duration: (\\d{2}):(\\d{2}):(\\d{2})', line)
-                            if duration_match:
-                                h, m, s = map(int, duration_match.groups())
-                                duration = h * 3600 + m * 60 + s
-                        time_match = re.search('time=(\\d{2}):(\\d{2}):(\\d{2})', line)
-                        if time_match and duration:
-                            h, m, s = map(int, time_match.groups())
-                            time = h * 3600 + m * 60 + s
-                            progress = min(int(time / duration * 100), 100)
-                            self.progress_updated.emit(self.thread_index, progress)
+                rc = core_ffmpeg_runner.run_ffmpeg(
+                    command,
+                    dialect='legacy_stderr',
+                    on_progress=lambda pct: self.progress_updated.emit(self.thread_index, pct),
+                    on_output_line=lambda line: self.output_updated.emit(line + '\n'),
+                    should_cancel=lambda: self.is_cancelled,
+                )
+                if self.is_cancelled:
+                    self.status_updated.emit(self.thread_index, 'Cancelled')
+                    self.progress_updated.emit(self.thread_index, 0)
+                    return
+                if rc == 0:
+                    self.status_updated.emit(self.thread_index, f'Completed Step {i + 1}/{len(self.encoder_names)}')
+                    self.progress_updated.emit(self.thread_index, 100)
+                    self.output_updated.emit(f'\n[Thread {self.thread_index + 1}] Completed Step {i + 1}/{len(self.encoder_names)}: {os.path.basename(current_input)} with {encoder_name}\n')
+                    if current_input!= self.video_path:
+                        try:
+                            os.remove(current_input)
+                        except:
+                            pass
+                    current_input = output_file
+                    current_output = output_file
+                    if i == len(self.encoder_names) - 1:
+                        final_output = output_filename
+                else:
+                    error_msg = f'Error processing {os.path.basename(current_input)} with {encoder_name} (Step {i + 1}/{len(self.encoder_names)}): Return code {rc}'
+                    self.error_occurred.emit(error_msg)
+                    self.status_updated.emit(self.thread_index, 'Error')
+                    self.progress_updated.emit(self.thread_index, 0)
+                    return
             if final_output:
                 self.render_completed.emit(final_output)
         except Exception as e:

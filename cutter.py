@@ -106,44 +106,38 @@ class CutWorker(QRunnable):
                                 command.extend(['-ss', str(start), '-t', str(duration), temp_output])
                 self.logger.info(f"FFmpeg command: {' '.join((str(x) for x in command))}")
                 self.signals.output_updated.emit(f"FFmpeg command: {' '.join((str(x) for x in command))}\n")
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, startupinfo=self.get_startupinfo(), creationflags=core_ffmpeg_runner.hidden_creationflags(), text=True, encoding='utf-8', errors='replace')
-                duration = self.get_video_duration()
                 error_output = []
-                while True:
-                    if self.is_cancelled:
-                        process.terminate()
-                        process.wait()
-                        self.signals.status_updated.emit(self.thread_index, 'Cancelled')
-                        self.signals.progress_updated.emit(self.thread_index, 0)
-                        return
-                    line = process.stdout.readline()
-                    if not line and process.poll() is not None:
-                        return_code = process.wait()
-                        if return_code == 0 and (not self.is_cancelled):
-                            output_pattern = temp_output.replace('%03d', '*')
-                            temp_files = glob.glob(output_pattern)
-                            if temp_files and all((os.path.getsize(f) > 0 for f in temp_files)):
-                                for temp_file in temp_files:
-                                    segment_duration = self.get_segment_duration(temp_file)
-                                    self.logger.info(f'Segment {temp_file}: Duration = {segment_duration}s')
-                                    shutil.move(temp_file, final_output.replace('%03d', os.path.basename(temp_file)[(-7):(-4)]))
-                                self.signals.status_updated.emit(self.thread_index, 'Completed')
-                                self.signals.progress_updated.emit(self.thread_index, 100)
-                                self.signals.output_updated.emit(f'\n[Thread {self.thread_index + 1}] Completed: {os.path.basename(self.output_path)}\n')
-                                self.signals.cut_completed.emit(os.path.basename(self.output_path))
-                            else:
-                                raise RuntimeError(f'No valid output files created for: {self.output_path}')
-                        else:
-                            raise RuntimeError(f'FFmpeg error code {return_code}\n' + '\n'.join(error_output))
-                        break
-                    if line:
-                        error_output.append(line)
-                        self.signals.output_updated.emit(line)
-                        time_match = re.search('out_time_ms=(\\d+)', line)
-                        if time_match and duration:
-                            time = int(time_match.group(1)) / 1000000
-                            progress = min(int(time / duration * 100), 100)
-                            self.signals.progress_updated.emit(self.thread_index, progress)
+                def _on_line(line):
+                    error_output.append(line + '\n')
+                    self.signals.output_updated.emit(line + '\n')
+                return_code = core_ffmpeg_runner.run_ffmpeg(
+                    command,
+                    dialect='progress_pipe',
+                    duration_seconds=total_duration,
+                    on_progress=lambda pct: self.signals.progress_updated.emit(self.thread_index, pct),
+                    on_output_line=_on_line,
+                    should_cancel=lambda: self.is_cancelled,
+                )
+                if self.is_cancelled:
+                    self.signals.status_updated.emit(self.thread_index, 'Cancelled')
+                    self.signals.progress_updated.emit(self.thread_index, 0)
+                    return
+                if return_code == 0:
+                    output_pattern = temp_output.replace('%03d', '*')
+                    temp_files = glob.glob(output_pattern)
+                    if temp_files and all((os.path.getsize(f) > 0 for f in temp_files)):
+                        for temp_file in temp_files:
+                            segment_duration = self.get_segment_duration(temp_file)
+                            self.logger.info(f'Segment {temp_file}: Duration = {segment_duration}s')
+                            shutil.move(temp_file, final_output.replace('%03d', os.path.basename(temp_file)[(-7):(-4)]))
+                        self.signals.status_updated.emit(self.thread_index, 'Completed')
+                        self.signals.progress_updated.emit(self.thread_index, 100)
+                        self.signals.output_updated.emit(f'\n[Thread {self.thread_index + 1}] Completed: {os.path.basename(self.output_path)}\n')
+                        self.signals.cut_completed.emit(os.path.basename(self.output_path))
+                    else:
+                        raise RuntimeError(f'No valid output files created for: {self.output_path}')
+                else:
+                    raise RuntimeError(f'FFmpeg error code {return_code}\n' + '\n'.join(error_output))
         except Exception as e:
             error_msg = f'Error processing {os.path.basename(self.output_path)}: {str(e)}'
             self.logger.error(error_msg)

@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Literal, Optional
 
 
 # ========== Binary resolution ==========
@@ -130,3 +132,265 @@ def probe_resolution(ffprobe: Path, video: Path) -> tuple[int, int]:
         return (int(parts[0]), int(parts[1]))
     except (subprocess.SubprocessError, ValueError, OSError, IndexError):
         return (0, 0)
+
+
+# ========== Progress parsers (pure functions — easy to unit test) ==========
+
+_LEGACY_DURATION_RE = re.compile(r'Duration:\s*(\d{2}):(\d{2}):(\d{2})')
+_LEGACY_TIME_RE = re.compile(r'time=(\d{2}):(\d{2}):(\d{2})')
+_PROGRESS_PIPE_TIME_RE = re.compile(r'out_time_ms=(\d+)')
+
+
+class _DurationTracker:
+    """Holds the discovered duration for the legacy_stderr dialect.
+
+    FFmpeg emits a 'Duration:' line once near the start, then 'time=' lines
+    throughout. We discover duration mid-stream, then compute percent.
+    """
+
+    def __init__(self, precomputed: Optional[float] = None) -> None:
+        self.duration = precomputed or 0.0
+
+    def feed_duration_line(self, line: str) -> None:
+        if self.duration > 0:
+            return  # already found
+        m = _LEGACY_DURATION_RE.search(line)
+        if m:
+            h, mi, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            self.duration = h * 3600 + mi * 60 + s
+
+
+def _parse_legacy_line(line: str, tracker: _DurationTracker) -> Optional[int]:
+    """Parse one line of legacy stderr output, return percent (0-100) or None."""
+    tracker.feed_duration_line(line)
+    if tracker.duration <= 0:
+        return None
+    m = _LEGACY_TIME_RE.search(line)
+    if not m:
+        return None
+    h, mi, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    elapsed = h * 3600 + mi * 60 + s
+    pct = int(elapsed / tracker.duration * 100)
+    return max(0, min(100, pct))
+
+
+def _parse_progress_pipe_line(line: str, duration_seconds: float) -> Optional[int]:
+    """Parse one line of -progress pipe:1 output, return percent (0-100) or None."""
+    if duration_seconds <= 0:
+        return None
+    m = _PROGRESS_PIPE_TIME_RE.search(line)
+    if not m:
+        return None
+    # Note: ffmpeg key is named out_time_ms but value is microseconds (ffmpeg misnomer)
+    elapsed = int(m.group(1)) / 1_000_000
+    pct = int(elapsed / duration_seconds * 100)
+    return max(0, min(100, pct))
+
+
+# ========== Cancel ladder (Windows-correct graceful stop) ==========
+
+def _cancel_ffmpeg(
+    proc: subprocess.Popen,
+    graceful_timeout: float = 8.0,
+    terminate_timeout: float = 2.0,
+) -> None:
+    """Cancel a running FFmpeg process with proper graceful → kill escalation.
+
+    Critical: on Windows, Popen.terminate() is equivalent to kill() (TerminateProcess).
+    It does NOT flush the MP4 moov atom. To get a playable partial output, we must
+    first ask FFmpeg to stop gracefully by writing 'q\\n' to stdin.
+
+    Ladder:
+    1. Write 'q\\n' to stdin (graceful — FFmpeg writes trailer). Wait up to 8s.
+    2. If still alive: proc.terminate() (forceful — no cleanup). Wait up to 2s.
+    3. If still alive: proc.kill() (last resort).
+    """
+    if proc.poll() is not None:
+        return
+    # Step 1: graceful 'q'
+    try:
+        if proc.stdin is not None and not proc.stdin.closed:
+            proc.stdin.write('q\n')
+            proc.stdin.flush()
+            proc.stdin.close()
+    except (OSError, BrokenPipeError, ValueError):
+        pass
+    try:
+        proc.wait(timeout=graceful_timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    # Step 2: terminate
+    try:
+        proc.terminate()
+    except (OSError, ProcessLookupError):
+        return
+    try:
+        proc.wait(timeout=terminate_timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    # Step 3: kill
+    try:
+        proc.kill()
+        proc.wait(timeout=terminate_timeout)
+    except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+        pass
+
+
+# ========== Stderr drain (prevents pipe deadlock in progress_pipe mode) ==========
+
+def _drain_stream(
+    stream,
+    on_line: Optional[Callable[[str], None]],
+) -> None:
+    """Drain a stream line-by-line, optionally calling on_line per line.
+
+    Intended to run in a daemon thread so the pipe buffer never fills
+    (which would deadlock ffmpeg). If on_line is None, lines are read
+    and discarded.
+    """
+    try:
+        for line in stream:
+            if on_line is not None:
+                try:
+                    on_line(line.rstrip('\r\n'))
+                except Exception:
+                    pass  # caller's callback errors must not kill the drain
+    except (OSError, ValueError):
+        pass
+
+
+# ========== The runner ==========
+
+Dialect = Literal['legacy_stderr', 'progress_pipe']
+
+
+def run_ffmpeg(
+    command: list[str],
+    *,
+    dialect: Dialect,
+    duration_seconds: Optional[float] = None,
+    on_progress: Optional[Callable[[int], None]] = None,
+    on_output_line: Optional[Callable[[str], None]] = None,
+    should_cancel: Optional[Callable[[], bool]] = None,
+) -> int:
+    """Run ffmpeg, stream progress, and handle cancellation cleanly.
+
+    Args:
+        command: Full ffmpeg command as list[str]. Callers are responsible
+            for constructing the command including any dialect-specific
+            flags (e.g., '-progress pipe:1' for progress_pipe dialect).
+        dialect: 'legacy_stderr' parses 'Duration:' and 'time=' from stderr.
+            'progress_pipe' parses 'out_time_ms=' from stdout — REQUIRES
+            duration_seconds to be precomputed and passed in.
+        duration_seconds: Precomputed video duration for percent calc.
+            Required for progress_pipe dialect; optional for legacy_stderr
+            (discovered from stream if not supplied).
+        on_progress: Called with integer percent 0-100 ONLY when the percent
+            increases by 1 or more (debounced to prevent UI thrash).
+            Callback may emit Qt signals — Qt handles cross-thread queue.
+        on_output_line: Called with every raw stream line (no trailing
+            newline). Used for appending to an output console/text widget.
+            Callback may emit Qt signals for cross-thread UI updates.
+        should_cancel: Called frequently (between lines). If it returns
+            True, the runner invokes the graceful cancel ladder. Typical:
+            `lambda: self.is_cancelled` or `cancel_event.is_set`.
+
+    Returns:
+        Process exit code. 0 = success. Non-zero = ffmpeg's reported exit
+        (callers classify whether it's a real failure vs. graceful cancel).
+        A graceful 'q' cancel typically returns 255.
+
+    Callback thread safety:
+        All callbacks are invoked from the thread that called run_ffmpeg.
+        That thread is almost certainly a worker thread (QThread or
+        QRunnable.run()). When callbacks emit Qt signals, the default
+        queued-connection semantics deliver them to the main thread safely.
+        Do NOT directly touch Qt widgets from inside callbacks — emit
+        signals instead.
+    """
+    # Build Popen kwargs from Phase 5a helper + dialect-specific stream wiring
+    kwargs = ffmpeg_popen_kwargs()
+    if dialect == 'progress_pipe':
+        # Progress blocks on stdout; stderr must be drained concurrently to
+        # avoid pipe-buffer deadlock when ffmpeg writes warnings/errors.
+        kwargs['stdout'] = subprocess.PIPE
+        kwargs['stderr'] = subprocess.PIPE
+    else:  # legacy_stderr
+        kwargs['stdout'] = subprocess.DEVNULL
+        kwargs['stderr'] = subprocess.PIPE
+
+    proc = subprocess.Popen(command, **kwargs)
+    drain_thread: Optional[threading.Thread] = None
+
+    try:
+        # If progress_pipe, drain stderr in background
+        if dialect == 'progress_pipe' and proc.stderr is not None:
+            drain_thread = threading.Thread(
+                target=_drain_stream,
+                args=(proc.stderr, on_output_line),
+                daemon=True,
+            )
+            drain_thread.start()
+
+        # Choose primary stream and parser
+        if dialect == 'progress_pipe':
+            primary_stream = proc.stdout
+        else:
+            primary_stream = proc.stderr
+
+        tracker = _DurationTracker(duration_seconds) if dialect == 'legacy_stderr' else None
+        last_pct = -1
+
+        if primary_stream is None:
+            proc.wait()
+            return proc.returncode
+
+        for line in primary_stream:
+            # Cancellation check (polled per line — cheap, fast)
+            if should_cancel is not None and should_cancel():
+                _cancel_ffmpeg(proc)
+                break
+
+            clean_line = line.rstrip('\r\n')
+
+            # Emit raw line if requested (for console/log display).
+            # In progress_pipe mode, stderr lines go via the drain thread;
+            # here we emit primary-stream (stdout) lines.
+            if on_output_line is not None:
+                try:
+                    on_output_line(clean_line)
+                except Exception:
+                    pass
+
+            # Parse progress
+            if dialect == 'legacy_stderr':
+                pct = _parse_legacy_line(line, tracker)
+            else:
+                pct = _parse_progress_pipe_line(line, duration_seconds or 0.0)
+
+            # Emit only on monotonic increase (prevents UI jitter)
+            if pct is not None and pct > last_pct:
+                last_pct = pct
+                if on_progress is not None:
+                    try:
+                        on_progress(pct)
+                    except Exception:
+                        pass
+
+        # Wait for exit code
+        rc = proc.wait()
+        if drain_thread is not None:
+            drain_thread.join(timeout=2.0)
+        return rc
+
+    finally:
+        # Safety net: if we exit by exception or early return, ensure
+        # no zombie process lingers.
+        if proc.poll() is None:
+            try:
+                proc.kill()
+                proc.wait(timeout=2.0)
+            except (OSError, subprocess.TimeoutExpired):
+                pass

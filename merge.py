@@ -45,6 +45,21 @@ class WorkerSignals(QObject):
     output_updated = pyqtSignal(str)
     merge_completed = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
+class _RunnerHandle:
+    """Sentinel exposed as MergeWorker.process after Phase 5b migration.
+
+    cancel_merge's UI-thread path checks `if worker.process and worker.process.poll() is None`
+    before setting `worker.is_cancelled = True` and calling `worker.process.terminate()`.
+    With run_ffmpeg() owning the real Popen, this sentinel lets that guard pass so
+    is_cancelled propagates; the terminate() call is a no-op because the runner's
+    own cancel ladder (triggered via should_cancel) handles process termination.
+    """
+    def poll(self):
+        return None
+    def terminate(self):
+        pass
+
+
 class MergeWorker(QRunnable):
     running_workers = []
     def __init__(self, input_files: List[str], output_path: str, thread_index: int, ffmpeg_path: Path, merge_mode: str, layout: str, opacity: float, audio_source: str, output_format: str='Free', video_ratio: int=5, custom_audio: str=None, is_boost_mode: bool=False):
@@ -187,50 +202,35 @@ class MergeWorker(QRunnable):
             command.extend(self.get_ffmpeg_params())
             command.append(self.output_path)
             self.signals.output_updated.emit(f"\nLệnh FFmpeg: {' '.join((str(x) for x in command))}\n\n")
-            startupinfo = core_ffmpeg_runner.hidden_startupinfo()
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), text=True, encoding='utf-8', errors='replace')
-            self.process = process
-            duration, time = (None, 0)
+            self.process = _RunnerHandle()
             error_output = []
-            while True:
-                if self.is_cancelled:
-                    if self.process:
-                        self.process.terminate()
-                        self.process.wait()
-                    self.signals.status_updated.emit(self.thread_index, 'Đã hủy')
-                    self.signals.progress_updated.emit(self.thread_index, 0)
-                    if self in MergeWorker.running_workers:
-                        MergeWorker.running_workers.remove(self)
-                    return
-                line = process.stderr.readline()
-                if not line and process.poll() is not None:
-                    return_code = process.wait()
-                    if return_code == 0 and (not self.is_cancelled):
-                        if os.path.exists(self.output_path) and os.path.getsize(self.output_path) > 0:
-                            self.signals.status_updated.emit(self.thread_index, 'Hoàn thành')
-                            self.signals.progress_updated.emit(self.thread_index, 100)
-                            self.signals.output_updated.emit(f'\n[Thread {self.thread_index + 1}] Hoàn thành: {os.path.basename(self.output_path)}\n')
-                            self.signals.merge_completed.emit(os.path.basename(self.output_path))
-                        else:
-                            raise RuntimeError('File đầu ra không tồn tại hoặc rỗng')
-                    else:
-                        error_msg = '\n'.join(error_output[(-5):])
-                        raise RuntimeError(f'FFmpeg trả về mã lỗi {return_code}\n{error_msg}')
-                    break
-                if line:
-                    error_output.append(line)
-                    self.signals.output_updated.emit(line)
-                    if duration is None and 'Duration:' in line:
-                        duration_match = re.search('Duration: (\\d{2}):(\\d{2}):(\\d{2})', line)
-                        if duration_match:
-                            h, m, s = map(int, duration_match.groups())
-                            duration = h * 3600 + m * 60 + s
-                    time_match = re.search('time=(\\d{2}):(\\d{2}):(\\d{2})', line)
-                    if time_match and duration:
-                        h, m, s = map(int, time_match.groups())
-                        time = h * 3600 + m * 60 + s
-                        progress = min(int(time / duration * 100), 100)
-                        self.signals.progress_updated.emit(self.thread_index, progress)
+            def _on_line(line):
+                error_output.append(line + '\n')
+                self.signals.output_updated.emit(line + '\n')
+            return_code = core_ffmpeg_runner.run_ffmpeg(
+                command,
+                dialect='legacy_stderr',
+                on_progress=lambda pct: self.signals.progress_updated.emit(self.thread_index, pct),
+                on_output_line=_on_line,
+                should_cancel=lambda: self.is_cancelled,
+            )
+            if self.is_cancelled:
+                self.signals.status_updated.emit(self.thread_index, 'Đã hủy')
+                self.signals.progress_updated.emit(self.thread_index, 0)
+                if self in MergeWorker.running_workers:
+                    MergeWorker.running_workers.remove(self)
+                return
+            if return_code == 0:
+                if os.path.exists(self.output_path) and os.path.getsize(self.output_path) > 0:
+                    self.signals.status_updated.emit(self.thread_index, 'Hoàn thành')
+                    self.signals.progress_updated.emit(self.thread_index, 100)
+                    self.signals.output_updated.emit(f'\n[Thread {self.thread_index + 1}] Hoàn thành: {os.path.basename(self.output_path)}\n')
+                    self.signals.merge_completed.emit(os.path.basename(self.output_path))
+                else:
+                    raise RuntimeError('File đầu ra không tồn tại hoặc rỗng')
+            else:
+                error_msg = '\n'.join(error_output[(-5):])
+                raise RuntimeError(f'FFmpeg trả về mã lỗi {return_code}\n{error_msg}')
         except Exception as e:
             error_msg = f'Lỗi khi xử lý {os.path.basename(self.output_path)}: {str(e)}\n{traceback.format_exc()}'
             print(f'Merge Error: {error_msg}')
