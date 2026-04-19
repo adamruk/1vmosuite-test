@@ -43,7 +43,7 @@ Naming conventions:
 
 This block is illustrative, not part of the project history. It shows the shape a good entry should take.
 
-```- `.claude/settings.json` + `.claude/hooks/check-changelog.sh` - CHANGELOG-enforcement hook. Blocks `git commit` via Claude Code's PreToolUse Bash hook if `CHANGELOG.md` is not in the staged diff, unless the commit message contains `[skip changelog]` (escape hatch for pure internal refactors per amended rule 7). Deterministic enforcement of CLAUDE.md section 4. [PENDING]
+```- `.claude/settings.json` + `.claude/hooks/check-changelog.sh` - CHANGELOG-enforcement hook. Blocks `git commit` via Claude Code's PreToolUse Bash hook if `CHANGELOG.md` is not in the staged diff, unless the commit message contains `[skip changelog]` (escape hatch for pure internal refactors per amended rule 7). Deterministic enforcement of CLAUDE.md section 4. [250668b]
 
 ### Changed
 - Default HEVC encoder switched from libx265 to hevc_nvenc on CUDA-capable systems — encodes 3.2× faster at matched VMAF ≥ 94 on the reference RTX 4070 preset sweep. Fallback to libx265 on CPU-only hosts unchanged. [bench/2026-04-18-nvenc-preset-vmaf-audit.md] [ADR-0001-nvenc-migration] [a1b2c3d, e4f5g6h]
