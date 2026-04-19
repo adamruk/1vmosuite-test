@@ -26,6 +26,7 @@ from PyQt5.QtGui import QIcon, QColor
 from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config
+from core import file_picker as core_file_picker
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
 FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
@@ -445,7 +446,7 @@ class VideoMergerTool(QMainWindow):
         """Chọn video từ hệ thống tệp."""
         try:
             initial_dir = self.config.get(config_key, os.getcwd())
-            file_paths, _ = QFileDialog.getOpenFileNames(self, title, initial_dir, 'Video Files (*.mp4 *.avi *.mkv)')
+            file_paths = core_file_picker.pick_files(self, title, initial_dir, core_file_picker.VIDEO_FILTER)
             if file_paths:
                 new_files = [fp for fp in file_paths if fp not in video_list]
                 if not new_files:
@@ -536,7 +537,7 @@ class VideoMergerTool(QMainWindow):
     def select_output_directory(self):
         """Chọn thư mục đầu ra."""
         try:
-            output_dir = QFileDialog.getExistingDirectory(self, 'Select Output Directory', self.output_directory or os.getcwd())
+            output_dir = core_file_picker.pick_directory(self, 'Select Output Directory', self.output_directory or os.getcwd())
             if output_dir:
                 self.output_directory = output_dir
                 self.dir_label.setText(f'{self.output_directory}')

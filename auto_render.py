@@ -21,6 +21,7 @@ from help_dialog import HelpDialog
 from updater import DriveUpdater
 import gpu_detect
 from core import config as core_config
+from core import file_picker as core_file_picker
 def resource_path(relative_path):
     """Lấy đường dẫn tuyệt đối cho tài nguyên, hoạt động cả khi chạy từ source và từ file exe"""
     try:
@@ -556,7 +557,7 @@ class VideoRendererTool(QMainWindow):
         """Chọn nhiều video từ thư mục đầu vào."""
         try:
             initial_dir = os.path.dirname(self.videos[0]) if self.videos else os.getcwd()
-            file_paths, _ = QFileDialog.getOpenFileNames(self, 'Select Videos', initial_dir, 'Video Files (*.mp4 *.avi *.mkv)')
+            file_paths = core_file_picker.pick_files(self, 'Select Videos', initial_dir, core_file_picker.VIDEO_FILTER)
             if file_paths:
                 new_files = [fp for fp in file_paths if fp not in self.videos]
                 if not new_files:
@@ -639,7 +640,7 @@ class VideoRendererTool(QMainWindow):
     def select_output_directory(self):
         """Chọn thư mục đầu ra."""
         try:
-            output_dir = QFileDialog.getExistingDirectory(self, 'Select Output Directory', self.output_directory or os.getcwd())
+            output_dir = core_file_picker.pick_directory(self, 'Select Output Directory', self.output_directory or os.getcwd())
             if output_dir:
                 self.output_directory = output_dir
                 self.dir_label.setText(f'{self.output_directory}')

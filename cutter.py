@@ -24,6 +24,7 @@ from PyQt5.QtGui import QIcon, QColor
 from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config
+from core import file_picker as core_file_picker
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
 FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
@@ -594,7 +595,7 @@ class VideoCutterTool(QMainWindow):
             self.current_label.setText('Loading videos...')
             QApplication.processEvents()
             initial_dir = self.config.get('last_videos_dir', os.getcwd())
-            file_paths, _ = QFileDialog.getOpenFileNames(self, 'Select Videos', initial_dir, 'Video Files (*.mp4 *.avi *.mkv)')
+            file_paths = core_file_picker.pick_files(self, 'Select Videos', initial_dir, core_file_picker.VIDEO_FILTER)
             if file_paths:
                 new_files = [fp for fp in file_paths if fp not in self.video_list]
                 if not new_files:
@@ -670,7 +671,7 @@ class VideoCutterTool(QMainWindow):
         return startupinfo
     def select_output_directory(self):
         try:
-            output_dir = QFileDialog.getExistingDirectory(self, 'Select Output Directory', self.output_directory or os.getcwd())
+            output_dir = core_file_picker.pick_directory(self, 'Select Output Directory', self.output_directory or os.getcwd())
             if output_dir:
                 self.output_directory = output_dir
                 self.dir_label.setText(f'{self.output_directory}')

@@ -27,6 +27,7 @@ from PyQt5.QtGui import QIcon, QColor, QPainter, QPen, QBrush
 from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config
+from core import file_picker as core_file_picker
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
 FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
@@ -868,7 +869,7 @@ class VideoMergeTool(QMainWindow):
     def select_videos(self, video_list: List[str], title: str, config_key: str):
         try:
             initial_dir = self.config.get(config_key, os.getcwd())
-            file_paths, _ = QFileDialog.getOpenFileNames(self, title, initial_dir, 'Media Files (*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm *.jpg *.jpeg *.png *.bmp *.gif *.tiff)')
+            file_paths = core_file_picker.pick_files(self, title, initial_dir, core_file_picker.MEDIA_FILTER)
             if file_paths:
                 new_files = [fp for fp in file_paths if fp not in video_list]
                 if not new_files:
@@ -996,7 +997,7 @@ class VideoMergeTool(QMainWindow):
         return result.stdout.strip() or 'Unknown'
     def select_output_directory(self):
         try:
-            output_dir = QFileDialog.getExistingDirectory(self, 'Select Output Directory', self.output_directory or os.getcwd())
+            output_dir = core_file_picker.pick_directory(self, 'Select Output Directory', self.output_directory or os.getcwd())
             if output_dir:
                 self.output_directory = output_dir
                 self.dir_label.setText(f'{self.output_directory}')
@@ -1352,7 +1353,7 @@ class VideoMergeTool(QMainWindow):
         """Chọn file audio"""
         try:
             initial_dir = self.config.get('last_audio_dir', os.getcwd())
-            file_paths, _ = QFileDialog.getOpenFileNames(self, 'Select Audio Files', initial_dir, 'Audio Files (*.mp3 *.wav *.m4a *.aac *.ogg *.flac *.wma)')
+            file_paths = core_file_picker.pick_files(self, 'Select Audio Files', initial_dir, core_file_picker.AUDIO_FILTER)
             if file_paths:
                 new_files = [fp for fp in file_paths if fp not in self.audio_files]
                 if not new_files:
