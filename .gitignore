@@ -26,3 +26,9 @@ ffmpeg/ffprobe.exe
 
 # Runtime logs / user data
 *.log
+
+# Runtime config files (written by apps on every close)
+config_video_renderer.json
+config_video_cutter.json
+config_video_merge.json
+config_video_merger.json
