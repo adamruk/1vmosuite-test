@@ -26,9 +26,9 @@ from help_dialog import HelpDialog
 from core import config as core_config
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
+from core import ffmpeg_runner as core_ffmpeg_runner
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
-FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / 'assets' / 'Cutter.ico'
 CONFIG_FILE = SCRIPT_DIR / 'config_video_cutter.json'
 logging.basicConfig(filename='video_cutter.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -65,10 +65,7 @@ class CutWorker(QRunnable):
         self.signals = WorkerSignals()
         self.logger = logging.getLogger(__name__)
     def get_startupinfo(self):
-        startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-        if startupinfo:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        return startupinfo
+        return core_ffmpeg_runner.hidden_startupinfo()
     def run(self):
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -109,7 +106,7 @@ class CutWorker(QRunnable):
                                 command.extend(['-ss', str(start), '-t', str(duration), temp_output])
                 self.logger.info(f"FFmpeg command: {' '.join((str(x) for x in command))}")
                 self.signals.output_updated.emit(f"FFmpeg command: {' '.join((str(x) for x in command))}\n")
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, startupinfo=self.get_startupinfo(), creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, text=True, encoding='utf-8', errors='replace')
+                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, startupinfo=self.get_startupinfo(), creationflags=core_ffmpeg_runner.hidden_creationflags(), text=True, encoding='utf-8', errors='replace')
                 duration = self.get_video_duration()
                 error_output = []
                 while True:
@@ -157,7 +154,7 @@ class CutWorker(QRunnable):
     def get_video_duration(self) -> float:
         try:
             cmd = [str(FFPROBE_PATH), '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', self.input_file]
-            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=self.get_startupinfo(), creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=self.get_startupinfo(), creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
             if result.returncode!= 0:
                 raise FFmpegError(f'FFprobe error: {result.stderr}')
             else:
@@ -166,16 +163,7 @@ class CutWorker(QRunnable):
             self.logger.error(f'Error getting video duration: {str(e)}')
             raise MetadataError(f'Failed to get duration: {str(e)}')
     def get_segment_duration(self, file_path: str) -> float:
-        try:
-            cmd = [str(FFPROBE_PATH), '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', file_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=self.get_startupinfo(), creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
-            if result.returncode!= 0:
-                raise FFmpegError(f'FFprobe error: {result.stderr}')
-            else:
-                return float(result.stdout.strip())
-        except Exception as e:
-            self.logger.error(f'Error getting segment duration for {file_path}: {str(e)}')
-            return 0.0
+        return core_ffmpeg_runner.probe_duration(FFPROBE_PATH, Path(file_path))
 class VideoCutterTool(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -623,7 +611,7 @@ class VideoCutterTool(QMainWindow):
     def get_video_duration(self, video_path: str) -> str:
         try:
             cmd = [str(FFPROBE_PATH), '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=self.get_startupinfo(), creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=self.get_startupinfo(), creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
             if result.returncode!= 0:
                 raise FFmpegError(f'FFprobe error: {result.stderr}')
             else:
@@ -637,16 +625,13 @@ class VideoCutterTool(QMainWindow):
     def get_video_resolution(self, video_path: str) -> str:
         try:
             cmd = [str(FFPROBE_PATH), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', video_path]
-            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=self.get_startupinfo(), creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+            result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=self.get_startupinfo(), creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
             return result.stdout.strip() or 'Unknown'
         except Exception as e:
             self.logger.error(f'Error getting resolution for {video_path}: {str(e)}')
             raise MetadataError(f'Failed to get resolution: {str(e)}')
     def get_startupinfo(self):
-        startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-        if startupinfo:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        return startupinfo
+        return core_ffmpeg_runner.hidden_startupinfo()
     def select_output_directory(self):
         try:
             output_dir = core_file_picker.pick_directory(self, 'Select Output Directory', self.output_directory or os.getcwd())

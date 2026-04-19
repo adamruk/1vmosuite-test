@@ -41,6 +41,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from core import ffmpeg_runner as core_ffmpeg_runner
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -57,10 +59,7 @@ def _find_executable(name: str) -> Optional[Path]:
 
 
 def _creationflags() -> int:
-    # Hide subprocess console window on Windows. No-op elsewhere.
-    if os.name == "nt":
-        return getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    return 0
+    return core_ffmpeg_runner.hidden_creationflags()
 
 
 def _sanitize_label(text: str) -> str:

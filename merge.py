@@ -29,9 +29,9 @@ from help_dialog import HelpDialog
 from core import config as core_config
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
+from core import ffmpeg_runner as core_ffmpeg_runner
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
-FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / 'assets' / 'Merge.ico'
 CONFIG_FILE = SCRIPT_DIR / 'config_video_merge.json'
 logging.basicConfig(filename='video_merge.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -187,11 +187,8 @@ class MergeWorker(QRunnable):
             command.extend(self.get_ffmpeg_params())
             command.append(self.output_path)
             self.signals.output_updated.emit(f"\nLệnh FFmpeg: {' '.join((str(x) for x in command))}\n\n")
-            startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-            if startupinfo:
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.dwFlags |= subprocess.STARTF_USESTDHANDLES
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, text=True, encoding='utf-8', errors='replace')
+            startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), text=True, encoding='utf-8', errors='replace')
             self.process = process
             duration, time = (None, 0)
             error_output = []
@@ -250,13 +247,7 @@ class MergeWorker(QRunnable):
         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
         return float(result.stdout.strip())
     def get_video_resolution(self, video_path: str) -> Tuple[int, int]:
-        cmd = [str(FFPROBE_PATH), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', video_path]
-        startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-        if startupinfo:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
-        width, height = map(int, result.stdout.strip().split('x'))
-        return (width, height)
+        return core_ffmpeg_runner.probe_resolution(FFPROBE_PATH, Path(video_path))
     def get_ffmpeg_params(self):
         if self.is_boost_mode:
             return ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'aac', '-b:a', '128k', '-async', '1', '-vsync', '1', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', '-max_muxing_queue_size', '1024', '-threads', '3', '-avoid_negative_ts', 'make_zero', '-max_muxing_queue_size', '4096', '-max_interleave_delta', '0', '-thread_queue_size', '512', '-analyzeduration', '2147483647', '-probesize', '2147483647']
@@ -924,10 +915,8 @@ class VideoMergeTool(QMainWindow):
             return 'Unknown'
     def get_audio_duration(self, audio_path: str) -> str:
         cmd = [str(FFPROBE_PATH), '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audio_path]
-        startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-        if startupinfo:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+        startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
         try:
             duration_seconds = float(result.stdout.strip())
             hours, remainder = divmod(int(duration_seconds), 3600)
@@ -957,20 +946,16 @@ class VideoMergeTool(QMainWindow):
                 counters[file_type] += 1
     def get_video_duration(self, video_path: str) -> str:
         cmd = [str(FFPROBE_PATH), '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
-        startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-        if startupinfo:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+        startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
         duration_seconds = float(result.stdout.strip())
         hours, remainder = divmod(int(duration_seconds), 3600)
         minutes, seconds = divmod(remainder, 60)
         return f'{hours:02d}:{minutes:02d}:{seconds:02d}'
     def get_video_resolution(self, video_path: str) -> str:
         cmd = [str(FFPROBE_PATH), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', video_path]
-        startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-        if startupinfo:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+        startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
         return result.stdout.strip() or 'Unknown'
     def select_output_directory(self):
         try:

@@ -28,9 +28,9 @@ from help_dialog import HelpDialog
 from core import config as core_config
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
+from core import ffmpeg_runner as core_ffmpeg_runner
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
-FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / 'assets' / 'Mixer.ico'
 CONFIG_FILE = SCRIPT_DIR / 'config_video_merger.json'
 logging.basicConfig(filename='video_merger.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -71,11 +71,8 @@ class MergeWorker(QRunnable):
             os.chmod(temp_file_path, 438)
             command = [str(self.ffmpeg_path), '-y', '-f', 'concat', '-safe', '0', '-i', temp_file_path, '-c', 'copy', str(self.output_path)]
             self.signals.output_updated.emit(f"Lệnh thực thi: {' '.join((str(x) for x in command))}\n\n")
-            startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-            if startupinfo:
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.dwFlags |= subprocess.STARTF_USESTDHANDLES
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, text=True, encoding='utf-8', errors='replace')
+            startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), text=True, encoding='utf-8', errors='replace')
             duration, time = (None, 0)
             error_output = []
             while True:
@@ -501,10 +498,8 @@ class VideoMergerTool(QMainWindow):
     def get_video_duration(self, video_path: str) -> str:
         """Lấy thời lượng video."""
         cmd = [str(FFPROBE_PATH), '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
-        startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-        if startupinfo:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+        startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
         duration_seconds = float(result.stdout.strip())
         hours, remainder = divmod(int(duration_seconds), 3600)
         minutes, seconds = divmod(remainder, 60)
@@ -512,10 +507,8 @@ class VideoMergerTool(QMainWindow):
     def get_video_resolution(self, video_path: str) -> str:
         """Lấy độ phân giải video."""
         cmd = [str(FFPROBE_PATH), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', video_path]
-        startupinfo = subprocess.STARTUPINFO() if os.name == 'nt' else None
-        if startupinfo:
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+        startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+        result = subprocess.run(cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
         return result.stdout.strip() or 'Unknown'
     def select_output_directory(self):
         """Chọn thư mục đầu ra."""

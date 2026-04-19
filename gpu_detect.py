@@ -33,6 +33,8 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from core import ffmpeg_runner as core_ffmpeg_runner
+
 
 class GPUGeneration(Enum):
     UNKNOWN = "unknown"
@@ -213,16 +215,12 @@ def _probe_ffmpeg_encoders(ffmpeg_path: Path) -> Tuple[NvencCodecs, Optional[str
         return codecs, f"ffmpeg not found at {ffmpeg_path}"
 
     try:
-        creationflags = 0
-        if os.name == "nt":
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
         result = subprocess.run(
             [str(ffmpeg_path), "-hide_banner", "-encoders"],
             capture_output=True,
             text=True,
             timeout=10,
-            creationflags=creationflags,
+            creationflags=core_ffmpeg_runner.hidden_creationflags(),
             check=False,
         )
     except subprocess.TimeoutExpired:

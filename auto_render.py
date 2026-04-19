@@ -24,6 +24,7 @@ from core import config as core_config
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
 from core import preset_loader as core_preset_loader
+from core import ffmpeg_runner as core_ffmpeg_runner
 def resource_path(relative_path):
     """Lấy đường dẫn tuyệt đối cho tài nguyên, hoạt động cả khi chạy từ source và từ file exe"""
     try:
@@ -81,12 +82,8 @@ class RenderWorker(QObject):
                 command.extend(['-y', str(Path(output_file))])
                 self.output_updated.emit(f'\n[Thread {self.thread_index + 1}] {progress_info}: Processing {os.path.basename(current_input)} with {encoder_name}\n')
                 self.output_updated.emit(f"Command: {' '.join((str(x) for x in command))}\n\n")
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    startupinfo.dwFlags |= subprocess.STARTF_USESTDHANDLES
-                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, encoding='utf-8', errors='replace')
+                startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+                process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags(), encoding='utf-8', errors='replace')
                 duration = None
                 time = 0
                 while True:
@@ -182,8 +179,7 @@ class VideoRendererTool(QMainWindow):
         self.sequential_mode = False
         self.sequential_encoders = [None] * 5
         self.SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
-        self.FFMPEG_PATH = self.SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
-        self.FFPROBE_PATH = self.SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+        self.FFMPEG_PATH, self.FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(self.SCRIPT_DIR)
         self.CONFIG_FILE = self.SCRIPT_DIR / 'config_video_renderer.json'
         self.ENCODER_FILE = self.SCRIPT_DIR / 'assets' / 'Encoder.txt'
         self._check_dependencies()
@@ -583,12 +579,8 @@ class VideoRendererTool(QMainWindow):
         """Lấy thời lượng video sử dụng FFprobe."""
         command = [str(self.FFPROBE_PATH), '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
         try:
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.dwFlags |= subprocess.STARTF_USESTDHANDLES
-            result = subprocess.run(command, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+            result = subprocess.run(command, capture_output=True, text=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags())
             duration_seconds = float(result.stdout.strip())
             hours = int(duration_seconds // 3600)
             minutes = int(duration_seconds % 3600 // 60)
@@ -600,12 +592,8 @@ class VideoRendererTool(QMainWindow):
         """Lấy độ phân giải video sử dụng FFprobe."""
         command = [str(self.FFPROBE_PATH), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', video_path]
         try:
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.dwFlags |= subprocess.STARTF_USESTDHANDLES
-            result = subprocess.run(command, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            startupinfo = core_ffmpeg_runner.hidden_startupinfo()
+            result = subprocess.run(command, capture_output=True, text=True, startupinfo=startupinfo, creationflags=core_ffmpeg_runner.hidden_creationflags())
             return result.stdout.strip() or 'Loading...'
         except Exception as e:
             print(f'Failed to get video resolution: {str(e)}')
