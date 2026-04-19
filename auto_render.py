@@ -23,6 +23,7 @@ import gpu_detect
 from core import config as core_config
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
+from core import preset_loader as core_preset_loader
 def resource_path(relative_path):
     """Lấy đường dẫn tuyệt đối cho tài nguyên, hoạt động cả khi chạy từ source và từ file exe"""
     try:
@@ -523,36 +524,26 @@ class VideoRendererTool(QMainWindow):
             core_config.save(Path(self.CONFIG_FILE), config)
         except (OSError, TypeError) as e:
             QMessageBox.warning(self, 'Error', f'Failed to save configuration: {str(e)}')
-    def load_encoder_options(self) -> List[Dict[str, Any]]:
+    def load_encoder_options(self) -> List[core_preset_loader.Preset]:
         """Đọc các tùy chọn render từ file Encoder.txt và bỏ qua các dòng lỗi."""
-        options = []
-        if self.ENCODER_FILE.exists():
-            with open(self.ENCODER_FILE, 'r', encoding='utf-8') as file:
-                for line_number, line in enumerate(file, start=1):
-                    try:
-                        if line.strip():
-                            parts = line.strip().rsplit('|', 1)
-                            if len(parts)!= 2:
-                                print(f'Skipping invalid encoder option at line {line_number}: {line.strip()}')
-                                continue
-                            header_parts = parts[0].split('|', 3)
-                            if len(header_parts) < 3:
-                                print(f'Skipping invalid encoder option at line {line_number}: {line.strip()}')
-                                continue
-                            group = header_parts[0].strip()
-                            name = header_parts[1].strip()
-                            description = header_parts[2].strip()
-                            details = header_parts[3].strip() if len(header_parts) > 3 else ''
-                            code = parts[1].strip()
-                            if not name:
-                                print(f'Skipping encoder option with empty name at line {line_number}')
-                                continue
-                            options.append({'name': f'{group}|{name}', 'description': description, 'details': details, 'params': code.split()})
-                    except Exception as e:
-                        print(f'Error parsing line {line_number}: {str(e)}')
-        default_options = [{'name': 'Text|Text Bottom Basic', 'description': 'Thêm chữ ở dưới với nền đen mờ', 'details': 'Thêm chữ ở dưới video với nền đen mờ, font Arial, size 35px', 'params': ['-vf', 'drawtext=fontfile=Arial:text=\'THAY_THẾ_NỘI_DUNG\':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10']}, {'name': 'Text|Text Top Basic', 'description': 'Thêm chữ ở trên với nền đen mờ', 'details': 'Thêm chữ ở trên video với nền đen mờ, font Arial, size 35px', 'params': ['-vf', 'drawtext=fontfile=Arial:text=\'THAY_THẾ_NỘI_DUNG\':x=(w-text_w)/2:y=(h-text_h)/15:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10']}]
-        options.extend(default_options)
-        return options
+        presets = core_preset_loader.load_presets(self.ENCODER_FILE)
+        # App-specific defaults appended after file load — these are
+        # auto_render's own UI affordances, not part of Encoder.txt.
+        presets.append(core_preset_loader.Preset(
+            group='Text',
+            name='Text Bottom Basic',
+            description='Thêm chữ ở dưới với nền đen mờ',
+            details='Thêm chữ ở dưới video với nền đen mờ, font Arial, size 35px',
+            params=('-vf', "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"),
+        ))
+        presets.append(core_preset_loader.Preset(
+            group='Text',
+            name='Text Top Basic',
+            description='Thêm chữ ở trên với nền đen mờ',
+            details='Thêm chữ ở trên video với nền đen mờ, font Arial, size 35px',
+            params=('-vf', "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/15:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"),
+        ))
+        return presets
     def select_videos(self):
         """Chọn nhiều video từ thư mục đầu vào."""
         try:
@@ -787,9 +778,8 @@ class VideoRendererTool(QMainWindow):
                         else:
                             if self.sequential_mode:
                                 for encoder in self.encoder_options:
-                                    name_parts = encoder['name'].split('|', 1)
-                                    if len(name_parts) > 1 and name_parts[1] == encoder_name:
-                                            encoder_params_list.append(encoder['params'])
+                                    if encoder.name == encoder_name:
+                                            encoder_params_list.append(list(encoder.params))
                                             break
                             else:
                                 params = self.encoder_params.get(encoder_name)
@@ -983,29 +973,24 @@ class VideoRendererTool(QMainWindow):
         if selected_group in current_groups or selected_group == '🕹️ 1vmo Ultimate':
             self.group_combo.setCurrentText(selected_group)
         self.group_combo.blockSignals(False)
-        sorted_encoders = sorted(self.encoder_options, key=lambda x: (x['name'].split('|')[0] if '|' in x['name'] else '', x['name']))
+        sorted_encoders = sorted(self.encoder_options, key=lambda x: (x.group, x.full_name))
         counter = 1
         for combo in self.sequential_combos:
             combo.blockSignals(True)
             combo.clear()
             combo.addItem('')
             for encoder in sorted_encoders:
-                name_parts = encoder['name'].split('|', 1)
-                name = name_parts[1] if len(name_parts) > 1 else encoder['name']
-                combo.addItem(name)
+                combo.addItem(encoder.name)
             combo.blockSignals(False)
         for encoder in sorted_encoders:
-            name_parts = encoder['name'].split('|', 1)
-            group = name_parts[0] if len(name_parts) > 1 else ''
-            name = name_parts[1] if len(name_parts) > 1 else encoder['name']
-            if selected_group == 'All Groups' or group == selected_group:
+            if selected_group == 'All Groups' or encoder.group == selected_group:
                 item = QTreeWidgetItem(self.tree_encoders)
                 item.setText(0, str(counter))
-                item.setText(1, group)
-                item.setText(2, name)
-                item.setText(3, encoder['description'])
-                if encoder.get('details'):
-                    tooltip_text = encoder['details'].replace(',', ',<br>')
+                item.setText(1, encoder.group)
+                item.setText(2, encoder.name)
+                item.setText(3, encoder.description)
+                if encoder.details:
+                    tooltip_text = encoder.details.replace(',', ',<br>')
                     tooltip_html = f'\n                    <div style=\'min-width:280px; max-width:350px; background:#e3f2fd; color:#1976d2; font-family:Consolas,monospace; font-size:13px; padding:8px; border-radius:8px;\'>\n                        {tooltip_text}\n                    </div>\n                    '
                     item.setText(4, 'ℹ️')
                     item.setTextAlignment(4, Qt.AlignCenter)
@@ -1013,7 +998,7 @@ class VideoRendererTool(QMainWindow):
                         item.setToolTip(col, tooltip_html)
                 else:
                     item.setText(4, '')
-                item.setData(0, Qt.UserRole, ' '.join(encoder['params']))
+                item.setData(0, Qt.UserRole, ' '.join(encoder.params))
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 counter += 1
         self.tree_encoders.setHeaderLabels(['No.', 'Group', 'Name', 'Description', 'Details'])
@@ -1030,7 +1015,13 @@ class VideoRendererTool(QMainWindow):
                 item.setText(2, name)
                 item.setText(3, dialog.result['description'])
                 item.setData(0, Qt.UserRole, ' '.join(dialog.result['params']))
-                self.encoder_options.append(dialog.result)
+                self.encoder_options.append(core_preset_loader.Preset(
+                    group=group,
+                    name=name,
+                    description=dialog.result['description'],
+                    details=dialog.result.get('details', ''),
+                    params=tuple(dialog.result['params']),
+                ))
                 self.save_encoder_changes()
     def edit_encoder(self) -> None:
         """Chỉnh sửa encoder đã chọn"""
@@ -1057,7 +1048,13 @@ class VideoRendererTool(QMainWindow):
                     item.setData(0, Qt.UserRole, ' '.join(dialog.result['params']))
                     idx = self.get_encoder_index_by_name(f'{current_group}|{current_name}')
                     if idx is not None:
-                        self.encoder_options[idx] = dialog.result
+                        self.encoder_options[idx] = core_preset_loader.Preset(
+                            group=group,
+                            name=name,
+                            description=dialog.result['description'],
+                            details=dialog.result.get('details', ''),
+                            params=tuple(dialog.result['params']),
+                        )
                         self.save_encoder_changes()
     def delete_encoder(self) -> None:
         """Xóa encoder đã chọn"""
@@ -1082,18 +1079,14 @@ class VideoRendererTool(QMainWindow):
         try:
             with open(self.ENCODER_FILE, 'w', encoding='utf-8') as file:
                 for encoder in self.encoder_options:
-                    name_parts = encoder['name'].split('|', 1)
-                    group = name_parts[0] if len(name_parts) > 1 else ''
-                    name = name_parts[1] if len(name_parts) > 1 else encoder['name']
-                    details = encoder.get('details', '')
-                    file.write(f"{group}|{name}|{encoder['description']}|{details}|{' '.join(encoder['params'])}\n")
+                    file.write(f"{encoder.group}|{encoder.name}|{encoder.description}|{encoder.details}|{' '.join(encoder.params)}\n")
             QMessageBox.information(self, 'Success', 'Encoder settings saved successfully')
         except Exception as e:
             QMessageBox.warning(self, 'Warning', f'Failed to save encoder settings: {str(e)}')
     def get_encoder_index_by_name(self, name: str) -> Optional[int]:
         """Tìm index của encoder trong list theo tên"""
         for i, encoder in enumerate(self.encoder_options):
-            if encoder['name'] == name:
+            if encoder.full_name == name:
                 return i
     def open_output_directory(self):
         """Mở thư mục output directory trong file explorer"""
@@ -1125,13 +1118,7 @@ class VideoRendererTool(QMainWindow):
             QMessageBox.critical(self, 'Error', f'Error while refreshing: {str(e)}')
     def get_encoder_groups(self) -> List[str]:
         """Lấy danh sách các nhóm encoder duy nhất"""
-        groups = set()
-        for encoder in self.encoder_options:
-            name_parts = encoder['name'].split('|', 1)
-            group = name_parts[0] if len(name_parts) > 1 else ''
-            if group:
-                groups.add(group)
-        return sorted(list(groups))
+        return sorted(core_preset_loader.unique_groups(self.encoder_options))
     def on_group_changed(self, group: str):
         """Xử lý khi chọn nhóm khác"""
         self.load_encoders_to_tree(group)
