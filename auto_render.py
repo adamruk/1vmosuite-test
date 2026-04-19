@@ -22,6 +22,7 @@ from updater import DriveUpdater
 import gpu_detect
 from core import config as core_config
 from core import file_picker as core_file_picker
+from core import widgets as core_widgets
 def resource_path(relative_path):
     """Lấy đường dẫn tuyệt đối cho tài nguyên, hoạt động cả khi chạy từ source và từ file exe"""
     try:
@@ -439,10 +440,9 @@ class VideoRendererTool(QMainWindow):
         controls_layout.addLayout(top_controls)
         controls_layout.addLayout(bottom_controls)
         output_layout.addWidget(controls_frame)
-        self.tree_output = QTreeWidget()
-        self.tree_output.setHeaderLabels(['No.', 'Original Filename', 'Output Filename', 'Duration', 'Resolution', 'Status'])
-        self.tree_output.setAlternatingRowColors(True)
-        self.tree_output.header().setDefaultAlignment(Qt.AlignCenter)
+        self.tree_output = core_widgets.create_output_tree(
+            ['No.', 'Original Filename', 'Output Filename', 'Duration', 'Resolution', 'Status']
+        )
         output_layout.addWidget(self.tree_output)
         self.resizeEvent = self.on_resize
     def on_resize(self, event):

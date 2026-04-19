@@ -28,6 +28,7 @@ from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config
 from core import file_picker as core_file_picker
+from core import widgets as core_widgets
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
 FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
@@ -746,20 +747,8 @@ class VideoMergeTool(QMainWindow):
         self.thread_bars = []
         self.thread_labels = []
         for i in range(3):
-            thread_row = QHBoxLayout(spacing=8)
-            label = QLabel(f'IDLE #{i + 1}')
-            label.setFixedWidth(70)
-            label.setProperty('class', 'status_label')
-            status = QLabel('Waiting')
-            status.setFixedWidth(250)
-            status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            status.setProperty('class', 'status_label')
-            progress = QProgressBar()
-            progress.setFixedHeight(25)
-            thread_row.addWidget(label)
-            thread_row.addWidget(status)
-            thread_row.addWidget(progress, stretch=1)
-            thread_layout.addLayout(thread_row)
+            row, label, status, progress = core_widgets.create_thread_row_with_status_class(i)
+            thread_layout.addLayout(row)
             self.thread_bars.append(progress)
             self.thread_labels.append(status)
         progress_layout.addWidget(thread_frame)
@@ -794,12 +783,7 @@ class VideoMergeTool(QMainWindow):
         top_controls.addWidget(open_btn)
         bottom_controls = QHBoxLayout(spacing=5)
         bottom_controls.addStretch(1)
-        self.btn_boost = QPushButton('⚡ Boost: OFF')
-        self.btn_boost.setFixedWidth(150)
-        self.btn_boost.setFixedHeight(30)
-        self.btn_boost.setToolTip('Toggle Boost Mode')
-        self.btn_boost.clicked.connect(self.toggle_boost)
-        self.btn_boost.setStyleSheet('\n            QPushButton {\n                background-color: #6c757d;\n                color: white;\n                border: none;\n                border-radius: 4px;\n                padding: 5px 10px;\n                font-weight: bold;\n            }\n            QPushButton:hover {\n                background-color: #5a6268;\n            }\n        ')
+        self.btn_boost = core_widgets.create_boost_button(self.toggle_boost)
         bottom_controls.addWidget(self.btn_boost)
         self.btn_start = QPushButton('🚀 Start')
         self.btn_start.setFixedWidth(150)
@@ -824,17 +808,10 @@ class VideoMergeTool(QMainWindow):
         tree_layout = QVBoxLayout(tree_frame)
         tree_layout.setContentsMargins(0, 0, 0, 0)
         tree_layout.setSpacing(0)
-        self.tree_output = QTreeWidget()
-        self.tree_output.setHeaderLabels(['No.', 'Input Videos', 'Output Video', 'Duration', 'Resolution', 'Format', 'Status'])
-        self.tree_output.setAlternatingRowColors(True)
-        self.tree_output.header().setDefaultAlignment(Qt.AlignCenter)
-        self.tree_output.setColumnWidth(0, 50)
-        self.tree_output.setColumnWidth(1, 100)
-        self.tree_output.setColumnWidth(2, 250)
-        self.tree_output.setColumnWidth(3, 80)
-        self.tree_output.setColumnWidth(4, 80)
-        self.tree_output.setColumnWidth(5, 80)
-        self.tree_output.setColumnWidth(6, 80)
+        self.tree_output = core_widgets.create_output_tree(
+            ['No.', 'Input Videos', 'Output Video', 'Duration', 'Resolution', 'Format', 'Status'],
+            column_widths=[50, 100, 250, 80, 80, 80, 80]
+        )
         tree_layout.addWidget(self.tree_output)
         output_layout.addWidget(tree_frame)
         return output_frame
@@ -1332,12 +1309,7 @@ class VideoMergeTool(QMainWindow):
         self.update_preview()
     def toggle_boost(self):
         self.is_boost_mode = not self.is_boost_mode
-        if self.is_boost_mode:
-            self.btn_boost.setText('⚡ Boost: ON')
-            self.btn_boost.setStyleSheet('\n                QPushButton {\n                    background-color: #28a745;\n                    color: white;\n                    border: none;\n                    border-radius: 4px;\n                    padding: 5px 10px;\n                    font-weight: bold;\n                }\n                QPushButton:hover {\n                    background-color: #218838;\n                }\n            ')
-        else:
-            self.btn_boost.setText('⚡ Boost: OFF')
-            self.btn_boost.setStyleSheet('\n                QPushButton {\n                    background-color: #6c757d;\n                    color: white;\n                    border: none;\n                    border-radius: 4px;\n                    padding: 5px 10px;\n                    font-weight: bold;\n                }\n                QPushButton:hover {\n                    background-color: #5a6268;\n                }\n            ')
+        core_widgets.set_boost_on_style(self.btn_boost, self.is_boost_mode)
     def get_ffmpeg_params(self):
         if self.is_boost_mode:
             return ['-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-c:a', 'aac', '-b:a', '128k', '-async', '1', '-vsync', '1', '-movflags', '+faststart', '-pix_fmt', 'yuv420p', '-max_muxing_queue_size', '1024', '-threads', '3', '-avoid_negative_ts', 'make_zero']

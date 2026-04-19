@@ -27,6 +27,7 @@ from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config
 from core import file_picker as core_file_picker
+from core import widgets as core_widgets
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
 FFPROBE_PATH = SCRIPT_DIR / 'ffmpeg' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
@@ -331,20 +332,8 @@ class VideoMergerTool(QMainWindow):
         self.thread_bars = []
         self.thread_labels = []
         for i in range(3):
-            thread_row = QHBoxLayout(spacing=8)
-            label = QLabel(f'IDLE #{i + 1}')
-            label.setFixedWidth(70)
-            label.setProperty('class', 'status_label')
-            status = QLabel('Waiting')
-            status.setFixedWidth(250)
-            status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            status.setProperty('class', 'status_label')
-            progress = QProgressBar()
-            progress.setFixedHeight(25)
-            thread_row.addWidget(label)
-            thread_row.addWidget(status)
-            thread_row.addWidget(progress, stretch=1)
-            thread_layout.addLayout(thread_row)
+            row, label, status, progress = core_widgets.create_thread_row_with_status_class(i)
+            thread_layout.addLayout(row)
             self.thread_bars.append(progress)
             self.thread_labels.append(status)
         progress_layout.addWidget(thread_frame)
@@ -403,16 +392,10 @@ class VideoMergerTool(QMainWindow):
         tree_layout = QVBoxLayout(tree_frame)
         tree_layout.setContentsMargins(0, 0, 0, 0)
         tree_layout.setSpacing(0)
-        self.tree_output = QTreeWidget()
-        self.tree_output.setHeaderLabels(['No.', 'Input Videos', 'Output Video', 'Duration', 'Resolution', 'Status'])
-        self.tree_output.setAlternatingRowColors(True)
-        self.tree_output.header().setDefaultAlignment(Qt.AlignCenter)
-        self.tree_output.setColumnWidth(0, 50)
-        self.tree_output.setColumnWidth(1, 100)
-        self.tree_output.setColumnWidth(2, 300)
-        self.tree_output.setColumnWidth(3, 100)
-        self.tree_output.setColumnWidth(4, 100)
-        self.tree_output.setColumnWidth(5, 100)
+        self.tree_output = core_widgets.create_output_tree(
+            ['No.', 'Input Videos', 'Output Video', 'Duration', 'Resolution', 'Status'],
+            column_widths=[50, 100, 300, 100, 100, 100]
+        )
         tree_layout.addWidget(self.tree_output)
         output_layout.addWidget(tree_frame)
         return output_frame
