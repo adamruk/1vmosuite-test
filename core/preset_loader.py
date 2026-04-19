@@ -8,6 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
+import json
+import os
+from dataclasses import asdict
+
+SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -129,3 +134,100 @@ def unique_groups(presets: list[Preset]) -> list[str]:
             seen.append(p.group)
             seen_set.add(p.group)
     return seen
+
+
+def load_presets_json(path: Path) -> list[Preset]:
+    """Parse presets from a JSON file written by save_presets_json.
+
+    Schema v1: {"schema_version": 1, "presets": [{"group": str, "name": str,
+    "description": str, "details": str, "params": list[str]}, ...]}
+
+    Missing file returns [] (matches load_presets() contract).
+    Corrupt JSON, schema mismatch, or structural errors raise ValueError
+    with specific context. params is reconstructed as tuple to preserve
+    Preset's frozen-dataclass hashability.
+    """
+    if not path.exists():
+        return []
+
+    with open(path, 'r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"Encoder JSON at {path} is syntactically invalid "
+                f"at line {e.lineno} col {e.colno}: {e.msg}. "
+                f"Restore from git or re-run tools/generate_encoder_json.py."
+            ) from e
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Encoder JSON root must be an object, got {type(data).__name__}"
+        )
+    if data.get('schema_version') != SCHEMA_VERSION:
+        raise ValueError(
+            f"Encoder JSON schema_version is {data.get('schema_version')!r}, "
+            f"expected {SCHEMA_VERSION}. Explicit migration required."
+        )
+    if not isinstance(data.get('presets'), list):
+        raise ValueError(
+            f"Encoder JSON 'presets' key must be a list, "
+            f"got {type(data.get('presets')).__name__}"
+        )
+
+    presets: list[Preset] = []
+    required_fields = ('group', 'name', 'description', 'details', 'params')
+    for i, entry in enumerate(data['presets']):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"Preset at index {i} must be an object, got {type(entry).__name__}"
+            )
+        for field in required_fields:
+            if field not in entry:
+                raise ValueError(f"Preset at index {i} missing required field {field!r}")
+        if not isinstance(entry['params'], list):
+            raise ValueError(
+                f"Preset at index {i}: 'params' must be a list, "
+                f"got {type(entry['params']).__name__}"
+            )
+        presets.append(Preset(
+            group=entry['group'],
+            name=entry['name'],
+            description=entry['description'],
+            details=entry['details'],
+            params=tuple(entry['params']),
+        ))
+    return presets
+
+
+def save_presets_json(path: Path, presets: list[Preset]) -> None:
+    """Atomically write presets to a JSON file.
+
+    Serialization byte-matches tools/generate_encoder_json.py output:
+    schema_version=1, ensure_ascii=False, indent=2, sort_keys=False,
+    newline='\\n', trailing '\\n' after json.dump. Field order via asdict().
+
+    Atomic via .tmp -> flush -> fsync -> os.replace (atomic on POSIX via
+    rename(2); atomic on Windows since Python 3.3 via MoveFileEx). On
+    failure the .tmp is cleaned up; original file never partially overwritten.
+    Directory fsync deliberately omitted — not justified for desktop app.
+    """
+    tmp_path = path.with_suffix(path.suffix + '.tmp')
+    payload = {
+        'schema_version': SCHEMA_VERSION,
+        'presets': [asdict(p) for p in presets],
+    }
+    try:
+        with open(tmp_path, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=False)
+            f.write('\n')
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+        raise

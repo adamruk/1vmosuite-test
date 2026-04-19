@@ -31,7 +31,6 @@ would silently drop presets. This tool passes a callback that raises SystemExit.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -41,12 +40,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from core import preset_loader  # noqa: E402
-from dataclasses import asdict  # noqa: E402
 
 
 ENCODER_TXT = _REPO_ROOT / 'assets' / 'Encoder.txt'
 ENCODER_JSON = _REPO_ROOT / 'assets' / 'Encoder.json'
-SCHEMA_VERSION = 1
 
 
 # Text defaults — verbatim from auto_render.py lines 512-525. DO NOT EDIT.
@@ -94,19 +91,13 @@ def main() -> int:
     if len(all_presets) != 111:
         raise SystemExit(f"FATAL: expected 111 total presets, got {len(all_presets)}")
 
-    # 3. Serialize. asdict() converts tuple(params) → list(params) naturally.
-    payload = {
-        'schema_version': SCHEMA_VERSION,
-        'presets': [asdict(p) for p in all_presets],
-    }
-
-    # 4. Write deterministically: LF-only, UTF-8 verbatim, 2-space indent, no key sort
+    # 3. Serialize via core.preset_loader.save_presets_json — single source
+    #    of truth for on-disk format. Future serialization-contract changes
+    #    flow into this tool automatically. Also provides atomic write.
     ENCODER_JSON.parent.mkdir(parents=True, exist_ok=True)
-    with open(ENCODER_JSON, 'w', encoding='utf-8', newline='\n') as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=False)
-        f.write('\n')  # trailing newline — POSIX convention, consistent across re-runs
+    preset_loader.save_presets_json(ENCODER_JSON, all_presets)
 
-    print(f"Wrote {ENCODER_JSON} with {len(all_presets)} presets (schema v{SCHEMA_VERSION})")
+    print(f"Wrote {ENCODER_JSON} with {len(all_presets)} presets (schema v{preset_loader.SCHEMA_VERSION})")
     return 0
 
 
