@@ -129,11 +129,12 @@ If the spec omits a behavior that the original has, **preserve the original beha
 
 ---
 
-## 7. ADR-0001 constraints (locked)
+## 7. ADR-0001 constraints (locked) + ADR-0003 amendment
 
-- **No pytest.** `tests/` is smoke-logs-only. Adopting pytest requires a new ADR.
+- **No general pytest adoption.** `tests/` is smoke-logs-only by default. See ADR-0001.
+- **Narrow pytest exceptions permitted** under ADR-0003 when all four conditions are met (near-zero manual-smoke catch-rate, meaningful regression coverage, small single-purpose test surface, documented in phase plan). Approved exception list lives in ADR-0003. Additional exceptions require amending ADR-0003 or a superseding ADR.
 - **No qt facade.** Phase 2d PyQt5→PySide6 migration is direct, no `qtpy` or compat shim.
-- **Manual testing only.** No automated GUI test suite.
+- **Manual testing only for UI and render output.** No automated GUI test suite. No render-output correctness pytest.
 - **Hand-rolled `qt_compat` stays** if any; do not replace with a library.
 
 ---
@@ -154,38 +155,14 @@ When drafting a prompt **for the user to paste into Claude Code**, the user expe
 
 ---
 
-## 10. Deferred observations (DO NOT FIX, just surface if you notice)
+## 10. Observations canon
 
-These are known issues tracked for future phases. Touching any of them during unrelated work is a scope violation.
+Observations canon lives in `docs/ROADMAP.md`. Surface new ones there with the next available letter (W next). Never add to CLAUDE.md.
 
-- **A** — widget resize polish
-- **C** — `merge.py` type-coercion crash in `load_last_paths`
-- **D** — duplicate config files (killed by construction in Phase 2c)
-- **F** — `merge.py` doesn't use NVENC
-- **H** — config key inconsistency across apps
-- **I** — `mixer.py` Stop button is non-functional
-- **J** — `cutter.py` Stop only kills queued jobs, not in-flight
-- **K** — cancel caller-side cleanup
-- **L** — `EncoderDialog` returns dict, not `Preset` (deferred per 2c scope)
-- **M** — progress dialect harmonization (`legacy_stderr` vs `progress_pipe`)
-- **N** — Python 3.13 + PyQt5 time bomb (addressed in Phase 2d)
-- **O** — frozen `.exe` unvalidated
-- **P** — `merge.py` `_RunnerHandle` sentinel
-- **Q** — `auto_render.py` cancel unvalidated
-- **S** — `EncoderDialog` loses `details` field on edit
-- **T** — English translation pass (Vietnamese strings in decompiled source)
-- **U** — killed by Phase 2c-b (tool now uses `save_presets_json`)
+Current canon: A, C, D, F, H, I, J, K, L, M, N, O, P, Q, S, T, U (Fixed in 2c-b), V. Letters B, E, G, R are reserved and must not be reused.
 
 ---
 
-## 11. Phase status (update at end of each phase)
+## 11. Phase status
 
-- **Phase 1**: DONE. GPU detection, benchmarking, CHANGELOG rules, ADR framework, 43 decompilation fixes. Tag `phase-1-complete` conceptual.
-- **Phase 2a**: DONE. `core/` package extracted. Tag `phase-2a-complete` at commit `3731230`.
-- **Phase 2c**: IN PROGRESS.
-  - 2c-a DONE (`5fc1dc7`) — migration tool + `Encoder.json`
-  - 2c-b DONE (`57564fe`) — `preset_loader` JSON I/O + tool refactor
-  - 2c-c PENDING — `auto_render.py` switches to JSON
-  - 2c-d PENDING — programmatic zoom-cycle generator (needs re-scoping; handoff's `6x/10x/24x/60x/100x` matrix does not match reality — see PARALLEL inventory)
-- **Phase 2d**: PENDING (PyQt5 → PySide6)
-- **Phase 2b**: DEFERRED indefinitely (updater migration)
+Phase status lives in `docs/ROADMAP.md`. Check it at session start. Do not duplicate phase details here.
