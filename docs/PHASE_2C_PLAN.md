@@ -6,7 +6,7 @@ Detailed execution plan for Phase 2 blockers and backlog. Phase status and team 
 
 ## Executive summary
 
-**Phase 2 done = 4 blocker sub-phases + Observation V fix + PySide6 migration.**
+**Phase 2 done = 4 blocker sub-phases + PySide6 migration.**
 
 Total: ~100-155 hours solo. At 6 hrs/day × 5 days: **3-5 calendar weeks.** At 4 hrs/day × 5 days: **5-8 weeks.**
 
@@ -99,6 +99,8 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 - Manual smoke: HEVC preset, `-c:a copy` preset, NVENC preset all render to preset intent (not silently overridden).
 
 **Commit message format:** *"Fix Observation V: RenderWorker codec-append gotcha."*
+
+**Status update (2026-04-23):** Fix shipped in commit `c03433a` as part of Path B, bundled with 5 other isolated bug fixes ported from Phase 1 (Bugs 1, 3, 5, 6, 7 + new `_has_acodec` helper). This deviates from the "standalone commit" rule above. The deviation is acknowledged as a one-off justified by tight relatedness (all 6 fixes from the same Phase 1 source folder, all touching the same `RenderWorker` class). The standalone-commit rule remains in force for future scheduled blocker fixes (2c-c-1, 2c-c-2, 2c-c-3, 2c-c-6, 2d). Acceptance items 1 (reproduction script) and 2 (status amendments) status: (1) skipped — fix already shipped, manual smoke testing covers regression risk; (2) addressed by this commit.
 
 ### 2c-c-6 — Mac-compat pass (5-8 hrs, Mac)
 

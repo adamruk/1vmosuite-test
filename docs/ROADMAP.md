@@ -78,7 +78,7 @@ Items surfaced during scoped work but NOT fixed in scope (per CLAUDE.md §6). St
 | S | `EncoderDialog` loses `details` field on edit | 2026-04 | Open, backlog |
 | T | Vietnamese text throughout UI, docs, and preset metadata. Translation needed before any commercial release. No impact on team-internal use. | 2026-04-20 | Open, backlog (Phase 2f trigger = commercial activation) |
 | U | `tools/generate_encoder_json.py` save path inconsistency | 2026-04 | **Fixed in Phase 2c-b** (`57564fe`) — tool now uses `save_presets_json` |
-| V | `RenderWorker.process()` appends `-c:v libx264 -c:a aac` after preset params. FFmpeg last-wins silently overrides `-vcodec libx265` → H.264 and `-c:a copy` → AAC re-encode. Image encoders (presets with `-f` or `image2`) are the only exception. Reproduce: `grep -E "libx265\|hevc_nvenc\|-c:a copy" assets/Encoder.txt`. Blocks HEVC and NVENC presets from working as authored. | 2026-04-21 | Open, scheduled Phase 2 (standalone commit) |
+| V | `RenderWorker.process()` appends `-c:v libx264 -c:a aac` after preset params. FFmpeg last-wins silently overrides `-vcodec libx265` → H.264 and `-c:a copy` → AAC re-encode. Image encoders (presets with `-f` or `image2`) are the only exception. Reproduce: `grep -E "libx265\|hevc_nvenc\|-c:a copy" assets/Encoder.txt`. Blocks HEVC and NVENC presets from working as authored. | 2026-04-21 | **Fixed in Phase 2 (`c03433a`)** — `_has_vcodec`/`_has_acodec` helpers gate codec-append in Path B |
 
 **Letter convention.** B, E, G, R were skipped during original surfacing and remain reserved — do not reuse. Observation IDs are permanent; fixed observations keep their letter with updated status.
 
