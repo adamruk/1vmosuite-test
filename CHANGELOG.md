@@ -78,8 +78,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - CLAUDE.md trimmed: §7 amended for ADR-0003 exceptions, §10 and §11 replaced with docs/ROADMAP.md pointers. [Unreleased]
 - ADR-0002 status header amended to note partial supersession by ADR-0004 (platform-scope clause only). Decision body unchanged for historical record. [docs/decisions/ADR-0002-product-trajectory.md][498c0e3]
 - CLAUDE.md line 37 stale path fixed: docs/PHASE_2_ROADMAP.md -> docs/ROADMAP.md (post-yesterday's git mv). [CLAUDE.md][498c0e3]
-- docs/ROADMAP.md Observation V status updated: "Open, scheduled Phase 2" -> "Fixed in Phase 2 (c03433a)" — closes governance loop on the Path B Observation V fix. [docs/ROADMAP.md][CHANGELOG-hash]
-- docs/PHASE_2C_PLAN.md governance update: removed "Observation V fix" from executive summary's "Phase 2 done = ..." formula (now shipped); added deviation note to Observation V section documenting Path B bundling as one-off, standalone-commit rule remains in force for future blockers. [docs/PHASE_2C_PLAN.md][CHANGELOG-hash]
+- docs/ROADMAP.md Observation V status updated: "Open, scheduled Phase 2" -> "Fixed in Phase 2 (c03433a)" — closes governance loop on the Path B Observation V fix. [docs/ROADMAP.md][bf4b636]
+- docs/PHASE_2C_PLAN.md governance update: removed "Observation V fix" from executive summary's "Phase 2 done = ..." formula (now shipped); added deviation note to Observation V section documenting Path B bundling as one-off, standalone-commit rule remains in force for future blockers. [docs/PHASE_2C_PLAN.md][bf4b636]
 
 ### Fixed
 - Restored source readability after pylingual decompile: 43 control-flow reconstruction artifacts corrected across the four apps (`auto_render.py`, `cutter.py`, `merge.py`, `mixer.py`) — indentation cascades from `# irreducible cflow, using cdg fallback` blocks, broken try/except nesting, and orphaned return statements. All four apps now launch and pass end-to-end smoke tests against the reference config files. [a225831]
