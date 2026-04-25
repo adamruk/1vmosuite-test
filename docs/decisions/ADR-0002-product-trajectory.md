@@ -1,6 +1,6 @@
 # ADR-0002: Product Trajectory — Team-Internal, Commercial Not Currently Planned
 
-**Status:** Accepted
+**Status:** Accepted (2026-04-22). Platform-scope clause partially superseded by ADR-0004 (2026-04-23) — Apple Silicon Mac added to targets. All other clauses remain in force.
 **Date:** 2026-04-21
 **Decision makers:** Adam (project lead)
 **Supersedes:** none

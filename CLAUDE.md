@@ -34,7 +34,7 @@ Layout:
 - `tools/` — developer-only scripts (e.g., `generate_encoder_json.py`)
 - `tests/` — **end-to-end smoke test logs only** (filename pattern `smoke-<app>-YYYYMMDD.log`). NOT a pytest directory.
 - `docs/decisions/` — ADRs (`ADR-NNNN-slug.md`)
-- `docs/research/`, `docs/PHASE_2_ROADMAP.md` — planning docs
+- `docs/research/`, `docs/ROADMAP.md` — planning docs
 - `benchmarks/` — VMAF/encoder measurement evidence
 - `CHANGELOG.md` — Keep-a-Changelog format, v2.0.0 `[Unreleased]` is the current release section
 
