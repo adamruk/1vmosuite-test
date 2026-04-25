@@ -47,6 +47,10 @@ class RenderWorker(QObject):
         self.output_dir = output_dir
         self.encoder_params_list = encoder_params_list
         self.is_cancelled = False
+    def _has_vcodec(self, params):
+        return any(p in ('-c:v', '-vcodec') for p in params)
+    def _has_acodec(self, params):
+        return any(p in ('-c:a', '-acodec') for p in params)
     def process(self):
         current_input = self.video_path
         current_output = None
@@ -78,7 +82,10 @@ class RenderWorker(QObject):
                 output_file = os.path.join(self.output_dir, output_filename)
                 command = [str(self.ffmpeg_path), '-i', str(Path(current_input))] + encoder_params
                 if not is_image_encoder:
-                    command.extend(['-c:v', 'libx264', '-c:a', 'aac'])
+                    if not self._has_vcodec(encoder_params):
+                        command.extend(['-c:v', 'libx264'])
+                    if not self._has_acodec(encoder_params):
+                        command.extend(['-c:a', 'aac'])
                 command.extend(['-y', str(Path(output_file))])
                 self.output_updated.emit(f'\n[Thread {self.thread_index + 1}] {progress_info}: Processing {os.path.basename(current_input)} with {encoder_name}\n')
                 self.output_updated.emit(f"Command: {' '.join((str(x) for x in command))}\n\n")
@@ -378,6 +385,7 @@ class VideoRendererTool(QMainWindow):
             self.thread_labels.append(status)
         progress_layout.addWidget(thread_frame)
         self.output_text = QTextEdit()
+        self.output_text.document().setMaximumBlockCount(2000)
         self.output_text.setFixedHeight(180)
         self.output_text.setReadOnly(True)
         progress_layout.addWidget(self.output_text)
@@ -708,6 +716,10 @@ class VideoRendererTool(QMainWindow):
             if self.current_task_index >= len(self.all_tasks) and self.completed_tasks >= self.total_tasks:
                 for thread in self.render_threads:
                     if thread.isRunning():
+                        try:
+                            thread.started.disconnect()
+                        except TypeError:
+                            pass
                         thread.quit()
                         thread.wait()
                 self.render_threads.clear()
@@ -771,6 +783,8 @@ class VideoRendererTool(QMainWindow):
                         worker.moveToThread(thread)
                         thread.started.connect(worker.process)
                         self.render_workers[thread_index] = worker
+                        worker.tree_item = item
+                        worker.task_index = self.current_task_index
                         if self.sequential_mode:
                             self.current_label.setText(f'Currently Rendering: {os.path.basename(video_path)} ({encoder_names_str})')
                         else:
@@ -789,6 +803,10 @@ class VideoRendererTool(QMainWindow):
             if hasattr(self, 'render_threads'):
                 for thread in self.render_threads:
                     if thread.isRunning():
+                        try:
+                            thread.started.disconnect()
+                        except TypeError:
+                            pass
                         thread.quit()
                         thread.wait()
                 self.render_threads.clear()
@@ -836,20 +854,15 @@ class VideoRendererTool(QMainWindow):
         output_path = os.path.join(self.output_directory, output_filename)
         resolution = self.get_video_resolution(output_path)
         duration = self.get_video_duration(output_path)
-        task_number = str(self.completed_tasks + 1)
-        found = False
-        for i in range(self.tree_output.topLevelItemCount()):
-            item = self.tree_output.topLevelItem(i)
-            if item.text(0) == task_number and item.text(5) == '🟡 Processing':
-                    found = True
-                    item.setText(2, output_filename)
-                    item.setText(3, duration)
-                    item.setText(4, resolution)
-                    item.setText(5, '🟢 Completed')
-                    break
-        if not found:
-            print(f'Warning: Could not find item number {task_number} in tree output')
-        box_index = self.completed_tasks
+        item = getattr(worker, 'tree_item', None)
+        if item is not None and item.text(5) == '🟡 Processing':
+            item.setText(2, output_filename)
+            item.setText(3, duration)
+            item.setText(4, resolution)
+            item.setText(5, '🟢 Completed')
+        else:
+            print('Warning: tree item missing for completed task')
+        box_index = getattr(worker, 'task_index', self.completed_tasks)
         self.update_box_color(box_index, 'green')
         self.completed_tasks += 1
         self.progress_label.setText(f'Progress: {self.completed_tasks}/{self.total_tasks} renders')
@@ -858,6 +871,10 @@ class VideoRendererTool(QMainWindow):
         if 0 <= thread_index < len(self.render_workers):
                 self.render_workers[thread_index] = None
                 if thread_index < len(self.render_threads):
+                    try:
+                        self.render_threads[thread_index].started.disconnect()
+                    except TypeError:
+                        pass
                     self.render_threads[thread_index].quit()
                     self.render_threads[thread_index].wait()
         if self.current_task_index < self.total_tasks:
@@ -865,6 +882,10 @@ class VideoRendererTool(QMainWindow):
         if self.completed_tasks >= self.total_tasks:
             for thread in self.render_threads:
                 if thread.isRunning():
+                    try:
+                        thread.started.disconnect()
+                    except TypeError:
+                        pass
                     thread.quit()
                     thread.wait()
             self.render_threads.clear()
@@ -886,20 +907,15 @@ class VideoRendererTool(QMainWindow):
             error_detail = error_message.split(':')[(-1)].strip()
             if len(error_detail) > 50:
                 error_detail = error_detail[:47] + '...'
-            task_number = str(self.completed_tasks + 1)
-            found = False
-            for i in range(self.tree_output.topLevelItemCount()):
-                item = self.tree_output.topLevelItem(i)
-                if item.text(0) == task_number and item.text(5) == '🟡 Processing':
-                        found = True
-                        item.setText(2, f'Error - {encoder_name} ({error_detail})')
-                        item.setText(3, 'Loading...')
-                        item.setText(4, 'Loading...')
-                        item.setText(5, '🔴 Error')
-                        break
-            if not found:
-                print(f'Warning: Could not find item number {task_number} in tree output')
-        box_index = self.completed_tasks
+            item = getattr(worker, 'tree_item', None)
+            if item is not None and item.text(5) == '🟡 Processing':
+                item.setText(2, f'Error - {encoder_name} ({error_detail})')
+                item.setText(3, 'Loading...')
+                item.setText(4, 'Loading...')
+                item.setText(5, '🔴 Error')
+            else:
+                print('Warning: tree item missing for failed task')
+        box_index = getattr(worker, 'task_index', self.completed_tasks)
         self.update_box_color(box_index, 'red')
         self.completed_tasks += 1
         self.progress_label.setText(f'Progress: {self.completed_tasks}/{self.total_tasks} renders')
@@ -907,6 +923,10 @@ class VideoRendererTool(QMainWindow):
         if 0 <= thread_index < len(self.render_workers):
                 self.render_workers[thread_index] = None
                 if thread_index < len(self.render_threads):
+                    try:
+                        self.render_threads[thread_index].started.disconnect()
+                    except TypeError:
+                        pass
                     self.render_threads[thread_index].quit()
                     self.render_threads[thread_index].wait()
         self.active_threads -= 1
@@ -919,9 +939,14 @@ class VideoRendererTool(QMainWindow):
                 self.is_rendering = False
                 if hasattr(self, 'render_workers'):
                     for worker in self.render_workers:
-                        worker.is_cancelled = True
+                        if worker is not None:
+                            worker.is_cancelled = True
                 if hasattr(self, 'render_threads'):
                     for thread in self.render_threads:
+                        try:
+                            thread.started.disconnect()
+                        except TypeError:
+                            pass
                         thread.quit()
                         thread.wait()
                     self.render_threads.clear()

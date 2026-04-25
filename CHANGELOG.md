@@ -80,6 +80,12 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `requirements.txt` — declared `Pillow>=10.0` as an explicit dependency. `merge.py` uses Pillow (function-level imports at lines 87 and 934) but it was not previously declared, meaning a fresh install strictly from `requirements.txt` would crash on image-handling code paths. Pre-existing condition from the original decompile; surfaced by repo verification on 2026-04-18.
 - Top-level frames in all four apps now expand to fill the window on resize. Previously fixed-size containers left dead gutters when the window was enlarged. [5454429]
 - `mixer.py` `save_config` — reconstructed scrambled dict field order from decompile artifact (fix #44, supplementing the 43 control-flow fixes above). Without this fix, mixer's saved config persisted with wrong keys matched to wrong values, corrupting preference restoration on relaunch. [3731230]
+- Path B: Observation V codec-append bug fixed in auto_render.py — `_has_vcodec` helper added to RenderWorker; trailing `-c:v libx264` no longer overrides preset codecs (libx265 stays libx265). [auto_render.py][CHANGELOG-hash]
+- Path B: `_has_acodec` helper added — trailing `-c:a aac` no longer overrides preset audio codecs (`-c:a copy` now respected). Audio half of Observation V. [auto_render.py][CHANGELOG-hash]
+- Path B: closeEvent crash on partial-batch close — added `if worker is not None:` guard around worker iteration; pre-allocated None placeholders no longer raise AttributeError. [auto_render.py][CHANGELOG-hash]
+- Path B: QThread.started double-spawn / RuntimeError — added `try: thread.started.disconnect() except TypeError: pass` before each of 6 quit() call sites. [auto_render.py][CHANGELOG-hash]
+- Path B: out-of-order completion stamping wrong tree row — workers now stamp `tree_item` and `task_index` attributes in `_start_next_task`; completion/error handlers use `getattr` lookups instead of count-based row matching. [auto_render.py][CHANGELOG-hash]
+- Path B: FFmpeg log unbounded growth — `output_text.document().setMaximumBlockCount(2000)` caps log buffer. [auto_render.py][CHANGELOG-hash]
 
 ---
 
