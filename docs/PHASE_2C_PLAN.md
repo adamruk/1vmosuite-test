@@ -76,10 +76,12 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 - `save_user_presets_json(presets)` in preset_loader using this primitive.
 - Writes only triggered by new `tools/test_user_save.py` smoke script.
 
+**Note (2026-04-26, D5 expansion):** This commit ALSO rewires the 4 `config_video_*.json` writes (auto_render / cutter / merge / mixer) from install-dir to user_data_dir, alongside the encoder.user.json writer. Strict plan reading would only rewire encoder.user.json, but Observation O ("frozen .exe behavior unvalidated") requires all 5 user-state writes go through the portable resolver. Migration of existing legacy `config_video_*.json` files is automatic on first launch, preserving originals (per `core.user_data.migrate_legacy_configs`).
+
 **Acceptance.**
-- `tools/test_user_save.py` round-trip works.
+- `tools/test_user_save.py` round-trip works. Manual smoke captured at `tests/smoke-2c-c-3-usersave-YYYYMMDD.log` (PASS).
 - Corrupted main file auto-falls-back to `.bak` on load with visible warning log.
-- `tests/smoke/test_atomic_write_retry.py` passes — **ADR-0001 pytest exception** (see Testing section below).
+- `tests/smoke/test_atomic_write_retry.py` passes (ADR-0003 Exception 1). Pytest output captured at `tests/smoke-2c-c-3-retry-YYYYMMDD.log`.
 - Manual smoke: open file in Notepad during save; retry resolves within 1.6s.
 
 **Tag:** `v2c-c-3`.

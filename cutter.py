@@ -48,11 +48,11 @@ from core import config as core_config
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
 from core import ffmpeg_runner as core_ffmpeg_runner
+from core.user_data import resolve_or_die, migrate_legacy_configs
 
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / "assets" / "Cutter.ico"
-CONFIG_FILE = SCRIPT_DIR / "config_video_cutter.json"
 logging.basicConfig(
     filename="video_cutter.log",
     level=logging.INFO,
@@ -315,6 +315,15 @@ class VideoCutterTool(QMainWindow):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.is_boost_mode = False
+        # 2c-c-3: portable user-data resolution + first-launch migration
+        self.USER_DATA_DIR = resolve_or_die(
+            SCRIPT_DIR,
+            on_error=lambda msg: QMessageBox.critical(None, "1vmo Cutter", msg),
+        )
+        _migrated = migrate_legacy_configs(SCRIPT_DIR, self.USER_DATA_DIR)
+        if _migrated:
+            print(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
+        self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_cutter.json"
         if not FFMPEG_PATH.exists() or not FFPROBE_PATH.exists():
             QMessageBox.critical(
                 self,
@@ -740,9 +749,9 @@ class VideoCutterTool(QMainWindow):
 
     def load_config(self) -> dict:
         default_config = {"version": 1}
-        if CONFIG_FILE.exists():
+        if self.CONFIG_FILE.exists():
             try:
-                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
                     json.load(f)
             except (json.JSONDecodeError, IOError) as e:
                 self.logger.warning(f"Failed to load config: {str(e)}")
@@ -750,7 +759,7 @@ class VideoCutterTool(QMainWindow):
                     self, "Warning", "Configuration file corrupted. Using default."
                 )
                 return default_config
-        config = core_config.load(Path(CONFIG_FILE), default=default_config)
+        config = core_config.load(Path(self.CONFIG_FILE), default=default_config)
         return config if config.get("version", 1) == 1 else default_config
 
     def save_config(self):
@@ -764,7 +773,7 @@ class VideoCutterTool(QMainWindow):
                 "last_videos": self.video_list,
                 "cut_mode": self.combo_cut_mode.currentText(),
             }
-            core_config.save(Path(CONFIG_FILE), config)
+            core_config.save(Path(self.CONFIG_FILE), config)
         except (OSError, TypeError) as e:
             self.logger.warning(f"Failed to save config: {str(e)}")
             QMessageBox.warning(self, "Warning", f"Cannot save configuration: {str(e)}")

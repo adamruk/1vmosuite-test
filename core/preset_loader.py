@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 import json
+import logging
 import os
 from dataclasses import asdict
 
@@ -270,3 +271,82 @@ def load_builtin_json(path: Path) -> list[Preset]:
         )
         for p in library.presets
     ]
+
+
+def load_user_presets_json(path: Path) -> list[Preset]:
+    """Load user presets from encoder.user.json with .bak fallback.
+
+    On JSONDecodeError or ValidationError, attempts <path>.bak. On second
+    failure, logs warning, renames corrupt file to <path>.corrupt for
+    manual recovery, and returns []. Never raises — never blocks startup.
+
+    Returns [] if path does not exist (file optional, created on first save).
+    """
+    from core.encoder_schema import EncoderLibrary
+
+    logger = logging.getLogger(__name__)
+
+    if not path.exists():
+        return []
+
+    def _try_load(candidate: Path) -> list[Preset] | None:
+        try:
+            raw = json.loads(candidate.read_text(encoding="utf-8"))
+            library = EncoderLibrary.model_validate(raw)
+            return [
+                Preset(
+                    group=p.group,
+                    name=p.name,
+                    description=p.description,
+                    details=p.details,
+                    params=tuple(p.params),
+                )
+                for p in library.presets
+            ]
+        except Exception:
+            return None
+
+    result = _try_load(path)
+    if result is not None:
+        return result
+
+    logger.warning("Failed to parse %s; attempting .bak fallback", path)
+    bak_path = path.with_suffix(path.suffix + ".bak")
+    if bak_path.exists():
+        result = _try_load(bak_path)
+        if result is not None:
+            logger.warning("Loaded user presets from %s after main failed", bak_path)
+            return result
+
+    corrupt_path = path.with_suffix(path.suffix + ".corrupt")
+    try:
+        os.replace(path, corrupt_path)
+        logger.error(
+            "Both %s and %s.bak failed to parse; renamed main to %s; returning [] presets",
+            path,
+            path,
+            corrupt_path,
+        )
+    except OSError:
+        logger.error(
+            "Both %s and %s.bak failed to parse; could not rename for recovery; returning [] presets",
+            path,
+            path,
+        )
+    return []
+
+
+def save_user_presets_json(path: Path, presets: list[Preset]) -> None:
+    """Atomically save user presets to encoder.user.json.
+
+    Uses core.atomic_write.save_json_atomic for .bak rotation + retry.
+    Schema matches load_user_presets_json (envelope: schema_version=1,
+    presets=list).
+    """
+    from core.atomic_write import save_json_atomic
+
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "presets": [asdict(p) for p in presets],
+    }
+    save_json_atomic(path, payload, indent=2)

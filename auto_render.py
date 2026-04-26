@@ -40,7 +40,9 @@ from core import config as core_config
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
 from core import preset_loader as core_preset_loader
+from core.preset_loader import load_user_presets_json, save_user_presets_json
 from core import ffmpeg_runner as core_ffmpeg_runner
+from core.user_data import resolve_or_die, migrate_legacy_configs
 
 
 def resource_path(relative_path):
@@ -246,7 +248,16 @@ class VideoRendererTool(QMainWindow):
         self.FFMPEG_PATH, self.FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(
             self.SCRIPT_DIR
         )
-        self.CONFIG_FILE = self.SCRIPT_DIR / "config_video_renderer.json"
+        # 2c-c-3: portable user-data resolution + first-launch migration
+        self.USER_DATA_DIR = resolve_or_die(
+            self.SCRIPT_DIR,
+            on_error=lambda msg: QMessageBox.critical(None, "1vmo Auto Render", msg),
+        )
+        _migrated = migrate_legacy_configs(self.SCRIPT_DIR, self.USER_DATA_DIR)
+        if _migrated:
+            print(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
+        self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_renderer.json"
+        self.USER_PRESETS_FILE = self.USER_DATA_DIR / "encoder.user.json"
         self.ENCODER_FILE = self.SCRIPT_DIR / "assets" / "Encoder.txt"
         self._check_dependencies()
 
@@ -682,6 +693,12 @@ class VideoRendererTool(QMainWindow):
                     ),
                 )
             )
+        # 2c-c-3 D4=a: user JSON merges in regardless of ENCODER_USE_JSON.
+        # Track builtin count so save_encoder_changes can write only user entries.
+        self._builtin_preset_count = len(presets)
+        user_presets = load_user_presets_json(self.USER_PRESETS_FILE)
+        if user_presets:
+            presets.extend(user_presets)
         return presets
 
     def select_videos(self):
@@ -1391,19 +1408,28 @@ class VideoRendererTool(QMainWindow):
                 self.save_encoder_changes()
 
     def save_encoder_changes(self) -> None:
-        """Lưu tất cả thay đổi vào file"""
+        """Save user-edited presets to USER_PRESETS_FILE atomically.
+
+        2c-c-3 D3=a: minimal rewire — all preset edits land in user JSON.
+        Built-in presets effectively read-only because the path that wrote
+        to assets/Encoder.txt is gone. Distinction between built-in and
+        user not exposed in UI in this commit (deferred to 2c-c-4 backlog).
+        Per merge strategy D4=a, user preset shadows built-in if names collide.
+        """
+        builtin_count = getattr(self, "_builtin_preset_count", 0)
+        user_presets = (
+            self.encoder_options[builtin_count:]
+            if builtin_count
+            else self.encoder_options
+        )
         try:
-            with open(self.ENCODER_FILE, "w", encoding="utf-8") as file:
-                for encoder in self.encoder_options:
-                    file.write(
-                        f"{encoder.group}|{encoder.name}|{encoder.description}|{encoder.details}|{' '.join(encoder.params)}\n"
-                    )
+            save_user_presets_json(self.USER_PRESETS_FILE, list(user_presets))
             QMessageBox.information(
                 self, "Success", "Encoder settings saved successfully"
             )
-        except Exception as e:
+        except (OSError, ValueError) as e:
             QMessageBox.warning(
-                self, "Warning", f"Failed to save encoder settings: {str(e)}"
+                self, "Save Failed", f"Could not save preset changes: {e}"
             )
 
     def get_encoder_index_by_name(self, name: str) -> Optional[int]:

@@ -1,0 +1,12 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-8.4.2, pluggy-1.6.0 -- C:\Users\adamm\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\adamm\Downloads\1vmo Auto Render v3.5 testing\1vmo-suite
+plugins: anyio-4.12.0
+collecting ... collected 3 items
+
+tests/smoke/test_atomic_write_retry.py::test_retry_succeeds_after_transient_permission_errors PASSED [ 33%]
+tests/smoke/test_atomic_write_retry.py::test_retry_exhaustion_raises PASSED [ 66%]
+tests/smoke/test_atomic_write_retry.py::test_backoff_count_matches_constant PASSED [100%]
+
+============================== 3 passed in 1.56s ==============================

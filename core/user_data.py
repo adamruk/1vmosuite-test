@@ -18,8 +18,10 @@ files. Callers (sub-phase 2c-c-3) are responsible for mkdir on first write.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
+from typing import Callable
 
 from platformdirs import user_data_path
 
@@ -115,3 +117,73 @@ def resolve_user_data_dir(install_dir: Path) -> Path:
         return install_dir / "UserData"
 
     return user_data_path(APP_NAME, appauthor=False)
+
+
+def resolve_or_die(
+    install_dir: Path,
+    on_error: Callable[[str], None] | None = None,
+) -> Path:
+    """Resolve user data dir; on PortableLocationError, call on_error then exit.
+
+    Designed for app __init__ blocks. Calls sys.exit(1) on
+    PortableLocationError; does not return in the error case.
+
+    Args:
+        install_dir: app's install directory (typically derived from __file__).
+        on_error: optional callback receiving the error message string.
+            Apps pass a Qt-aware error-display function (e.g. lambda msg:
+            QMessageBox.critical(None, "1vmo Suite", msg)). When None,
+            prints to stderr.
+
+    Returns:
+        The resolved user data Path with mkdir'd parents.
+    """
+    try:
+        user_dir = resolve_user_data_dir(install_dir)
+        user_dir.mkdir(parents=True, exist_ok=True)
+        return user_dir
+    except PortableLocationError as e:
+        msg = str(e)
+        if on_error is not None:
+            on_error(msg)
+        else:
+            print(f"FATAL: {msg}", file=sys.stderr)
+        sys.exit(1)
+
+
+def migrate_legacy_configs(
+    install_dir: Path,
+    user_data_dir: Path,
+) -> list[str]:
+    """Idempotently copy legacy config files from install_dir to user_data_dir.
+
+    Triggered on first launch after the 2c-c-3 path-cutover. Only runs if
+    user_data_dir contains zero config_video_*.json files AND install_dir
+    has at least one legacy file. Originals are NEVER deleted (per
+    conservative-deletes principle).
+
+    Args:
+        install_dir: directory holding legacy config files at repo root.
+        user_data_dir: resolved user data directory (mkdir'd by caller).
+
+    Returns:
+        List of filenames copied (empty if migration was skipped or
+        no-op). Caller may log this for visibility.
+    """
+    legacy_files = sorted(install_dir.glob("config_video_*.json"))
+    if not legacy_files:
+        return []
+
+    already_migrated = list(user_data_dir.glob("config_video_*.json"))
+    if already_migrated:
+        return []
+
+    copied: list[str] = []
+    for src in legacy_files:
+        dst = user_data_dir / src.name
+        try:
+            shutil.copy2(src, dst)
+            copied.append(src.name)
+        except OSError:
+            continue
+    return copied

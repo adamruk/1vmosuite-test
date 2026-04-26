@@ -23,13 +23,13 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 - **Phase 2c-b** — preset_loader JSON I/O (`57564fe`).
 - **Phase 2c-c-1** — Pydantic schema + JSON dark release behind `ENCODER_USE_JSON` (`[ce51400]`, tag `v2c-c-1`).
 - **Phase 2c-c-2** — platformdirs-based UserData resolver + portable.txt opt-in (`[248ac56]`, tag `v2c-c-2`).
+- **Phase 2c-c-3** — atomic_write + user preset writer + caller rewire + migration. Fixes Observation O across all 5 user-state writes (`[hash-pending]`, tag `v2c-c-3`).
 - **Governance backfill** — CLAUDE.md + CHANGELOG backfill (`f08b08e`), self-referential hash-fill (`fa0763b`), CHANGELOG hook installation (`250668b`), hook hash-fill (`9537660`).
 
 ### Pending — blocking Phase 2 done
 
 | Phase | Scope summary | Est | Detail |
 |---|---|---|---|
-| **2c-c-3** | `encoder.user.json` writer: atomic `os.replace()` + `.bak` rotation + 5-retry backoff. | 5-7 hrs | `PHASE_2C_PLAN.md` |
 | **2c-c-6** | Mac-compat pass: platform-aware path handling, bundled macOS ffmpeg. | 5-8 hrs | `PHASE_2C_PLAN.md` |
 | **Observation V fix** | RenderWorker codec-append gotcha. Standalone commit with reproduction script. | 3-5 hrs | `PHASE_2C_PLAN.md` |
 | **2d** | PyQt5 → PySide6 migration. Mac-quality-forced for current team. PySide6 6.9.1 target (not 6.9.2). 30-line `core/_qt.py` scaffold, libcst rewriter, Nuitka packaging. | 3-4 weeks | Playbook TBD |
@@ -79,6 +79,7 @@ Items surfaced during scoped work but NOT fixed in scope (per CLAUDE.md §6). St
 | T | Vietnamese text throughout UI, docs, and preset metadata. Translation needed before any commercial release. No impact on team-internal use. | 2026-04-20 | Open, backlog (Phase 2f trigger = commercial activation) |
 | U | `tools/generate_encoder_json.py` save path inconsistency | 2026-04 | **Fixed in Phase 2c-b** (`57564fe`) — tool now uses `save_presets_json` |
 | V | `RenderWorker.process()` appends `-c:v libx264 -c:a aac` after preset params. FFmpeg last-wins silently overrides `-vcodec libx265` → H.264 and `-c:a copy` → AAC re-encode. Image encoders (presets with `-f` or `image2`) are the only exception. Reproduce: `grep -E "libx265\|hevc_nvenc\|-c:a copy" assets/Encoder.txt`. Blocks HEVC and NVENC presets from working as authored. | 2026-04-21 | **Fixed in Phase 2 (`c03433a`)** — `_has_vcodec`/`_has_acodec` helpers gate codec-append in Path B |
+| W | `logging.basicConfig(filename="video_*.log", ...)` in cutter.py / merge.py / mixer.py uses bare filenames that resolve against CWD. Under shortcut/Program-Files launches the log lands in an unpredictable directory. Out of 2c-c-3 scope per plan ("user preset writer" focus). Fix is to move to `user_data_dir / "logs/"` in a follow-up cleanup commit. | 2026-04-26 | Open, deferred from 2c-c-3 (D2=b) |
 
 **Letter convention.** B, E, G, R were skipped during original surfacing and remain reserved — do not reuse. Observation IDs are permanent; fixed observations keep their letter with updated status.
 
