@@ -47,3 +47,40 @@ At minimum, a test log should make it possible to tell:
 ## Referenced from CHANGELOG.md as
 
 `[tests/e2e-cutter-20260418.log]`
+
+## Smoke runner convention
+
+Smoke runners live in `tools/` and follow a consistent shape so a
+reader can understand any new runner by analogy with existing ones.
+
+Naming:
+- `tools/check_*.py` — read-only validation (e.g.,
+  `check_encoder_schema.py`, `check_user_data.py`,
+  `check_preset_ids.py`).
+- `tools/test_*.py` — round-trip + assertion (e.g.,
+  `test_user_save.py`, `test_id_migration.py`,
+  `test_integration_smoke.py`, `test_encoder_json_determinism.py`).
+
+Output shape:
+- First line: `=== <name> smoke (sub-phase X) ===`
+- Per-test block: `[<test-name>]\n  PASS: <details>` or
+  `  FAIL: <details>`.
+- Last line: `=== N/M tests passed ===` then `PASS: ...` or `FAIL`.
+- Exit 0 on all PASS, 1 on any FAIL.
+
+Conventions:
+- Tempdir-isolated. Smoke must NOT mutate repo state.
+- Read-only on `assets/`. Use `tempfile.TemporaryDirectory()` for
+  any write work.
+- `PYTHONIOENCODING=utf-8` prepended at invocation when the runner
+  prints non-ASCII (emoji, accented characters).
+- Aggregate runner: `tools/run_all_smoke.py` runs every runner and
+  exits non-zero if any fail. Manual-run only (NOT a pre-commit
+  hook per ADR-0001).
+
+When adding a new sub-phase:
+- Author runner(s) in `tools/` matching the conventions above.
+- Capture log to `tests/smoke-<sub-phase>-<scenario>-YYYYMMDD.log`.
+- Cite the log in `CHANGELOG.md` per the project's changelog rules.
+- Add the runner to the `RUNNERS` list in
+  `tools/run_all_smoke.py` so future regression checks include it.

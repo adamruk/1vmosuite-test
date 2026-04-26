@@ -90,22 +90,15 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 
 **Status update (2026-04-23):** Fix shipped in commit `c03433a` as part of Path B, bundled with 5 other isolated bug fixes ported from Phase 1 (Bugs 1, 3, 5, 6, 7 + new `_has_acodec` helper). This deviates from the "standalone commit" rule above. The deviation is acknowledged as a one-off justified by tight relatedness (all 6 fixes from the same Phase 1 source folder, all touching the same `RenderWorker` class). The standalone-commit rule remains in force for future scheduled blocker fixes (2c-c-1, 2c-c-2, 2c-c-3, 2c-c-6, 2d). Acceptance items 1 (reproduction script) and 2 (status amendments) status: (1) skipped — fix already shipped, manual smoke testing covers regression risk; (2) addressed by this commit.
 
-### 2c-c-6 — Mac-compat pass (5-8 hrs, Mac)
+### 2c-c-6 — Windows-only smoke regression suite — SHIPPED 2026-04-27
 
-**Scope.**
-- Cross-platform path resolution already shipped in 2c-c-2 via `platformdirs` (see ADR-0005). macOS resolves to `~/Library/Application Support/1vmo-suite/`; Linux to `~/.local/share/1vmo-suite/`. No new code in `core/user_data.py` for this sub-phase — verify behavior on actual Mac hardware.
-- Bundled macOS ffmpeg binary decision (bundled-arm64 vs PATH-resolved) — pick during sub-phase with Junaid (per memory rule #15: M4 Pro, no NVIDIA).
-- Retry loop in `core/atomic_write.py` unchanged — Spotlight indexing occasionally causes transient EBUSY; existing 5-retry backoff handles it.
-- NVENC-requiring presets show non-blocking info message on Mac ("this preset uses NVENC, unavailable on this platform").
+Adds `tools/test_integration_smoke.py` + `tools/test_encoder_json_determinism.py` + `tools/run_all_smoke.py` + `tests/README.md` "Smoke runner convention" section + combined regression log `tests/smoke-2c-c-6-regression-20260427.log`.
 
-**Acceptance.**
-- auto_render launches on Mac with 111 presets loaded.
-- User preset round-trip works on Mac.
-- Bundled ffmpeg renders a libx264 preset successfully.
-- NVENC preset selection shows info message.
-- Both Mac teammates confirm launch + basic render.
+Determinism test uses STRATEGY A (import `TEXT_DEFAULTS` from `tools.generate_encoder_json`) to avoid hardcoded Text-default drift. Aggregate runner exits non-zero if any of the 9 smoke runners fails; manual-run only (NOT a pre-commit hook per ADR-0001).
 
-**Tag:** `v2c-c-complete`.
+Mac compat verification deferred to post-Phase-2 milestone with Junaid (memory rule #14 / governance commit ffe4e1f).
+
+**Tag:** `v2c-c-6` + `v2c-c-complete` (Phase 2c done — all 5 sub-phases shipped + post-2c-c-4 regression green).
 
 ### Phase 2d — PyQt5 → PySide6 migration (3-4 weeks, ~80-120 hrs)
 
@@ -162,7 +155,7 @@ Target: **6 hrs/day × 5 days/week** for sustainable solo pace. Evidence: Cal Ne
 ## Completion criteria
 
 All of:
-1. Tags exist: `v2c-c-1`, `v2c-c-2`, `v2c-c-3`, `v2c-c-complete`, `v2d-complete`. Observation V fix shipped untagged via Path B (commit `c03433a`); see "Status update (2026-04-23)" in the Observation V fix section.
+1. Tags exist: `v2c-c-1`, `v2c-c-2`, `v2c-c-3`, `v2c-c-4`, `v2c-c-6`, `v2c-c-complete`, `v2d-complete`. Observation V fix shipped untagged via Path B (commit `c03433a`); see "Status update (2026-04-23)" in the Observation V fix section. Mac compat verification deferred to post-Phase-2 milestone with Junaid (memory rule #14); v2c-c-complete = Windows-only smoke regression green.
 2. All 111 presets load, validate, render correctly on Windows + Mac.
 3. All 4 apps run on PySide6 with no PyQt5 imports remaining.
 4. Observation V marked Fixed in ROADMAP.md with sha.

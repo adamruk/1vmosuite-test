@@ -25,13 +25,14 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 - **Phase 2c-c-2** — platformdirs-based UserData resolver + portable.txt opt-in (`[248ac56]`, tag `v2c-c-2`).
 - **Phase 2c-c-3** — atomic_write + user preset writer + caller rewire + migration. Fixes Observation O across all 5 user-state writes (`[86edaa4]`, tag `v2c-c-3`).
 - **Phase 2c-c-4** — Prefix-namespaced preset IDs + schema v2 + EncoderDialog UI-Min. Fixes silent-data-loss bug from 2c-c-3 D3=a. See ADR-0006 (`[23c64bf]`, tag `v2c-c-4`).
+- **Phase 2c-c-6** — Windows-only smoke regression suite (integration + determinism + aggregator + tests/README convention) (`[hash-pending]`, tag `v2c-c-6`).
+- **Phase 2c done** — all 5 sub-phases shipped + post-2c-c-4 regression green; Mac smoke deferred to post-Phase-2 with Junaid (`[hash-pending]`, tag `v2c-c-complete`).
 - **Governance backfill** — CLAUDE.md + CHANGELOG backfill (`f08b08e`), self-referential hash-fill (`fa0763b`), CHANGELOG hook installation (`250668b`), hook hash-fill (`9537660`).
 
 ### Pending — blocking Phase 2 done
 
 | Phase | Scope summary | Est | Detail |
 |---|---|---|---|
-| **2c-c-6** | Mac-compat pass: platform-aware path handling, bundled macOS ffmpeg. | 5-8 hrs | `PHASE_2C_PLAN.md` |
 | **2d** | PyQt5 → PySide6 migration. Mac-quality-forced for current team. PySide6 6.9.1 target (not 6.9.2). 30-line `core/_qt.py` scaffold, libcst rewriter, Nuitka packaging. | 3-4 weeks | Playbook TBD |
 
 **Phase 2 done = all rows above shipped.** Estimate: ~100-155 hours solo. At 6 hrs/day × 5 days = 3-5 calendar weeks. At 4 hrs/day × 5 days = 5-8 weeks.

@@ -1,0 +1,153 @@
+PASS: Encoder.json validates against EncoderLibrary schema
+  schema_version: 2
+  preset count: 111
+=== core.user_data smoke validation (sub-phase 2c-c-2) ===
+Platform: win32
+
+[Default (no sentinel) returns platformdirs path]
+  PASS: default -> C:\Users\adamm\AppData\Local\1vmo-suite
+
+[Portable mode + safe install dir returns UserData]
+  PASS: portable safe -> C:\Users\adamm\AppData\Local\Temp\tmp1y5wlgwc\UserData
+
+[Portable mode + protected dir raises]
+  PASS: portable + protected -> raised PortableLocationError
+
+[Protected-dir detection (Program Files)]
+  PASS: 'C:\Program Files\1vmo-test' detected as protected
+
+=== 4/4 tests passed ===
+PASS: core.user_data resolves correctly across all branches
+=== User-preset save/load smoke (sub-phase 2c-c-3) ===
+Platform: win32
+
+[Missing file returns []]
+  PASS: missing file returns []
+
+[Round-trip with Vietnamese chars]
+  PASS: round-trip preserved 2 presets (incl. Vietnamese)
+
+[.bak rotation preserves first generation]
+  PASS: .bak rotation preserves first generation
+
+=== 3/3 tests passed ===
+PASS: user-preset save/load round-trip works
+...                                                                      [100%]
+3 passed in 1.55s
+=== Preset ID validation (sub-phase 2c-c-4) ===
+File: C:\Users\adamm\Downloads\1vmo Auto Render v3.5 testing\1vmo-suite\assets\Encoder.json
+Total presets: 111
+PASS: all 111 ids match ID_PATTERN
+PASS: all 111 ids are unique
+PASS: all 111 ids are builtin:
+PASS: layer-overlay collision cluster suffixed -1..-10
+
+PASS: preset IDs validate clean
+=== ID migration smoke (sub-phase 2c-c-4) ===
+Platform: win32
+
+[v1 file loads with derived ids]
+  PASS: v1 file loaded with derived ids: ['user:first-entry', 'user:second-entry']
+
+[v1 -> v2 persisted on save]
+  PASS: v1 -> v2 persisted on save; first id='user:test'
+
+[v2 file round-trips as-is]
+  PASS: v2 round-trip preserved
+
+=== 3/3 tests passed ===
+PASS: ID migration round-trip works
+=== Integration smoke (sub-phase 2c-c-6) ===
+Platform: win32
+Encoder JSON: C:\Users\adamm\Downloads\1vmo Auto Render v3.5 testing\1vmo-suite\assets\Encoder.json
+
+[Built-in JSON loads with v2 ids]
+  PASS: 111 built-in ids loaded; all builtin: prefix; all unique
+
+[User round-trip + merged with built-in]
+  PASS: merged 111 builtin + 2 user; no collisions; prefix split correct
+
+[User filter by id prefix]
+  PASS: id-prefix filter isolates user presets cleanly
+
+=== 3/3 tests passed ===
+PASS: integration smoke green
+=== Encoder.json determinism smoke (sub-phase 2c-c-6) ===
+Platform: win32
+
+[Regen byte-identical to live]
+  Live assets/Encoder.json md5: 706bd273917ef8b64d88e695e8f1a68d
+  Regen md5:                    706bd273917ef8b64d88e695e8f1a68d
+  PASS: regen byte-identical to live Encoder.json
+
+[Slug + id derivation deterministic]
+  PASS: derive_slug + derive_ids_for_presets deterministic across runs
+
+=== 2/2 tests passed ===
+PASS: determinism smoke green
+=== check_changelog.py smoke (sub-phase: hook-changelog) ===
+Platform: win32
+
+[Source w/o CHANGELOG blocks]
+  PASS: source-without-changelog correctly blocked
+
+[Source w/ CHANGELOG passes]
+  PASS: source+CHANGELOG passes
+
+[[skip changelog] marker passes]
+  PASS: [skip changelog] bypass works
+
+[Pure docs passes]
+  PASS: pure-docs commit passes
+
+[Merge commit passes]
+  PASS: merge commit bypassed
+
+[requirements.txt triggers (D2 verify)]
+  PASS: requirements.txt classified as SOURCE
+
+=== 6/6 tests passed ===
+PASS: check_changelog hook works end-to-end
+=== run_all_smoke (sub-phase 2c-c-6) ===
+Repo root: C:\Users\adamm\Downloads\1vmo Auto Render v3.5 testing\1vmo-suite
+Runners to execute: 9
+
+--- [schema (2c-c-1)] ---
+--- [schema (2c-c-1)] PASS ---
+
+--- [user-data (2c-c-2)] ---
+--- [user-data (2c-c-2)] PASS ---
+
+--- [user-save (2c-c-3)] ---
+--- [user-save (2c-c-3)] PASS ---
+
+--- [atomic-retry (2c-c-3)] ---
+--- [atomic-retry (2c-c-3)] PASS ---
+
+--- [preset-ids (2c-c-4)] ---
+--- [preset-ids (2c-c-4)] PASS ---
+
+--- [id-migration (2c-c-4)] ---
+--- [id-migration (2c-c-4)] PASS ---
+
+--- [integration (2c-c-6)] ---
+--- [integration (2c-c-6)] PASS ---
+
+--- [determinism (2c-c-6)] ---
+--- [determinism (2c-c-6)] PASS ---
+
+--- [hook-changelog] ---
+--- [hook-changelog] PASS ---
+
+=== AGGREGATE ===
+  [+] schema (2c-c-1): exit=0
+  [+] user-data (2c-c-2): exit=0
+  [+] user-save (2c-c-3): exit=0
+  [+] atomic-retry (2c-c-3): exit=0
+  [+] preset-ids (2c-c-4): exit=0
+  [+] id-migration (2c-c-4): exit=0
+  [+] integration (2c-c-6): exit=0
+  [+] determinism (2c-c-6): exit=0
+  [+] hook-changelog: exit=0
+
+PASS: all 9 smoke runners green
