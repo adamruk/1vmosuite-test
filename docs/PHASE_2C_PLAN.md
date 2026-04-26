@@ -175,11 +175,11 @@ All of:
 
 Items deferred from Phase 2 scope. Captured here so they're not lost when they become worth picking up.
 
-### 2c-c-4 — Prefix-namespaced IDs + copy-on-write for built-ins (5-7 hrs)
+### 2c-c-4 — Prefix-namespaced IDs + copy-on-write — SHIPPED 2026-04-27
 
-Preset `id` field required, namespaced: `builtin:<group>/<slug>` or `user:<slug>`. Copy-on-write on built-in mutation. Load-time validation rejects malformed or misprefixed IDs.
+Identity model bumped from position-based to prefix-namespaced IDs (`builtin:<group-slug>/<name-slug>` and `user:<name-slug>`). Schema version bumped 1→2. EncoderDialog disables Edit/Delete on built-in rows (italic name as visual signal). Silent-data-loss bug from 2c-c-3 D3=a fixed. Slug derivation rule + lazy v1→v2 migration semantics documented in ADR-0006.
 
-**Trigger for pickup.** Preset ID collision issues in team use, or commercial distribution becomes planned.
+**Tag:** `v2c-c-4`.
 
 ### 2c-c-5 — extends: schema field (6-9 hrs)
 

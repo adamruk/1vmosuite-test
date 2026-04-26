@@ -12,20 +12,87 @@ from typing import Callable, Optional
 import json
 import logging
 import os
+import re
+import unicodedata as _unicodedata
 from dataclasses import asdict
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def derive_slug(name: str) -> str:
+    """5-step slug transform per ADR-0006.
+
+    NFKD-normalize → strip combining marks → lowercase → replace runs
+    of non-alphanumeric with single hyphen → strip leading/trailing
+    hyphens. Returns "" if input has no alphanumeric content.
+    """
+    decomposed = _unicodedata.normalize("NFKD", name)
+    stripped = "".join(c for c in decomposed if not _unicodedata.combining(c))
+    lowered = stripped.lower()
+    hyphenated = _SLUG_RE.sub("-", lowered)
+    return hyphenated.strip("-")
+
+
+def derive_ids_for_presets(
+    name_pairs: list[tuple[str, str]],
+    *,
+    kind: str = "builtin",
+) -> list[str]:
+    """Derive ids from (group, name) tuples per ADR-0006.
+
+    Args:
+        name_pairs: list of (group, name) tuples in file order.
+        kind: "builtin" (group-prefixed; allows '/') or "user" (flat;
+            never has '/' regardless of group).
+
+    Returns:
+        list[str] of ids, 1:1 with name_pairs. Conditional suffix on
+        collisions: unique base slugs receive no suffix; collision
+        clusters receive 1-indexed -N suffix in file order.
+    """
+    assert kind in ("builtin", "user")
+    base_ids: list[str] = []
+    for group, name in name_pairs:
+        name_slug = derive_slug(name) or "preset"
+        if kind == "builtin" and group:
+            group_slug = derive_slug(group)
+            if group_slug:
+                base_ids.append(f"builtin:{group_slug}/{name_slug}")
+            else:
+                base_ids.append(f"builtin:{name_slug}")
+        elif kind == "builtin":
+            base_ids.append(f"builtin:{name_slug}")
+        else:
+            base_ids.append(f"user:{name_slug}")
+
+    counts: dict[str, int] = {}
+    for bid in base_ids:
+        counts[bid] = counts.get(bid, 0) + 1
+
+    result: list[str] = []
+    seen_count: dict[str, int] = {}
+    for bid in base_ids:
+        if counts[bid] == 1:
+            result.append(bid)
+        else:
+            seen_count[bid] = seen_count.get(bid, 0) + 1
+            result.append(f"{bid}-{seen_count[bid]}")
+    return result
 
 
 @dataclass(frozen=True)
 class Preset:
     """A single encoder preset parsed from Encoder.txt.
 
-    The legacy name field used in auto_render's UI was the concatenated
-    form '{group}|{name}'. Use .full_name when that exact form is needed
-    (e.g., comparing against persisted self.selected_encoders strings).
+    2c-c-4: id is the load-bearing identity. full_name is DEPRECATED
+    and retained as a property for the load-time selected_encoders
+    migration shim only; may be removed once that migration ships and
+    is verified.
     """
 
+    id: str  # 2c-c-4 stable identity (e.g., "builtin:group/name", "user:name")
     group: str  # column 1, may be '' for ungrouped
     name: str  # column 2, required non-empty
     description: str  # column 3
@@ -34,7 +101,12 @@ class Preset:
 
     @property
     def full_name(self) -> str:
-        """Concatenated '{group}|{name}' form used historically."""
+        """Concatenated '{group}|{name}' form used historically.
+
+        DEPRECATED with 2c-c-4; identity is now id. Kept for migration
+        shim and may be removed once selected_encoders migration is
+        verified in production.
+        """
         return f"{self.group}|{self.name}"
 
 
@@ -56,9 +128,9 @@ def load_presets(
     Returns presets in file order. Does NOT append app-specific defaults
     — callers merge those in.
     """
-    presets: list[Preset] = []
+    parsed: list[tuple[str, str, str, str, tuple[str, ...]]] = []
     if not path.exists():
-        return presets
+        return []
     with open(path, "r", encoding="utf-8") as f:
         for line_number, raw_line in enumerate(f, start=1):
             try:
@@ -86,19 +158,17 @@ def load_presets(
                     if not name:
                         _report(on_error, line_number, raw_line.strip(), "empty name")
                         continue
-                    presets.append(
-                        Preset(
-                            group=group,
-                            name=name,
-                            description=description,
-                            details=details,
-                            params=tuple(code.split()),
-                        )
+                    parsed.append(
+                        (group, name, description, details, tuple(code.split()))
                     )
             except Exception as e:
                 _report(on_error, line_number, raw_line.strip(), f"exception: {str(e)}")
                 continue
-    return presets
+    ids = derive_ids_for_presets([(g, n) for g, n, _, _, _ in parsed], kind="builtin")
+    return [
+        Preset(id=ids[i], group=g, name=n, description=d, details=dd, params=p)
+        for i, (g, n, d, dd, p) in enumerate(parsed)
+    ]
 
 
 def _report(
@@ -176,10 +246,11 @@ def load_presets_json(path: Path) -> list[Preset]:
         raise ValueError(
             f"Encoder JSON root must be an object, got {type(data).__name__}"
         )
-    if data.get("schema_version") != SCHEMA_VERSION:
+    sv = data.get("schema_version")
+    if sv not in (1, 2):
         raise ValueError(
-            f"Encoder JSON schema_version is {data.get('schema_version')!r}, "
-            f"expected {SCHEMA_VERSION}. Explicit migration required."
+            f"Encoder JSON schema_version is {sv!r}, expected 1 or 2. "
+            f"Explicit migration required."
         )
     if not isinstance(data.get("presets"), list):
         raise ValueError(
@@ -187,7 +258,6 @@ def load_presets_json(path: Path) -> list[Preset]:
             f"got {type(data.get('presets')).__name__}"
         )
 
-    presets: list[Preset] = []
     required_fields = ("group", "name", "description", "details", "params")
     for i, entry in enumerate(data["presets"]):
         if not isinstance(entry, dict):
@@ -204,16 +274,34 @@ def load_presets_json(path: Path) -> list[Preset]:
                 f"Preset at index {i}: 'params' must be a list, "
                 f"got {type(entry['params']).__name__}"
             )
-        presets.append(
+
+    raw_entries = data["presets"]
+    if sv == 2:
+        return [
             Preset(
-                group=entry["group"],
-                name=entry["name"],
-                description=entry["description"],
-                details=entry["details"],
-                params=tuple(entry["params"]),
+                id=p["id"],
+                group=p["group"],
+                name=p["name"],
+                description=p["description"],
+                details=p["details"],
+                params=tuple(p["params"]),
             )
+            for p in raw_entries
+        ]
+    ids = derive_ids_for_presets(
+        [(p["group"], p["name"]) for p in raw_entries], kind="builtin"
+    )
+    return [
+        Preset(
+            id=ids[i],
+            group=p["group"],
+            name=p["name"],
+            description=p["description"],
+            details=p["details"],
+            params=tuple(p["params"]),
         )
-    return presets
+        for i, p in enumerate(raw_entries)
+    ]
 
 
 def save_presets_json(path: Path, presets: list[Preset]) -> None:
@@ -263,6 +351,7 @@ def load_builtin_json(path: Path) -> list[Preset]:
     library = EncoderLibrary.model_validate(raw)
     return [
         Preset(
+            id=p.id,
             group=p.group,
             name=p.name,
             description=p.description,
@@ -292,16 +381,39 @@ def load_user_presets_json(path: Path) -> list[Preset]:
     def _try_load(candidate: Path) -> list[Preset] | None:
         try:
             raw = json.loads(candidate.read_text(encoding="utf-8"))
-            library = EncoderLibrary.model_validate(raw)
+            sv = raw.get("schema_version", 1)
+            if sv == 2:
+                library = EncoderLibrary.model_validate(raw)
+                return [
+                    Preset(
+                        id=p.id,
+                        group=p.group,
+                        name=p.name,
+                        description=p.description,
+                        details=p.details,
+                        params=tuple(p.params),
+                    )
+                    for p in library.presets
+                ]
+            entries = raw["presets"]
+            ids = derive_ids_for_presets(
+                [(p["group"], p["name"]) for p in entries], kind="user"
+            )
+            logger.info(
+                "Migrated %d user preset(s) from schema v1 to v2 "
+                "(will rewrite on next save)",
+                len(entries),
+            )
             return [
                 Preset(
-                    group=p.group,
-                    name=p.name,
-                    description=p.description,
-                    details=p.details,
-                    params=tuple(p.params),
+                    id=ids[i],
+                    group=p["group"],
+                    name=p["name"],
+                    description=p["description"],
+                    details=p["details"],
+                    params=tuple(p["params"]),
                 )
-                for p in library.presets
+                for i, p in enumerate(entries)
             ]
         except Exception:
             return None

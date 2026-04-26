@@ -1,0 +1,14 @@
+=== ID migration smoke (sub-phase 2c-c-4) ===
+Platform: win32
+
+[v1 file loads with derived ids]
+  PASS: v1 file loaded with derived ids: ['user:first-entry', 'user:second-entry']
+
+[v1 -> v2 persisted on save]
+  PASS: v1 -> v2 persisted on save; first id='user:test'
+
+[v2 file round-trips as-is]
+  PASS: v2 round-trip preserved
+
+=== 3/3 tests passed ===
+PASS: ID migration round-trip works

@@ -1,0 +1,9 @@
+=== Preset ID validation (sub-phase 2c-c-4) ===
+File: C:\Users\adamm\Downloads\1vmo Auto Render v3.5 testing\1vmo-suite\assets\Encoder.json
+Total presets: 111
+PASS: all 111 ids match ID_PATTERN
+PASS: all 111 ids are unique
+PASS: all 111 ids are builtin:
+PASS: layer-overlay collision cluster suffixed -1..-10
+
+PASS: preset IDs validate clean

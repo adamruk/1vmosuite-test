@@ -41,6 +41,7 @@ def test_round_trip() -> bool:
         path = Path(td) / "encoder.user.json"
         original = [
             Preset(
+                id="user:test1",
                 group="user",
                 name="Test1",
                 description="d1",
@@ -48,6 +49,7 @@ def test_round_trip() -> bool:
                 params=("-c:v", "libx264", "-crf", "20"),
             ),
             Preset(
+                id="user:vietnamese",
                 group="user",
                 name="Vietnamese",
                 description="Tiếng Việt",
@@ -71,8 +73,26 @@ def test_round_trip() -> bool:
 def test_bak_rotation() -> bool:
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "encoder.user.json"
-        gen1 = [Preset(group="user", name="V1", description="", details="", params=())]
-        gen2 = [Preset(group="user", name="V2", description="", details="", params=())]
+        gen1 = [
+            Preset(
+                id="user:v1",
+                group="user",
+                name="V1",
+                description="",
+                details="",
+                params=(),
+            )
+        ]
+        gen2 = [
+            Preset(
+                id="user:v2",
+                group="user",
+                name="V2",
+                description="",
+                details="",
+                params=(),
+            )
+        ]
 
         save_user_presets_json(path, gen1)
         save_user_presets_json(path, gen2)

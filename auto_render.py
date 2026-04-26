@@ -40,7 +40,11 @@ from core import config as core_config
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
 from core import preset_loader as core_preset_loader
-from core.preset_loader import load_user_presets_json, save_user_presets_json
+from core.preset_loader import (
+    load_user_presets_json,
+    save_user_presets_json,
+    derive_slug,
+)
 from core import ffmpeg_runner as core_ffmpeg_runner
 from core.user_data import resolve_or_die, migrate_legacy_configs
 
@@ -367,13 +371,15 @@ class VideoRendererTool(QMainWindow):
         self.tree_videos.header().setDefaultAlignment(Qt.AlignCenter)
         input_layout.addWidget(self.tree_videos)
         encoder_controls = QHBoxLayout()
-        add_btn = self.create_video_button(
+        # 2c-c-4: edit/delete buttons must be instance attrs so the
+        # selection-change handler can toggle their enabled state.
+        self.btn_add_encoder = self.create_video_button(
             "♻️ Add", self.add_encoder, "#e3f2fd", "#1976d2", "#bbdefb"
         )
-        edit_btn = self.create_video_button(
+        self.btn_edit_encoder = self.create_video_button(
             "🛠️ Edit", self.edit_encoder, "#fff3e0", "#e65100", "#ffe0b2"
         )
-        del_btn = self.create_video_button(
+        self.btn_delete_encoder = self.create_video_button(
             "🗑️ Delete",
             self.delete_encoder,
             "#ffcdd2",
@@ -390,9 +396,9 @@ class VideoRendererTool(QMainWindow):
         self.group_combo.addItem("🕹️ 1vmo Ultimate")
         self.group_combo.addItem("All Groups")
         self.group_combo.currentTextChanged.connect(self.on_group_changed)
-        encoder_controls.addWidget(add_btn)
-        encoder_controls.addWidget(edit_btn)
-        encoder_controls.addWidget(del_btn)
+        encoder_controls.addWidget(self.btn_add_encoder)
+        encoder_controls.addWidget(self.btn_edit_encoder)
+        encoder_controls.addWidget(self.btn_delete_encoder)
         encoder_controls.addWidget(update_btn)
         encoder_controls.addStretch()
         encoder_controls.addWidget(QLabel("Filter"))
@@ -405,6 +411,10 @@ class VideoRendererTool(QMainWindow):
         self.tree_encoders.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree_encoders.setAlternatingRowColors(True)
         self.tree_encoders.header().setDefaultAlignment(Qt.AlignCenter)
+        # 2c-c-4: disable Edit/Delete when any selected entry is built-in.
+        self.tree_encoders.itemSelectionChanged.connect(
+            self._update_encoder_buttons_enabled
+        )
         config_layout.addWidget(self.tree_encoders)
         mode_frame = QFrame(objectName="mode_frame")
         mode_frame.setFrameStyle(QFrame.StyledPanel)
@@ -669,8 +679,12 @@ class VideoRendererTool(QMainWindow):
             presets = core_preset_loader.load_presets(self.ENCODER_FILE)
             # App-specific defaults appended after file load — these are
             # auto_render's own UI affordances, not part of Encoder.txt.
+            # 2c-c-4: ids match those hardcoded in tools/generate_encoder_json.py
+            # so the legacy txt+append path produces same identities as the
+            # JSON dark-release path.
             presets.append(
                 core_preset_loader.Preset(
+                    id="builtin:text/text-bottom-basic",
                     group="Text",
                     name="Text Bottom Basic",
                     description="Thêm chữ ở dưới với nền đen mờ",
@@ -683,6 +697,7 @@ class VideoRendererTool(QMainWindow):
             )
             presets.append(
                 core_preset_loader.Preset(
+                    id="builtin:text/text-top-basic",
                     group="Text",
                     name="Text Top Basic",
                     description="Thêm chữ ở trên với nền đen mờ",
@@ -693,9 +708,8 @@ class VideoRendererTool(QMainWindow):
                     ),
                 )
             )
-        # 2c-c-3 D4=a: user JSON merges in regardless of ENCODER_USE_JSON.
-        # Track builtin count so save_encoder_changes can write only user entries.
-        self._builtin_preset_count = len(presets)
+        # 2c-c-4: built-in vs user is intrinsic via id prefix; no
+        # _builtin_preset_count needed.
         user_presets = load_user_presets_json(self.USER_PRESETS_FILE)
         if user_presets:
             presets.extend(user_presets)
@@ -1309,11 +1323,31 @@ class VideoRendererTool(QMainWindow):
                 else:
                     item.setText(4, "")
                 item.setData(0, Qt.UserRole, " ".join(encoder.params))
+                # 2c-c-4: stash id on UserRole+1 + italicize built-in names.
+                item.setData(0, Qt.UserRole + 1, encoder.id)
+                if encoder.id.startswith("builtin:"):
+                    name_font = item.font(2)
+                    name_font.setItalic(True)
+                    item.setFont(2, name_font)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 counter += 1
         self.tree_encoders.setHeaderLabels(
             ["No.", "Group", "Name", "Description", "Details"]
         )
+
+    def _update_encoder_buttons_enabled(self) -> None:
+        """2c-c-4: disable Edit/Delete when any selected encoder is built-in."""
+        selected = self.tree_encoders.selectedItems()
+        if not selected:
+            self.btn_edit_encoder.setEnabled(False)
+            self.btn_delete_encoder.setEnabled(False)
+            return
+        any_builtin = any(
+            (item.data(0, Qt.UserRole + 1) or "").startswith("builtin:")
+            for item in selected
+        )
+        self.btn_edit_encoder.setEnabled(not any_builtin)
+        self.btn_delete_encoder.setEnabled(not any_builtin)
 
     def add_encoder(self) -> None:
         """Thêm encoder mới"""
@@ -1324,12 +1358,27 @@ class VideoRendererTool(QMainWindow):
             name_parts = dialog.result["name"].split("|", 1)
             group = name_parts[0] if len(name_parts) > 1 else ""
             name = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
+            # 2c-c-4: derive user-namespace id with disambiguation suffix
+            base_slug = derive_slug(name) or "preset"
+            base_id = f"user:{base_slug}"
+            existing_user_ids = {
+                p.id for p in self.encoder_options if p.id.startswith("user:")
+            }
+            if base_id in existing_user_ids:
+                n = 2
+                while f"{base_id}-{n}" in existing_user_ids:
+                    n += 1
+                preset_id = f"{base_id}-{n}"
+            else:
+                preset_id = base_id
             item.setText(1, group)
             item.setText(2, name)
             item.setText(3, dialog.result["description"])
             item.setData(0, Qt.UserRole, " ".join(dialog.result["params"]))
+            item.setData(0, Qt.UserRole + 1, preset_id)
             self.encoder_options.append(
                 core_preset_loader.Preset(
+                    id=preset_id,
                     group=group,
                     name=name,
                     description=dialog.result["description"],
@@ -1345,41 +1394,44 @@ class VideoRendererTool(QMainWindow):
         if not selection:
             QMessageBox.warning(self, "Warning", "Please select an encoder to edit")
             return
-        else:
-            item = selection[0]
-            current_group = item.text(1)
-            current_name = item.text(2)
-            current_desc = item.text(3)
-            current_params = item.data(0, Qt.UserRole).split()
-            initial_values = {
-                "name": f"{current_group}|{current_name}",
-                "description": current_desc,
-                "params": current_params,
-            }
-            dialog = EncoderDialog(self, "Edit Encoder", initial_values)
-            if dialog.exec_() == QDialog.Accepted:
-                if dialog.result:
-                    name_parts = dialog.result["name"].split("|", 1)
-                    group = name_parts[0] if len(name_parts) > 1 else ""
-                    name = (
-                        name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
-                    )
-                    item.setText(1, group)
-                    item.setText(2, name)
-                    item.setText(3, dialog.result["description"])
-                    item.setData(0, Qt.UserRole, " ".join(dialog.result["params"]))
-                    idx = self.get_encoder_index_by_name(
-                        f"{current_group}|{current_name}"
-                    )
-                    if idx is not None:
-                        self.encoder_options[idx] = core_preset_loader.Preset(
-                            group=group,
-                            name=name,
-                            description=dialog.result["description"],
-                            details=dialog.result.get("details", ""),
-                            params=tuple(dialog.result["params"]),
-                        )
-                        self.save_encoder_changes()
+        item = selection[0]
+        current_id = item.data(0, Qt.UserRole + 1) or ""
+        # 2c-c-4: defense in depth — UI button is disabled for built-ins,
+        # but reject at model layer too in case of future signal regression.
+        if current_id.startswith("builtin:"):
+            print(f"edit_encoder: refused to edit built-in preset {current_id!r}")
+            return
+        current_group = item.text(1)
+        current_name = item.text(2)
+        current_desc = item.text(3)
+        current_params = item.data(0, Qt.UserRole).split()
+        initial_values = {
+            "name": f"{current_group}|{current_name}",
+            "description": current_desc,
+            "params": current_params,
+        }
+        dialog = EncoderDialog(self, "Edit Encoder", initial_values)
+        if dialog.exec_() == QDialog.Accepted and dialog.result:
+            name_parts = dialog.result["name"].split("|", 1)
+            group = name_parts[0] if len(name_parts) > 1 else ""
+            name = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
+            item.setText(1, group)
+            item.setText(2, name)
+            item.setText(3, dialog.result["description"])
+            item.setData(0, Qt.UserRole, " ".join(dialog.result["params"]))
+            idx = self.get_encoder_index_by_id(current_id)
+            if idx is not None:
+                # Preserve id across edits — rename of a user preset does not
+                # change its id, matching desktop-app conventions.
+                self.encoder_options[idx] = core_preset_loader.Preset(
+                    id=current_id,
+                    group=group,
+                    name=name,
+                    description=dialog.result["description"],
+                    details=dialog.result.get("details", ""),
+                    params=tuple(dialog.result["params"]),
+                )
+                self.save_encoder_changes()
 
     def delete_encoder(self) -> None:
         """Xóa encoder đã chọn"""
@@ -1387,43 +1439,41 @@ class VideoRendererTool(QMainWindow):
         if not selection:
             QMessageBox.warning(self, "Warning", "Please select encoder(s) to delete")
             return
-        else:
-            reply = QMessageBox.question(
-                self,
-                "Confirm Delete",
-                "Are you sure you want to delete the selected encoder(s)?",
-                QMessageBox.Yes | QMessageBox.No,
-            )
-            if reply == QMessageBox.Yes:
-                for item in selection:
-                    group = item.text(1)
-                    name = item.text(2)
-                    full_name = f"{group}|{name}" if group else name
-                    idx = self.get_encoder_index_by_name(full_name)
-                    if idx is not None:
-                        self.encoder_options.pop(idx)
-                    self.tree_encoders.takeTopLevelItem(
-                        self.tree_encoders.indexOfTopLevelItem(item)
-                    )
-                self.save_encoder_changes()
+        # 2c-c-4: defense in depth — UI is disabled when any built-in is
+        # selected; reject at model layer if any sneak through.
+        for item in selection:
+            preset_id = item.data(0, Qt.UserRole + 1) or ""
+            if preset_id.startswith("builtin:"):
+                print(
+                    f"delete_encoder: refused to delete built-in preset {preset_id!r}"
+                )
+                return
+        reply = QMessageBox.question(
+            self,
+            "Confirm Delete",
+            "Are you sure you want to delete the selected encoder(s)?",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            for item in selection:
+                preset_id = item.data(0, Qt.UserRole + 1) or ""
+                idx = self.get_encoder_index_by_id(preset_id)
+                if idx is not None:
+                    self.encoder_options.pop(idx)
+                self.tree_encoders.takeTopLevelItem(
+                    self.tree_encoders.indexOfTopLevelItem(item)
+                )
+            self.save_encoder_changes()
 
     def save_encoder_changes(self) -> None:
         """Save user-edited presets to USER_PRESETS_FILE atomically.
 
-        2c-c-3 D3=a: minimal rewire — all preset edits land in user JSON.
-        Built-in presets effectively read-only because the path that wrote
-        to assets/Encoder.txt is gone. Distinction between built-in and
-        user not exposed in UI in this commit (deferred to 2c-c-4 backlog).
-        Per merge strategy D4=a, user preset shadows built-in if names collide.
+        2c-c-4: Built-in vs user is intrinsic via id prefix. Filters
+        self.encoder_options for entries with id starting "user:".
         """
-        builtin_count = getattr(self, "_builtin_preset_count", 0)
-        user_presets = (
-            self.encoder_options[builtin_count:]
-            if builtin_count
-            else self.encoder_options
-        )
+        user_presets = [p for p in self.encoder_options if p.id.startswith("user:")]
         try:
-            save_user_presets_json(self.USER_PRESETS_FILE, list(user_presets))
+            save_user_presets_json(self.USER_PRESETS_FILE, user_presets)
             QMessageBox.information(
                 self, "Success", "Encoder settings saved successfully"
             )
@@ -1432,11 +1482,12 @@ class VideoRendererTool(QMainWindow):
                 self, "Save Failed", f"Could not save preset changes: {e}"
             )
 
-    def get_encoder_index_by_name(self, name: str) -> Optional[int]:
-        """Tìm index của encoder trong list theo tên"""
+    def get_encoder_index_by_id(self, preset_id: str) -> Optional[int]:
+        """2c-c-4: Find encoder index by stable id."""
         for i, encoder in enumerate(self.encoder_options):
-            if encoder.full_name == name:
+            if encoder.id == preset_id:
                 return i
+        return None
 
     def open_output_directory(self):
         """Mở thư mục output directory trong file explorer"""

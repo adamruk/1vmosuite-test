@@ -24,6 +24,7 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 - **Phase 2c-c-1** — Pydantic schema + JSON dark release behind `ENCODER_USE_JSON` (`[ce51400]`, tag `v2c-c-1`).
 - **Phase 2c-c-2** — platformdirs-based UserData resolver + portable.txt opt-in (`[248ac56]`, tag `v2c-c-2`).
 - **Phase 2c-c-3** — atomic_write + user preset writer + caller rewire + migration. Fixes Observation O across all 5 user-state writes (`[86edaa4]`, tag `v2c-c-3`).
+- **Phase 2c-c-4** — Prefix-namespaced preset IDs + schema v2 + EncoderDialog UI-Min. Fixes silent-data-loss bug from 2c-c-3 D3=a. See ADR-0006 (`[hash-pending]`, tag `v2c-c-4`).
 - **Governance backfill** — CLAUDE.md + CHANGELOG backfill (`f08b08e`), self-referential hash-fill (`fa0763b`), CHANGELOG hook installation (`250668b`), hook hash-fill (`9537660`).
 
 ### Pending — blocking Phase 2 done
@@ -41,7 +42,6 @@ Deferred items. Tracked here so they're not lost; picked up later if and when th
 
 | Item | Trigger for pickup |
 |---|---|
-| **2c-c-4** — Prefix-namespaced IDs + copy-on-write | Preset ID collision issues surface, or commercial distribution becomes planned |
 | **2c-c-5** — `extends:` schema field | Audit reveals deep preset redundancy that factors cleanly, or inheritance UI becomes needed |
 | **2c-d** — Zoom-cycle generator | Zoom-cycle preset maintenance becomes tedious, or a new cycle family needs to be added |
 | **2c-e Part B** — Inheritance UI + preset audit | 2c-c-5 picked up, or preset quality becomes a team complaint |

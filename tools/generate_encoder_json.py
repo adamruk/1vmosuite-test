@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
-"""Phase 2c-a: Encoder.txt → Encoder.json migration tool.
+"""Phase 2c-a (extended in 2c-c-4): Encoder.txt → Encoder.json migration tool.
 
 Reads assets/Encoder.txt via core.preset_loader, appends the 2 Text defaults
-currently hardcoded in auto_render.py (lines 512-525), writes assets/Encoder.json.
+currently hardcoded in auto_render.py, writes assets/Encoder.json.
 
-Schema v1 contract:
-  - Root object: {"schema_version": 1, "presets": [...]}
+Schema v2 contract (bumped from v1 in 2c-c-4 per ADR-0006):
+  - Root object: {"schema_version": 2, "presets": [...]}
   - Each preset entry: {
+        "id":          str,   # 2c-c-4 stable identity (builtin:group/name)
         "group":       str,   # may be empty string, UTF-8 with emoji/Vietnamese
         "name":        str,   # non-empty, UTF-8
         "description": str,   # may be empty string
         "details":     str,   # may be empty string
         "params":      list[str],  # JSON has no tuple; loader reconstructs as tuple
     }
-  - Field order within each preset: group, name, description, details, params
+  - Field order within each preset: id, group, name, description, details, params
     (matches Preset dataclass field order; relied on for deterministic output)
   - Preset ordering: Encoder.txt file order, then Text defaults (Bottom, Top)
   - Encoding: UTF-8, ensure_ascii=False (emoji/Vietnamese not escaped)
   - Line endings: LF only (newline='\\n'), regardless of platform
   - Indentation: 2 spaces
-
-v1 does NOT include a 'source' field (builtin vs user). If a future preset-
-editor UI needs that distinction, migrate to v2 via a separate tool.
 
 Determinism: re-running this tool on an unchanged Encoder.txt MUST produce a
 byte-identical Encoder.json. Any non-determinism is a bug.
@@ -47,9 +45,12 @@ ENCODER_TXT = _REPO_ROOT / "assets" / "Encoder.txt"
 ENCODER_JSON = _REPO_ROOT / "assets" / "Encoder.json"
 
 
-# Text defaults — verbatim from auto_render.py lines 512-525. DO NOT EDIT.
+# Text defaults — verbatim from auto_render.py.
+# 2c-c-4: ids hard-coded; verified at module import time below to not collide
+# with derived Encoder.txt ids.
 TEXT_DEFAULTS = [
     preset_loader.Preset(
+        id="builtin:text/text-bottom-basic",
         group="Text",
         name="Text Bottom Basic",
         description="Thêm chữ ở dưới với nền đen mờ",
@@ -60,6 +61,7 @@ TEXT_DEFAULTS = [
         ),
     ),
     preset_loader.Preset(
+        id="builtin:text/text-top-basic",
         group="Text",
         name="Text Top Basic",
         description="Thêm chữ ở trên với nền đen mờ",

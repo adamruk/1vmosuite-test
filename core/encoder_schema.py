@@ -1,26 +1,33 @@
-"""Pydantic schema for encoder preset validation (sub-phase 2c-c-1).
+"""Pydantic schema for encoder library JSON files (sub-phase 2c-c-1, 2c-c-4).
 
-Read-only validation only; this module does NOT generate or modify
-on-disk JSON. tools/generate_encoder_json.py remains the sole writer
-to preserve the byte-identical-regen determinism contract.
+schema_version=2 (bumped from v1 in 2c-c-4): adds required `id` field on
+EncoderPreset. See ADR-0006 for ID format, slug derivation rules, and
+lazy migration semantics. v1 files with no `id` are loaded via the
+legacy load path that auto-derives ids; this schema strictly accepts v2.
 """
 
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+# ID_PATTERN enforces:
+#   builtin:foo                ✓
+#   builtin:group/foo          ✓
+#   builtin:group/foo-3        ✓
+#   user:foo                   ✓
+#   user:foo-2                 ✓
+#   user:group/foo             ✗ (user namespace is flat)
+ID_PATTERN = r"^(builtin:([a-z0-9-]+/)?[a-z0-9-]+(-\d+)?|user:[a-z0-9-]+(-\d+)?)$"
 
 
 class EncoderPreset(BaseModel):
-    """Single encoder preset entry. Field set must match core.preset_loader.Preset.
-
-    No uniqueness validator on (group, name): 13 known full_name collisions
-    in current data are tolerated. Identity work deferred to sub-phase 2c-c-4.
-    """
+    """Single preset definition (2c-c-1 baseline; 2c-c-4 added `id`)."""
 
     model_config = ConfigDict(extra="forbid")
 
+    id: str = Field(..., pattern=ID_PATTERN)
     group: str
     name: str
     description: str
@@ -29,13 +36,26 @@ class EncoderPreset(BaseModel):
 
 
 class EncoderLibrary(BaseModel):
-    """Top-level envelope for assets/Encoder.json.
+    """Top-level envelope for encoder library JSON.
 
-    schema_version pinned to Literal[1]; bumping requires a separate
-    migration commit, not an in-place edit.
+    schema_version=2 (sub-phase 2c-c-4): id field required on every preset.
+    Library-level uniqueness validation enforces ids are unique across
+    presets list.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     presets: list[EncoderPreset]
+
+    @model_validator(mode="after")
+    def _ids_unique(self) -> "EncoderLibrary":
+        seen: dict[str, int] = {}
+        for idx, preset in enumerate(self.presets):
+            if preset.id in seen:
+                raise ValueError(
+                    f"Duplicate preset id '{preset.id}' at indices "
+                    f"{seen[preset.id]} and {idx}"
+                )
+            seen[preset.id] = idx
+        return self
