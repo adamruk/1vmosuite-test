@@ -157,9 +157,7 @@ When drafting a prompt **for the user to paste into Claude Code**, the user expe
 
 ## 10. Observations canon
 
-Observations canon lives in `docs/ROADMAP.md`. Surface new ones there with the next available letter (W next). Never add to CLAUDE.md.
-
-Current canon: A, C, D, F, H, I, J, K, L, M, N, O, P, Q, S, T, U (Fixed in 2c-b), V. Letters B, E, G, R are reserved and must not be reused.
+Observations canon lives in `docs/ROADMAP.md`. New observations are added there, not here.
 
 ---
 

@@ -31,7 +31,6 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 | Phase | Scope summary | Est | Detail |
 |---|---|---|---|
 | **2c-c-6** | Mac-compat pass: platform-aware path handling, bundled macOS ffmpeg. | 5-8 hrs | `PHASE_2C_PLAN.md` |
-| **Observation V fix** | RenderWorker codec-append gotcha. Standalone commit with reproduction script. | 3-5 hrs | `PHASE_2C_PLAN.md` |
 | **2d** | PyQt5 → PySide6 migration. Mac-quality-forced for current team. PySide6 6.9.1 target (not 6.9.2). 30-line `core/_qt.py` scaffold, libcst rewriter, Nuitka packaging. | 3-4 weeks | Playbook TBD |
 
 **Phase 2 done = all rows above shipped.** Estimate: ~100-155 hours solo. At 6 hrs/day × 5 days = 3-5 calendar weeks. At 4 hrs/day × 5 days = 5-8 weeks.
@@ -72,7 +71,7 @@ Items surfaced during scoped work but NOT fixed in scope (per CLAUDE.md §6). St
 | L | `EncoderDialog` returns `dict`, not `Preset` | 2026-04 | Open, backlog |
 | M | Progress dialect harmonization (`legacy_stderr` vs `progress_pipe`) across apps | 2026-04 | Open, backlog |
 | N | Python 3.13 + PyQt5 time bomb | 2026-04 | Open, scheduled Phase 2d |
-| O | Frozen `.exe` behavior unvalidated | 2026-04 | Open, backlog |
+| O | Frozen `.exe` behavior unvalidated | 2026-04 | **Fixed in 2c-c-3** (`86edaa4`) — all 5 user-state writes routed through `core/atomic_write.py` + `core/user_data.py` (platformdirs default, portable.txt opt-in); silent PermissionError under Program Files installs no longer possible |
 | P | `merge.py` `_RunnerHandle` sentinel cleanup (compatibility shim added during Phase 2a) | 2026-04 | Open, backlog |
 | Q | `auto_render.py` cancel unvalidated | 2026-04 | Open, backlog |
 | S | `EncoderDialog` loses `details` field on edit | 2026-04 | Open, backlog |

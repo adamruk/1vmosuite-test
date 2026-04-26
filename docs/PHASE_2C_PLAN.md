@@ -16,23 +16,9 @@ Pre-requisite for 2c-c-1: a **small audit** of Observation-U-affected presets (~
 
 ---
 
-## Pre-2c-c-1: small audit
+## Pre-2c-c-1: small audit — WAIVED 2026-04-26
 
-**Why small, not full.** Full 111-preset audit was scoped for the broader Phase 2c-e Part B work (backlog). For Phase 2 done, we only need to know which presets Observation V affects so the 2c-c schema and Observation V fix are both well-scoped.
-
-**Scope.** Spreadsheet at `docs/planning/observation-u-blast-radius.md`:
-- `id` — current preset identifier
-- `group` — current group
-- `codec` — video codec from params (libx265, h264_nvenc, hevc_nvenc, or none)
-- `audio_mode` — copy / re-encode / strip
-- `observation_u_affected` — Y/N
-- `notes`
-
-**Target.** All 111 entries, but only the codec/audio columns need careful attention. Fast pass. 2-3 hours.
-
-**Pass criterion.** Spreadsheet complete. Blast radius enumerated (count of affected presets + which groups). Ships as own commit before 2c-c-1.
-
-**Deferred to backlog.** Factoring-pattern analysis, kitchen-sink flagging, zoom-cycle pattern categorization — all part of the larger 2c-e Part B audit when picked up.
+Audit was scoped pre-2c-c-1 to enumerate Observation-U-affected presets. Observation U was fixed in Phase 2c-b (commit `57564fe`) before 2c-c-1 began, so the audit premise no longer applies. 2c-c-1 shipped without the audit. Full preset audit remains backlog (2c-e Part B).
 
 ---
 
@@ -107,9 +93,9 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 ### 2c-c-6 — Mac-compat pass (5-8 hrs, Mac)
 
 **Scope.**
-- `core/user_data.py`: `sys.platform == 'darwin'` branch resolves to either bundled-app-relative `./UserData/` (if writable) or `~/Library/Application Support/1vmo/UserData/` fallback. Linux raises `NotImplementedError`.
-- Bundled macOS ffmpeg binary (or PATH-resolved — decide with Mac teammates during sub-phase).
-- Retry loop in `atomic_write.py` unchanged — Spotlight indexing occasionally causes transient `EBUSY`; existing backoff handles it.
+- Cross-platform path resolution already shipped in 2c-c-2 via `platformdirs` (see ADR-0005). macOS resolves to `~/Library/Application Support/1vmo-suite/`; Linux to `~/.local/share/1vmo-suite/`. No new code in `core/user_data.py` for this sub-phase — verify behavior on actual Mac hardware.
+- Bundled macOS ffmpeg binary decision (bundled-arm64 vs PATH-resolved) — pick during sub-phase with Junaid (per memory rule #15: M4 Pro, no NVIDIA).
+- Retry loop in `core/atomic_write.py` unchanged — Spotlight indexing occasionally causes transient EBUSY; existing 5-retry backoff handles it.
 - NVENC-requiring presets show non-blocking info message on Mac ("this preset uses NVENC, unavailable on this platform").
 
 **Acceptance.**
@@ -120,8 +106,6 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 - Both Mac teammates confirm launch + basic render.
 
 **Tag:** `v2c-c-complete`.
-
-**Note (2026-04-26, per ADR-0005):** As of 2c-c-2, `core/user_data.py` uses platformdirs for cross-platform path resolution. The macOS branch is already handled. 2c-c-6 reduces in scope to verifying behavior on actual Mac hardware (Junaid's machine) rather than implementing a new darwin-specific code path.
 
 ### Phase 2d — PyQt5 → PySide6 migration (3-4 weeks, ~80-120 hrs)
 
@@ -178,7 +162,7 @@ Target: **6 hrs/day × 5 days/week** for sustainable solo pace. Evidence: Cal Ne
 ## Completion criteria
 
 All of:
-1. Tags exist: `v2c-c-1`, `v2c-c-2`, `v2c-c-3`, Observation V fix commit, `v2c-c-complete`, `v2d-complete`.
+1. Tags exist: `v2c-c-1`, `v2c-c-2`, `v2c-c-3`, `v2c-c-complete`, `v2d-complete`. Observation V fix shipped untagged via Path B (commit `c03433a`); see "Status update (2026-04-23)" in the Observation V fix section.
 2. All 111 presets load, validate, render correctly on Windows + Mac.
 3. All 4 apps run on PySide6 with no PyQt5 imports remaining.
 4. Observation V marked Fixed in ROADMAP.md with sha.
