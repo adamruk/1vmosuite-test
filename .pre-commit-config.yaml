@@ -39,3 +39,10 @@ repos:
         entry: python scripts/adr_lint.py
         language: system
         files: ^docs/decisions/ADR-.*\.md$
+      - id: check-changelog
+        name: CHANGELOG entry required for source changes
+        entry: python scripts/check_changelog.py
+        language: system
+        stages: [commit-msg]
+        pass_filenames: false
+        always_run: true

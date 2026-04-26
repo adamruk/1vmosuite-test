@@ -1,0 +1,23 @@
+=== check_changelog.py smoke (sub-phase: hook-changelog) ===
+Platform: win32
+
+[Source w/o CHANGELOG blocks]
+  PASS: source-without-changelog correctly blocked
+
+[Source w/ CHANGELOG passes]
+  PASS: source+CHANGELOG passes
+
+[[skip changelog] marker passes]
+  PASS: [skip changelog] bypass works
+
+[Pure docs passes]
+  PASS: pure-docs commit passes
+
+[Merge commit passes]
+  PASS: merge commit bypassed
+
+[requirements.txt triggers (D2 verify)]
+  PASS: requirements.txt classified as SOURCE
+
+=== 6/6 tests passed ===
+PASS: check_changelog hook works end-to-end

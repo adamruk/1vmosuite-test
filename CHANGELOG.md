@@ -95,6 +95,9 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `tests/smoke-2c-c-3-retry-20260426.log`: pytest output. [86edaa4] [v2c-c-3]
 - `requirements.txt`: `pytest>=8.0,<9` added per ADR-0003 ("pytest lives in requirements.txt"). [86edaa4] [v2c-c-3]
 - `docs/ROADMAP.md`: Observation W added — logging.basicConfig CWD-relative video_*.log fragility in cutter/merge/mixer. Deferred per D2=b. [86edaa4] [v2c-c-3]
+- `scripts/check_changelog.py` + `.pre-commit-config.yaml` local hook entry: pre-commit framework variant of the existing `.claude/hooks/check-changelog.sh` enforcement (defense-in-depth, D1=a). Fires on every `git commit` regardless of who issues it; the Bash hook only fired on Claude Code commits. SOURCE-vs-NOT-SOURCE path classification (D2) exempts pure-docs/governance commits from the rule. Bypass via `[skip changelog]` literal in commit message body. Stage: `commit-msg`. [TBD] [hook-changelog]
+- `tools/test_check_changelog.py`: tempdir-based manual smoke validator with 6 scenarios — source-blocks / source+CHANGELOG-passes / [skip changelog]-bypasses / pure-docs-passes / merge-commit-passes / requirements.txt-triggers (D2 path verification). Aligned with ADR-0001 (smoke logs only). [TBD] [hook-changelog]
+- `tests/smoke-hook-changelog-20260426.log`: 6/6 PASS smoke output. [TBD] [hook-changelog]
 
 ### Changed
 - Phase 2a: shared code extracted into `core/` package across five sub-phases — `core/config.py` (2a/1), `core/file_picker.py` (2a/2), `core/widgets.py` (2a/3), `core/preset_loader.py` (2a/4), `core/ffmpeg_runner.py` (2a/5a + 5b: binary resolution + subprocess lifecycle). Pure internal refactor, no user-visible behavior change. Enables Phase 2c JSON preset migration and Phase 2d PyQt5→PySide6 migration without per-app drift. Tag `phase-2a-complete` at `3731230`. [9f5eeab] [bf6f968] [106e8b1] [a56e10c] [7b30a87] [8d26072]
