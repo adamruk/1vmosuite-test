@@ -4,6 +4,8 @@
 
 **Date:** 2026-04-19
 
+**Decision makers:** Adam (project lead)
+
 **Context:** Phase 2 roadmap exists (`docs/PHASE_2_ROADMAP.md`). External planning session produced a heavier alternative plan. This ADR records the decision to keep the existing roadmap as authoritative and explains why.
 
 ## Context

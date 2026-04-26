@@ -91,7 +91,6 @@ class RenderWorker(QObject):
 
     def process(self):
         current_input = self.video_path
-        current_output = None
         final_output = None
         try:
             for i, (encoder_name, encoder_params) in enumerate(
@@ -173,10 +172,9 @@ class RenderWorker(QObject):
                     if current_input != self.video_path:
                         try:
                             os.remove(current_input)
-                        except:
+                        except OSError:
                             pass
                     current_input = output_file
-                    current_output = output_file
                     if i == len(self.encoder_names) - 1:
                         final_output = output_filename
                 else:
@@ -1157,7 +1155,6 @@ class VideoRendererTool(QMainWindow):
         if not self.is_rendering:
             return
         worker = self.sender()
-        original_filename = os.path.basename(worker.video_path)
         output_path = os.path.join(self.output_directory, output_filename)
         resolution = self.get_video_resolution(output_path)
         duration = self.get_video_duration(output_path)
@@ -1216,7 +1213,6 @@ class VideoRendererTool(QMainWindow):
         )
         worker = self.sender()
         if worker:
-            original_filename = os.path.basename(worker.video_path)
             encoder_name = (
                 worker.encoder_names[0] if worker.encoder_names else "Loading..."
             )

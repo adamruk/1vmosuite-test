@@ -2,6 +2,10 @@
 
 **Status:** Accepted (2026-04-23). Partially supersedes ADR-0002 (platform-scope clauses only).
 
+**Date:** 2026-04-23
+
+**Decision makers:** Adam (project lead)
+
 **Context:**
 
 ADR-0002 (Product trajectory: personal use, Windows only, commercial not currently planned) was committed on 2026-04-22 as part of Phase 2 governance. The platform-scope clause read: "Target platform: Windows only. macOS / Linux support is not planned. The bundled FFmpeg is Windows-only and the encoder pipeline assumes NVENC."

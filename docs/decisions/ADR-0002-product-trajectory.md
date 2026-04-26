@@ -1,7 +1,7 @@
 # ADR-0002: Product Trajectory — Team-Internal, Commercial Not Currently Planned
 
 **Status:** Accepted (2026-04-22). Platform-scope clause partially superseded by ADR-0004 (2026-04-23) — Apple Silicon Mac added to targets. All other clauses remain in force.
-**Date:** 2026-04-21
+**Date:** 2026-04-22
 **Decision makers:** Adam (project lead)
 **Supersedes:** none
 
@@ -102,3 +102,7 @@ Write a superseding ADR if:
 - `PHASE_2C_PLAN.md` — Phase 2 execution sized to team-internal requirements.
 
 This ADR records a framing decision, not a technical decision. Subsequent technical ADRs may reference it to justify scope.
+
+## Revision History
+
+- 2026-04-27: Reconciled Date field with Status line (was 2026-04-21; canonical date is 2026-04-22 per Status). [B-002]
