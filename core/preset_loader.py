@@ -3,6 +3,7 @@
 Currently used only by auto_render.py. The other 3 apps use hardcoded
 ffmpeg parameters and do not parse Encoder.txt.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -23,16 +24,17 @@ class Preset:
     form '{group}|{name}'. Use .full_name when that exact form is needed
     (e.g., comparing against persisted self.selected_encoders strings).
     """
-    group: str            # column 1, may be '' for ungrouped
-    name: str             # column 2, required non-empty
-    description: str      # column 3
-    details: str          # column 4, may be ''
-    params: tuple[str, ...]   # column 5, whitespace-tokenized
+
+    group: str  # column 1, may be '' for ungrouped
+    name: str  # column 2, required non-empty
+    description: str  # column 3
+    details: str  # column 4, may be ''
+    params: tuple[str, ...]  # column 5, whitespace-tokenized
 
     @property
     def full_name(self) -> str:
         """Concatenated '{group}|{name}' form used historically."""
-        return f'{self.group}|{self.name}'
+        return f"{self.group}|{self.name}"
 
 
 def load_presets(
@@ -56,35 +58,44 @@ def load_presets(
     presets: list[Preset] = []
     if not path.exists():
         return presets
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, "r", encoding="utf-8") as f:
         for line_number, raw_line in enumerate(f, start=1):
             try:
                 if raw_line.strip():
-                    parts = raw_line.strip().rsplit('|', 1)
+                    parts = raw_line.strip().rsplit("|", 1)
                     if len(parts) != 2:
-                        _report(on_error, line_number, raw_line.strip(), 'no pipe separator')
+                        _report(
+                            on_error, line_number, raw_line.strip(), "no pipe separator"
+                        )
                         continue
-                    header_parts = parts[0].split('|', 3)
+                    header_parts = parts[0].split("|", 3)
                     if len(header_parts) < 3:
-                        _report(on_error, line_number, raw_line.strip(), 'fewer than 3 header parts')
+                        _report(
+                            on_error,
+                            line_number,
+                            raw_line.strip(),
+                            "fewer than 3 header parts",
+                        )
                         continue
                     group = header_parts[0].strip()
                     name = header_parts[1].strip()
                     description = header_parts[2].strip()
-                    details = header_parts[3].strip() if len(header_parts) > 3 else ''
+                    details = header_parts[3].strip() if len(header_parts) > 3 else ""
                     code = parts[1].strip()
                     if not name:
-                        _report(on_error, line_number, raw_line.strip(), 'empty name')
+                        _report(on_error, line_number, raw_line.strip(), "empty name")
                         continue
-                    presets.append(Preset(
-                        group=group,
-                        name=name,
-                        description=description,
-                        details=details,
-                        params=tuple(code.split()),
-                    ))
+                    presets.append(
+                        Preset(
+                            group=group,
+                            name=name,
+                            description=description,
+                            details=details,
+                            params=tuple(code.split()),
+                        )
+                    )
             except Exception as e:
-                _report(on_error, line_number, raw_line.strip(), f'exception: {str(e)}')
+                _report(on_error, line_number, raw_line.strip(), f"exception: {str(e)}")
                 continue
     return presets
 
@@ -101,15 +112,15 @@ def _report(
     if on_error is not None:
         on_error(line_num, line, reason)
         return
-    if reason in ('no pipe separator', 'fewer than 3 header parts'):
-        print(f'Skipping invalid encoder option at line {line_num}: {line}')
-    elif reason == 'empty name':
-        print(f'Skipping encoder option with empty name at line {line_num}')
-    elif reason.startswith('exception: '):
-        exc = reason[len('exception: '):]
-        print(f'Error parsing line {line_num}: {exc}')
+    if reason in ("no pipe separator", "fewer than 3 header parts"):
+        print(f"Skipping invalid encoder option at line {line_num}: {line}")
+    elif reason == "empty name":
+        print(f"Skipping encoder option with empty name at line {line_num}")
+    elif reason.startswith("exception: "):
+        exc = reason[len("exception: ") :]
+        print(f"Error parsing line {line_num}: {exc}")
     else:
-        print(f'[preset_loader] line {line_num}: {reason}')
+        print(f"[preset_loader] line {line_num}: {reason}")
 
 
 def group_presets(presets: list[Preset]) -> dict[str, list[Preset]]:
@@ -150,7 +161,7 @@ def load_presets_json(path: Path) -> list[Preset]:
     if not path.exists():
         return []
 
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, "r", encoding="utf-8") as f:
         try:
             data = json.load(f)
         except json.JSONDecodeError as e:
@@ -164,39 +175,43 @@ def load_presets_json(path: Path) -> list[Preset]:
         raise ValueError(
             f"Encoder JSON root must be an object, got {type(data).__name__}"
         )
-    if data.get('schema_version') != SCHEMA_VERSION:
+    if data.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(
             f"Encoder JSON schema_version is {data.get('schema_version')!r}, "
             f"expected {SCHEMA_VERSION}. Explicit migration required."
         )
-    if not isinstance(data.get('presets'), list):
+    if not isinstance(data.get("presets"), list):
         raise ValueError(
             f"Encoder JSON 'presets' key must be a list, "
             f"got {type(data.get('presets')).__name__}"
         )
 
     presets: list[Preset] = []
-    required_fields = ('group', 'name', 'description', 'details', 'params')
-    for i, entry in enumerate(data['presets']):
+    required_fields = ("group", "name", "description", "details", "params")
+    for i, entry in enumerate(data["presets"]):
         if not isinstance(entry, dict):
             raise ValueError(
                 f"Preset at index {i} must be an object, got {type(entry).__name__}"
             )
         for field in required_fields:
             if field not in entry:
-                raise ValueError(f"Preset at index {i} missing required field {field!r}")
-        if not isinstance(entry['params'], list):
+                raise ValueError(
+                    f"Preset at index {i} missing required field {field!r}"
+                )
+        if not isinstance(entry["params"], list):
             raise ValueError(
                 f"Preset at index {i}: 'params' must be a list, "
                 f"got {type(entry['params']).__name__}"
             )
-        presets.append(Preset(
-            group=entry['group'],
-            name=entry['name'],
-            description=entry['description'],
-            details=entry['details'],
-            params=tuple(entry['params']),
-        ))
+        presets.append(
+            Preset(
+                group=entry["group"],
+                name=entry["name"],
+                description=entry["description"],
+                details=entry["details"],
+                params=tuple(entry["params"]),
+            )
+        )
     return presets
 
 
@@ -212,15 +227,15 @@ def save_presets_json(path: Path, presets: list[Preset]) -> None:
     failure the .tmp is cleaned up; original file never partially overwritten.
     Directory fsync deliberately omitted — not justified for desktop app.
     """
-    tmp_path = path.with_suffix(path.suffix + '.tmp')
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
     payload = {
-        'schema_version': SCHEMA_VERSION,
-        'presets': [asdict(p) for p in presets],
+        "schema_version": SCHEMA_VERSION,
+        "presets": [asdict(p) for p in presets],
     }
     try:
-        with open(tmp_path, 'w', encoding='utf-8', newline='\n') as f:
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=False)
-            f.write('\n')
+            f.write("\n")
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_path, path)

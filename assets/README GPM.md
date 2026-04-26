@@ -39,4 +39,4 @@ Shows information about processed profiles:
 1. Always check profile status before posting
 2. Wait for profile activation to complete
 3. Monitor log window for operation status
-4. Check result list for detailed information 
+4. Check result list for detailed information

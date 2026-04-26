@@ -1,4 +1,5 @@
 """Shared QFileDialog wrappers for 1vmo Suite apps."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -6,12 +7,12 @@ from typing import Optional
 from PyQt5.QtWidgets import QFileDialog, QWidget
 
 # Named filter constants — keep in sync with dialog titles users see.
-VIDEO_FILTER = 'Video Files (*.mp4 *.avi *.mkv)'
+VIDEO_FILTER = "Video Files (*.mp4 *.avi *.mkv)"
 MEDIA_FILTER = (
-    'Media Files (*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm '
-    '*.jpg *.jpeg *.png *.bmp *.gif *.tiff)'
+    "Media Files (*.mp4 *.avi *.mkv *.mov *.wmv *.flv *.webm "
+    "*.jpg *.jpeg *.png *.bmp *.gif *.tiff)"
 )
-AUDIO_FILTER = 'Audio Files (*.mp3 *.wav *.m4a *.aac *.ogg *.flac *.wma)'
+AUDIO_FILTER = "Audio Files (*.mp3 *.wav *.m4a *.aac *.ogg *.flac *.wma)"
 
 
 def pick_files(

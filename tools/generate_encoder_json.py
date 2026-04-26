@@ -29,6 +29,7 @@ byte-identical Encoder.json. Any non-determinism is a bug.
 Parse skips are FATAL: load_presets() defaults to print()ing on skip, which
 would silently drop presets. This tool passes a callback that raises SystemExit.
 """
+
 from __future__ import annotations
 
 import sys
@@ -42,25 +43,31 @@ if str(_REPO_ROOT) not in sys.path:
 from core import preset_loader  # noqa: E402
 
 
-ENCODER_TXT = _REPO_ROOT / 'assets' / 'Encoder.txt'
-ENCODER_JSON = _REPO_ROOT / 'assets' / 'Encoder.json'
+ENCODER_TXT = _REPO_ROOT / "assets" / "Encoder.txt"
+ENCODER_JSON = _REPO_ROOT / "assets" / "Encoder.json"
 
 
 # Text defaults — verbatim from auto_render.py lines 512-525. DO NOT EDIT.
 TEXT_DEFAULTS = [
     preset_loader.Preset(
-        group='Text',
-        name='Text Bottom Basic',
-        description='Thêm chữ ở dưới với nền đen mờ',
-        details='Thêm chữ ở dưới video với nền đen mờ, font Arial, size 35px',
-        params=('-vf', "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"),
+        group="Text",
+        name="Text Bottom Basic",
+        description="Thêm chữ ở dưới với nền đen mờ",
+        details="Thêm chữ ở dưới video với nền đen mờ, font Arial, size 35px",
+        params=(
+            "-vf",
+            "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10",
+        ),
     ),
     preset_loader.Preset(
-        group='Text',
-        name='Text Top Basic',
-        description='Thêm chữ ở trên với nền đen mờ',
-        details='Thêm chữ ở trên video với nền đen mờ, font Arial, size 35px',
-        params=('-vf', "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/15:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"),
+        group="Text",
+        name="Text Top Basic",
+        description="Thêm chữ ở trên với nền đen mờ",
+        details="Thêm chữ ở trên video với nền đen mờ, font Arial, size 35px",
+        params=(
+            "-vf",
+            "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/15:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10",
+        ),
     ),
 ]
 
@@ -97,9 +104,11 @@ def main() -> int:
     ENCODER_JSON.parent.mkdir(parents=True, exist_ok=True)
     preset_loader.save_presets_json(ENCODER_JSON, all_presets)
 
-    print(f"Wrote {ENCODER_JSON} with {len(all_presets)} presets (schema v{preset_loader.SCHEMA_VERSION})")
+    print(
+        f"Wrote {ENCODER_JSON} with {len(all_presets)} presets (schema v{preset_loader.SCHEMA_VERSION})"
+    )
     return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

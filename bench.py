@@ -54,6 +54,7 @@ def _find_executable(name: str) -> Optional[Path]:
     if local.is_file():
         return local
     from shutil import which
+
     hit = which(name)
     return Path(hit) if hit else None
 
@@ -69,15 +70,24 @@ def _sanitize_label(text: str) -> str:
 
 def _probe_input(ffprobe: Path, video: Path) -> dict:
     cmd = [
-        str(ffprobe), "-v", "error",
-        "-show_entries", "format=duration,bit_rate",
-        "-show_entries", "stream=codec_type,codec_name,width,height",
-        "-of", "json",
+        str(ffprobe),
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration,bit_rate",
+        "-show_entries",
+        "stream=codec_type,codec_name,width,height",
+        "-of",
+        "json",
         str(video),
     ]
     result = subprocess.run(
-        cmd, capture_output=True, text=True,
-        creationflags=_creationflags(), check=True, timeout=30,
+        cmd,
+        capture_output=True,
+        text=True,
+        creationflags=_creationflags(),
+        check=True,
+        timeout=30,
     )
     data = json.loads(result.stdout)
     video_stream = next(
@@ -103,8 +113,11 @@ def _probe_input(ffprobe: Path, video: Path) -> dict:
 def _ffmpeg_version(ffmpeg: Path) -> str:
     result = subprocess.run(
         [str(ffmpeg), "-version"],
-        capture_output=True, text=True,
-        creationflags=_creationflags(), check=False, timeout=10,
+        capture_output=True,
+        text=True,
+        creationflags=_creationflags(),
+        check=False,
+        timeout=10,
     )
     combined = (result.stdout or "") + (result.stderr or "")
     first = combined.splitlines()[0] if combined.strip() else ""
@@ -122,9 +135,12 @@ def _run_encode(
 ) -> Tuple[float, int, Optional[str]]:
     cmd = [
         str(ffmpeg),
-        "-hide_banner", "-y",
-        "-progress", "pipe:1",
-        "-i", str(input_file),
+        "-hide_banner",
+        "-y",
+        "-progress",
+        "pipe:1",
+        "-i",
+        str(input_file),
         *preset_args_list,
         str(output_file),
     ]
@@ -141,8 +157,12 @@ def _run_encode(
 
     stdout_lines: list = []
     stderr_lines: list = []
-    t_out = threading.Thread(target=_drain, args=(proc.stdout, stdout_lines), daemon=True)
-    t_err = threading.Thread(target=_drain, args=(proc.stderr, stderr_lines), daemon=True)
+    t_out = threading.Thread(
+        target=_drain, args=(proc.stdout, stdout_lines), daemon=True
+    )
+    t_err = threading.Thread(
+        target=_drain, args=(proc.stderr, stderr_lines), daemon=True
+    )
 
     start = time.perf_counter()
     t_out.start()
@@ -184,19 +204,32 @@ def _run_vmaf(
         cmd = [
             str(ffmpeg),
             "-hide_banner",
-            "-i", str(distorted),
-            "-i", str(reference),
-            "-lavfi", filter_str,
-            "-f", "null", "-",
+            "-i",
+            str(distorted),
+            "-i",
+            str(reference),
+            "-lavfi",
+            filter_str,
+            "-f",
+            "null",
+            "-",
         ]
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
-            creationflags=_creationflags(), timeout=1800,
-            encoding="utf-8", errors="replace",
+            cmd,
+            capture_output=True,
+            text=True,
+            creationflags=_creationflags(),
+            timeout=1800,
+            encoding="utf-8",
+            errors="replace",
         )
         if result.returncode != 0:
             stderr = (result.stderr or "").strip()
-            tail = stderr.splitlines()[-1] if stderr else f"libvmaf exited {result.returncode}"
+            tail = (
+                stderr.splitlines()[-1]
+                if stderr
+                else f"libvmaf exited {result.returncode}"
+            )
             return {}, tail
         if not log_path.is_file():
             return {}, "libvmaf produced no log file"
@@ -230,14 +263,18 @@ def _gpu_via_nvidia_smi() -> Optional[str]:
     try:
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
             creationflags=_creationflags(),
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     if result.returncode != 0:
         return None
-    lines = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+    lines = [
+        line.strip() for line in (result.stdout or "").splitlines() if line.strip()
+    ]
     return lines[0] if lines else None
 
 
@@ -316,23 +353,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         ),
     )
     parser.add_argument(
-        "--input", required=True, type=Path,
+        "--input",
+        required=True,
+        type=Path,
         help="Path to input video file",
     )
     parser.add_argument(
-        "--preset-args", required=True,
+        "--preset-args",
+        required=True,
         help=(
-            'Ffmpeg argument string between input and output. The tool '
+            "Ffmpeg argument string between input and output. The tool "
             'prepends "-progress pipe:1 -i <input>" and appends an output '
             'filename. Example: "-c:v libx264 -preset medium -crf 20 -c:a copy"'
         ),
     )
     parser.add_argument(
-        "--mode", choices=["quick", "full"], default="quick",
+        "--mode",
+        choices=["quick", "full"],
+        default="quick",
         help="quick: wall-clock + size (~10s overhead). full: adds VMAF (~60s overhead). (default: quick)",
     )
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("./bench_results"),
+        "--output-dir",
+        type=Path,
+        default=Path("./bench_results"),
         help="Directory for encoded outputs and JSON result (default: ./bench_results/)",
     )
     parser.add_argument(
@@ -340,7 +384,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Human-readable name for this run. Used in filenames and JSON. (default: derived from --preset-args)",
     )
     parser.add_argument(
-        "--runs", type=int, default=1,
+        "--runs",
+        type=int,
+        default=1,
         help="Number of times to run the benchmark. Results are averaged, stddev reported when >1. (default: 1)",
     )
     args = parser.parse_args(argv)
@@ -370,7 +416,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     for run_idx in range(1, args.runs + 1):
         output_file = args.output_dir / f"{label}__run{run_idx}.mkv"
         elapsed, output_bytes, error = _run_encode(
-            ffmpeg, args.input, preset_args_list, output_file,
+            ffmpeg,
+            args.input,
+            preset_args_list,
+            output_file,
         )
 
         entry = {
@@ -397,21 +446,33 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     wall_values = [r["wall_clock_seconds"] for r in run_results]
     size_values = [r["output_bytes"] for r in run_results]
-    vmaf_mean_values = [r["vmaf_mean"] for r in run_results if r["vmaf_mean"] is not None]
+    vmaf_mean_values = [
+        r["vmaf_mean"] for r in run_results if r["vmaf_mean"] is not None
+    ]
     vmaf_p5_values = [r["vmaf_p5"] for r in run_results if r["vmaf_p5"] is not None]
 
     aggregate = {
         "wall_clock_mean": statistics.mean(wall_values),
-        "wall_clock_stddev": statistics.stdev(wall_values) if len(wall_values) > 1 else 0.0,
+        "wall_clock_stddev": statistics.stdev(wall_values)
+        if len(wall_values) > 1
+        else 0.0,
         "output_bytes_mean": statistics.mean(size_values),
-        "vmaf_mean_avg": statistics.mean(vmaf_mean_values) if vmaf_mean_values else None,
+        "vmaf_mean_avg": statistics.mean(vmaf_mean_values)
+        if vmaf_mean_values
+        else None,
         "vmaf_p5_avg": statistics.mean(vmaf_p5_values) if vmaf_p5_values else None,
     }
 
     ffmpeg_command_display = " ".join(
         [
-            str(ffmpeg), "-hide_banner", "-y", "-progress", "pipe:1",
-            "-i", str(args.input), *preset_args_list,
+            str(ffmpeg),
+            "-hide_banner",
+            "-y",
+            "-progress",
+            "pipe:1",
+            "-i",
+            str(args.input),
+            *preset_args_list,
             f"{label}__run<N>.mkv",
         ]
     )

@@ -40,4 +40,4 @@ Hiển thị thông tin của các file đã xử lý:
 - Trạng thái xử lý:
   - 🟡 Processing: Đang xử lý
   - 🟢 Completed: Hoàn thành
-  - 🔴 Error: Lỗi (kèm thông tin lỗi) 
+  - 🔴 Error: Lỗi (kèm thông tin lỗi)

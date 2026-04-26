@@ -9,9 +9,9 @@ all use the same bundled FFmpeg binary location pattern; this module
 consolidates that. bench.py keeps its own Popen for v1 — only ffprobe
 helpers migrate from it.
 """
+
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -22,19 +22,21 @@ from typing import Any, Callable, Literal, Optional
 
 # ========== Binary resolution ==========
 
+
 def resolve_binaries(script_dir: Path) -> tuple[Path, Path]:
     """Return (ffmpeg_path, ffprobe_path) from the bundled ffmpeg/ subdirectory.
 
     Picks .exe suffix on Windows, no suffix elsewhere. Identical pattern to
     the literal form previously duplicated across all four apps + gpu_detect.
     """
-    suffix = '.exe' if os.name == 'nt' else ''
-    ffmpeg = script_dir / 'ffmpeg' / f'ffmpeg{suffix}'
-    ffprobe = script_dir / 'ffmpeg' / f'ffprobe{suffix}'
+    suffix = ".exe" if os.name == "nt" else ""
+    ffmpeg = script_dir / "ffmpeg" / f"ffmpeg{suffix}"
+    ffprobe = script_dir / "ffmpeg" / f"ffprobe{suffix}"
     return ffmpeg, ffprobe
 
 
 # ========== Windows hide-window helpers ==========
+
 
 def hidden_startupinfo() -> Any:
     """Return a STARTUPINFO that hides the FFmpeg console window on Windows.
@@ -42,7 +44,7 @@ def hidden_startupinfo() -> Any:
     Returns None on non-Windows platforms. Used as the startupinfo= kwarg
     to subprocess.Popen / subprocess.run.
     """
-    if os.name != 'nt':
+    if os.name != "nt":
         return None
     si = subprocess.STARTUPINFO()
     si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -56,12 +58,13 @@ def hidden_creationflags() -> int:
     Critical for PyInstaller --noconsole builds; without it, every FFmpeg
     invocation flashes a CMD window.
     """
-    if os.name != 'nt':
+    if os.name != "nt":
         return 0
     return subprocess.CREATE_NO_WINDOW
 
 
 # ========== Unified Popen kwargs (Phase 5b foundation) ==========
+
 
 def ffmpeg_popen_kwargs() -> dict[str, Any]:
     """Return uniform Popen kwargs for FFmpeg/ffprobe invocations.
@@ -79,17 +82,18 @@ def ffmpeg_popen_kwargs() -> dict[str, Any]:
     per dialect).
     """
     return {
-        'text': True,
-        'encoding': 'utf-8',
-        'errors': 'replace',
-        'bufsize': 1,
-        'stdin': subprocess.PIPE,
-        'startupinfo': hidden_startupinfo(),
-        'creationflags': hidden_creationflags(),
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "bufsize": 1,
+        "stdin": subprocess.PIPE,
+        "startupinfo": hidden_startupinfo(),
+        "creationflags": hidden_creationflags(),
     }
 
 
 # ========== ffprobe helpers ==========
+
 
 def probe_duration(ffprobe: Path, video: Path) -> float:
     """Return video duration in seconds via ffprobe. Returns 0.0 on probe failure.
@@ -98,12 +102,20 @@ def probe_duration(ffprobe: Path, video: Path) -> float:
     """
     try:
         result = subprocess.run(
-            [str(ffprobe), '-v', 'error', '-show_entries', 'format=duration',
-             '-of', 'default=noprint_wrappers=1:nokey=1', str(video)],
+            [
+                str(ffprobe),
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(video),
+            ],
             capture_output=True,
             text=True,
-            encoding='utf-8',
-            errors='replace',
+            encoding="utf-8",
+            errors="replace",
             startupinfo=hidden_startupinfo(),
             creationflags=hidden_creationflags(),
             timeout=30,
@@ -117,18 +129,27 @@ def probe_resolution(ffprobe: Path, video: Path) -> tuple[int, int]:
     """Return (width, height) via ffprobe. Returns (0, 0) on probe failure."""
     try:
         result = subprocess.run(
-            [str(ffprobe), '-v', 'error', '-select_streams', 'v:0',
-             '-show_entries', 'stream=width,height',
-             '-of', 'csv=s=x:p=0', str(video)],
+            [
+                str(ffprobe),
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=s=x:p=0",
+                str(video),
+            ],
             capture_output=True,
             text=True,
-            encoding='utf-8',
-            errors='replace',
+            encoding="utf-8",
+            errors="replace",
             startupinfo=hidden_startupinfo(),
             creationflags=hidden_creationflags(),
             timeout=30,
         )
-        parts = result.stdout.strip().split('x')
+        parts = result.stdout.strip().split("x")
         return (int(parts[0]), int(parts[1]))
     except (subprocess.SubprocessError, ValueError, OSError, IndexError):
         return (0, 0)
@@ -136,9 +157,9 @@ def probe_resolution(ffprobe: Path, video: Path) -> tuple[int, int]:
 
 # ========== Progress parsers (pure functions — easy to unit test) ==========
 
-_LEGACY_DURATION_RE = re.compile(r'Duration:\s*(\d{2}):(\d{2}):(\d{2})')
-_LEGACY_TIME_RE = re.compile(r'time=(\d{2}):(\d{2}):(\d{2})')
-_PROGRESS_PIPE_TIME_RE = re.compile(r'out_time_ms=(\d+)')
+_LEGACY_DURATION_RE = re.compile(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})")
+_LEGACY_TIME_RE = re.compile(r"time=(\d{2}):(\d{2}):(\d{2})")
+_PROGRESS_PIPE_TIME_RE = re.compile(r"out_time_ms=(\d+)")
 
 
 class _DurationTracker:
@@ -189,6 +210,7 @@ def _parse_progress_pipe_line(line: str, duration_seconds: float) -> Optional[in
 
 # ========== Cancel ladder (Windows-correct graceful stop) ==========
 
+
 def _cancel_ffmpeg(
     proc: subprocess.Popen,
     graceful_timeout: float = 8.0,
@@ -210,7 +232,7 @@ def _cancel_ffmpeg(
     # Step 1: graceful 'q'
     try:
         if proc.stdin is not None and not proc.stdin.closed:
-            proc.stdin.write('q\n')
+            proc.stdin.write("q\n")
             proc.stdin.flush()
             proc.stdin.close()
     except (OSError, BrokenPipeError, ValueError):
@@ -240,6 +262,7 @@ def _cancel_ffmpeg(
 
 # ========== Stderr drain (prevents pipe deadlock in progress_pipe mode) ==========
 
+
 def _drain_stream(
     stream,
     on_line: Optional[Callable[[str], None]],
@@ -254,7 +277,7 @@ def _drain_stream(
         for line in stream:
             if on_line is not None:
                 try:
-                    on_line(line.rstrip('\r\n'))
+                    on_line(line.rstrip("\r\n"))
                 except Exception:
                     pass  # caller's callback errors must not kill the drain
     except (OSError, ValueError):
@@ -263,7 +286,7 @@ def _drain_stream(
 
 # ========== The runner ==========
 
-Dialect = Literal['legacy_stderr', 'progress_pipe']
+Dialect = Literal["legacy_stderr", "progress_pipe"]
 
 
 def run_ffmpeg(
@@ -312,21 +335,21 @@ def run_ffmpeg(
     """
     # Build Popen kwargs from Phase 5a helper + dialect-specific stream wiring
     kwargs = ffmpeg_popen_kwargs()
-    if dialect == 'progress_pipe':
+    if dialect == "progress_pipe":
         # Progress blocks on stdout; stderr must be drained concurrently to
         # avoid pipe-buffer deadlock when ffmpeg writes warnings/errors.
-        kwargs['stdout'] = subprocess.PIPE
-        kwargs['stderr'] = subprocess.PIPE
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
     else:  # legacy_stderr
-        kwargs['stdout'] = subprocess.DEVNULL
-        kwargs['stderr'] = subprocess.PIPE
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.PIPE
 
     proc = subprocess.Popen(command, **kwargs)
     drain_thread: Optional[threading.Thread] = None
 
     try:
         # If progress_pipe, drain stderr in background
-        if dialect == 'progress_pipe' and proc.stderr is not None:
+        if dialect == "progress_pipe" and proc.stderr is not None:
             drain_thread = threading.Thread(
                 target=_drain_stream,
                 args=(proc.stderr, on_output_line),
@@ -335,12 +358,14 @@ def run_ffmpeg(
             drain_thread.start()
 
         # Choose primary stream and parser
-        if dialect == 'progress_pipe':
+        if dialect == "progress_pipe":
             primary_stream = proc.stdout
         else:
             primary_stream = proc.stderr
 
-        tracker = _DurationTracker(duration_seconds) if dialect == 'legacy_stderr' else None
+        tracker = (
+            _DurationTracker(duration_seconds) if dialect == "legacy_stderr" else None
+        )
         last_pct = -1
 
         if primary_stream is None:
@@ -353,7 +378,7 @@ def run_ffmpeg(
                 _cancel_ffmpeg(proc)
                 break
 
-            clean_line = line.rstrip('\r\n')
+            clean_line = line.rstrip("\r\n")
 
             # Emit raw line if requested (for console/log display).
             # In progress_pipe mode, stderr lines go via the drain thread;
@@ -365,7 +390,7 @@ def run_ffmpeg(
                     pass
 
             # Parse progress
-            if dialect == 'legacy_stderr':
+            if dialect == "legacy_stderr":
                 pct = _parse_legacy_line(line, tracker)
             else:
                 pct = _parse_progress_pipe_line(line, duration_seconds or 0.0)

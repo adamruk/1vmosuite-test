@@ -24,7 +24,7 @@
   - 16:9: Chuyển đổi sang tỷ lệ 16:9
   - 9:16: Chuyển đổi sang tỷ lệ 9:16
   - 1:1: Chuyển đổi sang tỷ lệ vuông
-- Video Ratio (khi chọn 2 video & Horizontal/Vertical): 
+- Video Ratio (khi chọn 2 video & Horizontal/Vertical):
   - Điều chỉnh tỷ lệ giữa video 1 và 2
   - Mặc định 5:5 (2 video bằng nhau)
 - Audio Source: Chọn nguồn âm thanh
@@ -75,4 +75,3 @@ Hiển thị thông tin của các file đã xử lý:
 - Tự động lưu cấu hình và đường dẫn cuối cùng
 - Hỗ trợ xử lý đa luồng (tối đa 3 luồng)
 - Tự động cập nhật phiên bản mới
-
