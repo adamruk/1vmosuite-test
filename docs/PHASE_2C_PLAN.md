@@ -58,14 +58,14 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 ### 2c-c-2 — Portable UserData + writable-install-dir guard (3-4 hrs, Windows)
 
 **Scope.**
-- `core/user_data.py` with `resolve_user_data_dir()`. Returns `./UserData/` alongside exe if writable.
-- On Program Files install, raise `PortableLocationError` with clear user-facing message.
-- `sys.platform == 'win32'` only; others raise `NotImplementedError` (2c-c-6 handles).
+- `core/user_data.py` with `resolve_user_data_dir()`. Returns platform-standard user data dir via platformdirs by default; opt-in portable mode via `portable.txt` sentinel returns `./UserData/` alongside exe.
+- In portable mode, raise `PortableLocationError` if install dir is under a Windows-protected location (Program Files, Windows, ProgramData) where writes would silently redirect via VirtualStore.
+- Cross-platform via platformdirs; no per-platform branching needed in this module. (See ADR-0005.)
 - No writes yet — pure resolution.
 
 **Acceptance.**
-- Writable directory returns `./UserData/`; Program Files path raises with clear message.
-- `tests/smoke/test_user_data_resolution.py` passes.
+- Default returns platformdirs user_data_path; portable.txt sentinel returns `./UserData/`; portable + protected dir raises PortableLocationError with clear message.
+- `tools/check_user_data.py` emits PASS to `tests/smoke-2c-c-2-userdata-YYYYMMDD.log` (manual-smoke per ADR-0001).
 
 **Tag:** `v2c-c-2`.
 
@@ -118,6 +118,8 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 - Both Mac teammates confirm launch + basic render.
 
 **Tag:** `v2c-c-complete`.
+
+**Note (2026-04-26, per ADR-0005):** As of 2c-c-2, `core/user_data.py` uses platformdirs for cross-platform path resolution. The macOS branch is already handled. 2c-c-6 reduces in scope to verifying behavior on actual Mac hardware (Junaid's machine) rather than implementing a new darwin-specific code path.
 
 ### Phase 2d — PyQt5 → PySide6 migration (3-4 weeks, ~80-120 hrs)
 

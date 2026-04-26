@@ -26,6 +26,7 @@ ffmpeg/ffprobe.exe
 
 # Runtime logs / user data
 *.log
+!tests/smoke-*.log
 
 # Runtime config files (written by apps on every close)
 config_video_renderer.json
