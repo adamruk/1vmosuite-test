@@ -648,33 +648,40 @@ class VideoRendererTool(QMainWindow):
 
     def load_encoder_options(self) -> List[core_preset_loader.Preset]:
         """Đọc các tùy chọn render từ file Encoder.txt và bỏ qua các dòng lỗi."""
-        presets = core_preset_loader.load_presets(self.ENCODER_FILE)
-        # App-specific defaults appended after file load — these are
-        # auto_render's own UI affordances, not part of Encoder.txt.
-        presets.append(
-            core_preset_loader.Preset(
-                group="Text",
-                name="Text Bottom Basic",
-                description="Thêm chữ ở dưới với nền đen mờ",
-                details="Thêm chữ ở dưới video với nền đen mờ, font Arial, size 35px",
-                params=(
-                    "-vf",
-                    "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10",
-                ),
+        if os.environ.get("ENCODER_USE_JSON") == "1":
+            # Dark-release path (sub-phase 2c-c-1).
+            # assets/Encoder.json already contains the 2 Text defaults
+            # (appended by tools/generate_encoder_json.py); do NOT re-append.
+            encoder_json_path = self.SCRIPT_DIR / "assets" / "Encoder.json"
+            presets = core_preset_loader.load_builtin_json(encoder_json_path)
+        else:
+            presets = core_preset_loader.load_presets(self.ENCODER_FILE)
+            # App-specific defaults appended after file load — these are
+            # auto_render's own UI affordances, not part of Encoder.txt.
+            presets.append(
+                core_preset_loader.Preset(
+                    group="Text",
+                    name="Text Bottom Basic",
+                    description="Thêm chữ ở dưới với nền đen mờ",
+                    details="Thêm chữ ở dưới video với nền đen mờ, font Arial, size 35px",
+                    params=(
+                        "-vf",
+                        "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10",
+                    ),
+                )
             )
-        )
-        presets.append(
-            core_preset_loader.Preset(
-                group="Text",
-                name="Text Top Basic",
-                description="Thêm chữ ở trên với nền đen mờ",
-                details="Thêm chữ ở trên video với nền đen mờ, font Arial, size 35px",
-                params=(
-                    "-vf",
-                    "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/15:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10",
-                ),
+            presets.append(
+                core_preset_loader.Preset(
+                    group="Text",
+                    name="Text Top Basic",
+                    description="Thêm chữ ở trên với nền đen mờ",
+                    details="Thêm chữ ở trên video với nền đen mờ, font Arial, size 35px",
+                    params=(
+                        "-vf",
+                        "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/15:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10",
+                    ),
+                )
             )
-        )
         return presets
 
     def select_videos(self):

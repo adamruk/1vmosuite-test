@@ -21,13 +21,13 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 - **Phase 2a** — `core/` extraction (`3731230`, tag `phase-2a-complete`).
 - **Phase 2c-a** — Encoder.json generation (`5fc1dc7`).
 - **Phase 2c-b** — preset_loader JSON I/O (`57564fe`).
+- **Phase 2c-c-1** — Pydantic schema + JSON dark release behind `ENCODER_USE_JSON` (`[hash-pending]`, tag `v2c-c-1`).
 - **Governance backfill** — CLAUDE.md + CHANGELOG backfill (`f08b08e`), self-referential hash-fill (`fa0763b`), CHANGELOG hook installation (`250668b`), hook hash-fill (`9537660`).
 
 ### Pending — blocking Phase 2 done
 
 | Phase | Scope summary | Est | Detail |
 |---|---|---|---|
-| **2c-c-1** | Pydantic schema + `encoder.builtin.json` generated, loaded behind `ENCODER_USE_JSON` env var. | 6-8 hrs | `PHASE_2C_PLAN.md` |
 | **2c-c-2** | `./UserData/` portable directory + writable-install-dir guard. | 3-4 hrs | `PHASE_2C_PLAN.md` |
 | **2c-c-3** | `encoder.user.json` writer: atomic `os.replace()` + `.bak` rotation + 5-retry backoff. | 5-7 hrs | `PHASE_2C_PLAN.md` |
 | **2c-c-6** | Mac-compat pass: platform-aware path handling, bundled macOS ffmpeg. | 5-8 hrs | `PHASE_2C_PLAN.md` |

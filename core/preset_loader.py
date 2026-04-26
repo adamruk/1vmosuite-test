@@ -246,3 +246,27 @@ def save_presets_json(path: Path, presets: list[Preset]) -> None:
             except OSError:
                 pass
         raise
+
+
+def load_builtin_json(path: Path) -> list[Preset]:
+    """Load and validate encoder presets from JSON via the Pydantic schema.
+
+    Read-only loader for the dark-release path (ENCODER_USE_JSON=1).
+    Validation failures raise pydantic.ValidationError.
+    Returns the existing Preset frozen-dataclass type so callers see the
+    same interface as load_presets() and load_presets_json().
+    """
+    from core.encoder_schema import EncoderLibrary
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    library = EncoderLibrary.model_validate(raw)
+    return [
+        Preset(
+            group=p.group,
+            name=p.name,
+            description=p.description,
+            details=p.details,
+            params=tuple(p.params),
+        )
+        for p in library.presets
+    ]

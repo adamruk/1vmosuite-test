@@ -44,14 +44,14 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 
 **Scope.**
 - `core/encoder_schema.py`: `EncoderPreset`, `EncoderLibrary` (`schema_version: int = 1`, `presets: list[EncoderPreset]`).
-- Regenerate `assets/encoder.builtin.json` via existing `tools/generate_encoder_json.py`.
+- Regenerate `assets/Encoder.json` via existing `tools/generate_encoder_json.py`.
 - Add `load_builtin_json()` to `core/preset_loader.py`.
 - Gate behind `ENCODER_USE_JSON=1` env var. Legacy `Encoder.txt` loader remains default. No UI or write changes.
 
 **Acceptance.**
 - `ENCODER_USE_JSON=1` launches with 111 presets from JSON; unset launches from `Encoder.txt`.
 - Load time within 100ms of legacy.
-- `tests/smoke/test_schema_validation.py` passes.
+- `tools/check_encoder_schema.py` emits PASS to `tests/smoke-2c-c-1-schema-YYYYMMDD.log` (manual-smoke per ADR-0001).
 
 **Tag:** `v2c-c-1`.
 
