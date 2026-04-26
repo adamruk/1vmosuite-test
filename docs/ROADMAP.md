@@ -25,8 +25,8 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 - **Phase 2c-c-2** — platformdirs-based UserData resolver + portable.txt opt-in (`[248ac56]`, tag `v2c-c-2`).
 - **Phase 2c-c-3** — atomic_write + user preset writer + caller rewire + migration. Fixes Observation O across all 5 user-state writes (`[86edaa4]`, tag `v2c-c-3`).
 - **Phase 2c-c-4** — Prefix-namespaced preset IDs + schema v2 + EncoderDialog UI-Min. Fixes silent-data-loss bug from 2c-c-3 D3=a. See ADR-0006 (`[23c64bf]`, tag `v2c-c-4`).
-- **Phase 2c-c-6** — Windows-only smoke regression suite (integration + determinism + aggregator + tests/README convention) (`[hash-pending]`, tag `v2c-c-6`).
-- **Phase 2c done** — all 5 sub-phases shipped + post-2c-c-4 regression green; Mac smoke deferred to post-Phase-2 with Junaid (`[hash-pending]`, tag `v2c-c-complete`).
+- **Phase 2c-c-6** — Windows-only smoke regression suite (integration + determinism + aggregator + tests/README convention) (`[d856bd3]`, tag `v2c-c-6`).
+- **Phase 2c done** — all 5 sub-phases shipped + post-2c-c-4 regression green; Mac smoke deferred to post-Phase-2 with Junaid (`[d856bd3]`, tag `v2c-c-complete`).
 - **Governance backfill** — CLAUDE.md + CHANGELOG backfill (`f08b08e`), self-referential hash-fill (`fa0763b`), CHANGELOG hook installation (`250668b`), hook hash-fill (`9537660`).
 
 ### Pending — blocking Phase 2 done
