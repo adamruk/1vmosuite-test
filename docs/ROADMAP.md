@@ -22,7 +22,7 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 - **Phase 2c-a** — Encoder.json generation (`5fc1dc7`).
 - **Phase 2c-b** — preset_loader JSON I/O (`57564fe`).
 - **Phase 2c-c-1** — Pydantic schema + JSON dark release behind `ENCODER_USE_JSON` (`[ce51400]`, tag `v2c-c-1`).
-- **Phase 2c-c-2** — platformdirs-based UserData resolver + portable.txt opt-in (`[hash-pending]`, tag `v2c-c-2`).
+- **Phase 2c-c-2** — platformdirs-based UserData resolver + portable.txt opt-in (`[248ac56]`, tag `v2c-c-2`).
 - **Governance backfill** — CLAUDE.md + CHANGELOG backfill (`f08b08e`), self-referential hash-fill (`fa0763b`), CHANGELOG hook installation (`250668b`), hook hash-fill (`9537660`).
 
 ### Pending — blocking Phase 2 done
