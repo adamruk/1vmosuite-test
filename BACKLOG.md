@@ -34,7 +34,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ## Resolved
 
-- **B-001** — ADR-0001 missing Decision makers field. Resolved [TBD] 2026-04-27.
-- **B-002** — ADR-0002 status/date mismatch. Resolved [TBD] 2026-04-27 (canonical date: 2026-04-22).
-- **B-003** — ADR-0004 missing Date + Decision makers fields. Resolved [TBD] 2026-04-27.
-- **B-005** — ruff debt in auto_render.py (E722 bare except + F841 unused current_output). BACKLOG entry stated "7 errors"; 4 were live at fix time (5 silently fixed in earlier 2c-c-* commits; 2 additional F841 unused `original_filename` errors at lines 1160 + 1219 surfaced post-audit and were also fixed as minimum-fix scope expansion to satisfy `ruff check` exit 0). Resolved [TBD] 2026-04-27.
+- **B-001** — ADR-0001 missing Decision makers field. Resolved [df1125a] 2026-04-27.
+- **B-002** — ADR-0002 status/date mismatch. Resolved [df1125a] 2026-04-27 (canonical date: 2026-04-22).
+- **B-003** — ADR-0004 missing Date + Decision makers fields. Resolved [df1125a] 2026-04-27.
+- **B-005** — ruff debt in auto_render.py (E722 bare except + F841 unused current_output). BACKLOG entry stated "7 errors"; 4 were live at fix time (5 silently fixed in earlier 2c-c-* commits; 2 additional F841 unused `original_filename` errors at lines 1160 + 1219 surfaced post-audit and were also fixed as minimum-fix scope expansion to satisfy `ruff check` exit 0). Resolved [df1125a] 2026-04-27.
