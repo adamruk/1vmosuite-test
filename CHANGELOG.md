@@ -59,6 +59,11 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Added
 
+- F5 sequential-mode slot UI port complete: 8 slots (was 5; SEQUENTIAL_SLOT_COUNT module constant introduced replaces 4 literal sites), per-slot X clear button (hidden until slot has selection, clears slot on click via _update_slot_clear_buttons + lambda-bound setCurrentIndex(0)), placeholder text "Drop preset here", Phase-1 8-color palette (#FFCDD2 / #C8E6C9 / #BBDEFB / #E1BEE7 / #FFECB3 / #FFCCBC / #B2EBF2 / #F8BBD0).
+- empty_videos_hint widget (child of tree_videos viewport, italic gray, "Drag videos here or click Add Videos", repositioned via on_resize setGeometry call) + empty_slots_hint widget (sibling in mode_layout above sequential_frame, "Click a preset above, then click a slot", visible only in Render All Variants mode when no slot is filled). Closes Step 3b-B Decision 2 deferral.
+- Smart Start button state machine via _update_start_button_state (4-state ladder: videos? -> preset? -> output dir? -> enable). Wires to update_video_list, select_output_directory, tree_encoders.itemSelectionChanged, on_mode_changed, each slot's currentTextChanged via _on_slot_text_changed, end of setup_ui (initial state). Replaces static "Begin rendering (F5)" tooltip with state-dependent tooltips ("Add videos first" / "Pick a preset first" / "Choose output folder first" / "Begin rendering (F5)"). Closes Step 3b-B btn_start state-machine deferral.
+- _apply_slot_defaults method: reads sequential_slots key from config_video_renderer.json on startup; calls combo.findText() + combo.setCurrentIndex() per slot to restore last session's slot selections. Called once in __init__ after self.load_encoders_to_tree().
+
 - settings_dialog.py: NEW module (243 lines, verbatim port from Phase 1) providing modal Settings dialog with 3 tabs (General / Rendering / Advanced). Loads/writes config_video_renderer.json directly via utf-8 json.dump (matches core/config.py encoding contract). Module-level DEFAULTS dict with 9 keys: output_dir, num_threads, use_gpu, nvenc_quality_offset, gpu_error_action, output_collision, show_ffmpeg_command, open_output_when_done, tour_seen. Wired into auto_render.py via toolbar button (settings_btn before help_btn) + open_settings + _reload_config_settings methods.
 - auto_render.py: 5 new config keys plumbed through VideoRendererTool: output_collision (Bug 4 closure default "rename"), gpu_error_action (Step 4c reserve, default "retry_cpu"), nvenc_quality_offset (Step 4f reserve), show_ffmpeg_command (Step 4f reserve), open_output_when_done (Step 4f reserve). Settings dialog persists; reload_config_settings applies runtime-changeable bits on OK accept.
 
@@ -126,6 +131,15 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `tests/README.md` "Smoke runner convention" section: documents naming (check_/test_), output shape, tempdir constraint, aggregator script, and per-sub-phase log convention. ~30 lines. Per PARALLEL discovery D7=b. [d856bd3] [v2c-c-6]
 
 ### Changed
+
+- auto_render.py mode_frame UI: slot count expanded 5 -> 8 (introduces SEQUENTIAL_SLOT_COUNT = 8 module constant; replaces 4 literal sites previously hardcoded as `5`).
+  BEFORE: 5 sequential combos with 5-color palette subset; literal `range(5)` in slot creation loop and on_mode_changed comprehension; literal `[None] * 5` in __init__ and on_mode_changed else-branch; mode toggle radios labeled "Single Render" / "X Render"; placeholder text "Encoder N" per slot.
+  AFTER: 8 sequential combos with full 8-color palette per Phase 1 spec; SEQUENTIAL_SLOT_COUNT = 8 constant defined at module level; all 4 literal sequential `5` sites replaced (note: a separate `for col in range(5)` for tree_encoders column iteration at L1420 is unrelated and untouched); mode toggle radios labeled "Render Once" / "Render All Variants" per PORT_NOTES line 226-229 + PARALLEL Phase 1 fidelity; placeholder text "Drop preset here" per slot; Step 3 label updated to "Step 3 - Assign to slots (for Render All Variants only)" to match new naming.
+  WHY: per PARALLEL Phase 1 discovery + PORT_NOTES line 156-247 + CLAUDE.md §5 byte-by-byte fidelity rule. SEQUENTIAL_SLOT_COUNT as named constant means future changes (back to 5 if observation reveals clutter, up to 10 if ever needed) are 1-line edits. Phase 1 labels are clearer plain-English than v2's "Single/X" (e.g., "X Render" was mysterious; "Render All Variants" is self-explanatory).
+- save_config now persists sequential_slots: [c.currentText() for c in self.sequential_combos] alongside existing keys (input_files, output_dir, encoder_options, num_threads). _apply_slot_defaults reads this key on startup to restore slot selections across sessions.
+  BEFORE: save_config wrote 4 keys + dialog-managed keys via merge (Step 4b-amend); sequential_slots was NOT persisted, so user's slot selections lost across app restarts.
+  AFTER: save_config also writes sequential_slots; _apply_slot_defaults restores them in __init__ after load_encoders_to_tree(). Round-trip works: select slots -> close app -> reopen -> slots restored.
+  WHY: PORT_NOTES F5 line 240+ specifies sequential_slots persistence; closes the "slot selection persistence" gap.
 
 - auto_render.py RenderWorker.__init__: signature extended with output_collision="rename" and gpu_error_action="retry_cpu" kw params (defaults match current v2 behavior — no behavior change for callers that don't pass them). Body adds self.output_collision = output_collision and self.gpu_error_action = gpu_error_action assignments. output_collision is consumed in process() Site 4 (Bug 4 closure); gpu_error_action is reserved for Step 4c when GPU pipeline lands and Bug 2 closure becomes possible.
   BEFORE: RenderWorker.__init__ took only existing 2.5a params; output_collision logic was hardcoded in process() (always avoid_collision).
@@ -197,6 +211,11 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `docs/ROADMAP.md` Done section. BEFORE: 2c-c-6 in Pending blockers; no v2c-c-complete row. AFTER: 2c-c-6 row in Done with feat hash + [v2c-c-6] tag; new "Phase 2c done" row in Done with same feat hash + [v2c-c-complete] tag noting Mac deferral. WHY: Phase 2c stabilization closes here; Phase 2.5 (PORT_NOTES port) and Phase 2d (PySide6 migration) are separate forward work. [d856bd3] [v2c-c-6]
 
 ### Fixed
+
+- Step 3b-B Decision 2 deferral closed: empty_videos_hint + empty_slots_hint widgets + _update_empty_hints handler + clear_btn (slot X) tooltip now ship in Step 4c.
+  BEFORE: Step 3b-B PARALLEL Decision 2 deferred both empty-state hints because they depend on _update_empty_hints handler wiring + sequential-mode slot UI which weren't in F4 scope. The clear_btn (slot X) tooltip was also deferred for the same reason.
+  AFTER: F5 sequential-mode slot UI port lands the full 3-widget surface — empty_videos_hint + empty_slots_hint + clear_btn (with "Clear this slot" tooltip) — plus the _update_empty_hints / _update_slot_clear_buttons handlers + 3 wiring sites (update_video_list / on_mode_changed / _on_slot_text_changed).
+  WHY: F5 was the natural home for these deferrals; Step 3b-B's deferral was correct (pre-slot-UI implementation would have been zombie widgets); Step 4c is when the dependencies actually exist. [<commit>]
 
 - PORT_NOTES Bug 4 — output_collision setting had no effect (always renamed) — closed.
   BEFORE: auto_render.py L143-144 unconditionally called naming_utils.avoid_collision for non-image-encoder outputs, ignoring any user setting. Phase 1 PORT_NOTES line 222 documented the bug; Step 3a's avoid_collision call was the unconditional v2 site.

@@ -50,6 +50,8 @@ from core import naming_utils
 from settings_dialog import SettingsDialog
 from core.user_data import resolve_or_die, migrate_legacy_configs
 
+SEQUENTIAL_SLOT_COUNT = 8
+
 
 def resource_path(relative_path):
     """Lấy đường dẫn tuyệt đối cho tài nguyên, hoạt động cả khi chạy từ source và từ file exe"""
@@ -272,7 +274,7 @@ class VideoRendererTool(QMainWindow):
         self.is_rendering = False
         self.num_threads = 3
         self.sequential_mode = False
-        self.sequential_encoders = [None] * 5
+        self.sequential_encoders = [None] * SEQUENTIAL_SLOT_COUNT
         self.SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
         self.FFMPEG_PATH, self.FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(
             self.SCRIPT_DIR
@@ -321,6 +323,7 @@ class VideoRendererTool(QMainWindow):
                 self.update_video_list()
                 self.btn_delete.setEnabled(True)
         self.load_encoders_to_tree()
+        self._apply_slot_defaults()
 
         # Keyboard shortcuts (Phase 2.5 F4 onboarding)
         QShortcut(QKeySequence("Ctrl+O"), self, self.select_videos)
@@ -412,6 +415,14 @@ class VideoRendererTool(QMainWindow):
         input_layout.addWidget(step1_label)
         input_layout.addLayout(video_controls)
         self.tree_videos = QTreeWidget()
+        self.empty_videos_hint = QLabel(
+            "Drag videos here or click Add Videos", self.tree_videos.viewport()
+        )
+        self.empty_videos_hint.setAlignment(Qt.AlignCenter)
+        self.empty_videos_hint.setStyleSheet(
+            "color: #999; background: transparent; font-style: italic; font-weight: normal; padding: 0;"
+        )
+        self.empty_videos_hint.hide()
         self.tree_videos.setHeaderLabels(["No.", "Filename", "Duration", "Resolution"])
         self.tree_videos.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree_videos.setAlternatingRowColors(True)
@@ -471,6 +482,7 @@ class VideoRendererTool(QMainWindow):
         self.tree_encoders.itemSelectionChanged.connect(
             self._update_encoder_buttons_enabled
         )
+        self.tree_encoders.itemSelectionChanged.connect(self._update_start_button_state)
         config_layout.addWidget(self.tree_encoders)
         mode_frame = QFrame(objectName="mode_frame")
         mode_frame.setFrameStyle(QFrame.StyledPanel)
@@ -480,22 +492,32 @@ class VideoRendererTool(QMainWindow):
         render_mode_frame = QFrame()
         render_mode_layout = QHBoxLayout(render_mode_frame)
         render_mode_layout.setContentsMargins(0, 0, 0, 0)
-        self.mode_all = QRadioButton("Single Render")
+        self.mode_all = QRadioButton("Render Once")
         self.mode_all.setChecked(True)
         self.mode_all.toggled.connect(self.on_mode_changed)
-        self.mode_sequential = QRadioButton("X Render")
+        self.mode_sequential = QRadioButton("Render All Variants")
         self.mode_sequential.toggled.connect(self.on_mode_changed)
         render_mode_layout.addWidget(self.mode_all)
         render_mode_layout.addWidget(self.mode_sequential)
         render_mode_layout.addStretch()
         mode_layout.addWidget(render_mode_frame)
         self.sequential_combos = []
+        self.sequential_clear_btns = []
         sequential_frame = QFrame()
         sequential_layout = QHBoxLayout(sequential_frame)
         sequential_layout.setContentsMargins(0, 0, 0, 0)
         sequential_layout.setSpacing(20)
-        combo_colors = ["#FFCDD2", "#C8E6C9", "#BBDEFB", "#E1BEE7", "#FFECB3"]
-        for i in range(5):
+        combo_colors = [
+            "#FFCDD2",
+            "#C8E6C9",
+            "#BBDEFB",
+            "#E1BEE7",
+            "#FFECB3",
+            "#FFCCBC",
+            "#B2EBF2",
+            "#F8BBD0",
+        ]
+        for i in range(SEQUENTIAL_SLOT_COUNT):
             combo_container = QFrame()
             combo_container.setStyleSheet(
                 f"background-color: {combo_colors[i]}; border-radius: 4px; padding: 2px;"
@@ -511,14 +533,38 @@ class VideoRendererTool(QMainWindow):
             combo.setEnabled(False)
             combo.setFixedWidth(120)
             combo.setFixedHeight(25)
-            combo.setPlaceholderText(f"Encoder {i + 1}")
-            combo.setStyleSheet(
-                "\n                QComboBox {\n                    background-color: white;\n                    border: 1px solid #ccc;\n                    border-radius: 3px;\n                    padding: 2px;\n                }\n                QComboBox::drop-down {\n                    border: none;\n                }\n                QComboBox::down-arrow {\n                    image: url(down_arrow.png);\n                    width: 12px;\n                    height: 12px;\n                }\n            "
-            )
+            combo.setPlaceholderText("Drop preset here")
             self.sequential_combos.append(combo)
-            combo_layout.addWidget(combo)
+            combo.currentTextChanged.connect(self._on_slot_text_changed)
+            combo_row = QHBoxLayout()
+            combo_row.setContentsMargins(0, 0, 0, 0)
+            combo_row.setSpacing(2)
+            combo_row.addWidget(combo)
+            clear_btn = QPushButton("X")
+            clear_btn.setFixedSize(20, 25)
+            clear_btn.setToolTip("Clear this slot")
+            clear_btn.setStyleSheet(
+                "background-color: white; color: #666; border: 1px solid #ccc; border-radius: 3px; font-weight: bold; font-size: 11px; min-width: 20px; max-width: 20px;"
+            )
+            clear_btn.hide()
+            clear_btn.clicked.connect(lambda _checked, c=combo: c.setCurrentIndex(0))
+            self.sequential_clear_btns.append(clear_btn)
+            combo_row.addWidget(clear_btn)
+            combo_layout.addLayout(combo_row)
             sequential_layout.addWidget(combo_container)
         sequential_layout.addStretch()
+        step3_label = QLabel("Step 3 - Assign to slots (for Render All Variants only)")
+        step3_label.setStyleSheet(
+            "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
+        )
+        mode_layout.addWidget(step3_label)
+        self.empty_slots_hint = QLabel("Click a preset above, then click a slot")
+        self.empty_slots_hint.setAlignment(Qt.AlignCenter)
+        self.empty_slots_hint.setStyleSheet(
+            "color: #999; background: transparent; font-style: italic; font-weight: normal; padding: 6px;"
+        )
+        mode_layout.addWidget(self.empty_slots_hint)
+        self.empty_slots_hint.hide()
         mode_layout.addWidget(sequential_frame)
         config_layout.addWidget(mode_frame)
         progress_info_frame = QFrame(objectName="progress_info_frame")
@@ -630,6 +676,9 @@ class VideoRendererTool(QMainWindow):
         output_layout.addWidget(self.tree_output)
         self.resizeEvent = self.on_resize
 
+        self._update_empty_hints()
+        self._update_start_button_state()
+
     def on_resize(self, event):
         """Căn chỉnh kích thước các cột khi cửa sổ thay đổi kích thước"""
         total_width = self.tree_videos.width()
@@ -643,6 +692,8 @@ class VideoRendererTool(QMainWindow):
         self.tree_encoders.setColumnWidth(2, int(total_width * 0.2))
         self.tree_encoders.setColumnWidth(3, int(total_width * 0.55))
         self.tree_encoders.setColumnWidth(4, int(total_width * 0.1))
+        if hasattr(self, "empty_videos_hint"):
+            self.empty_videos_hint.setGeometry(self.tree_videos.viewport().rect())
         total_width = self.tree_output.width()
         self.tree_output.setColumnWidth(0, int(total_width * 0.1))
         self.tree_output.setColumnWidth(1, int(total_width * 0.25))
@@ -735,6 +786,69 @@ class VideoRendererTool(QMainWindow):
         # Other Settings keys (use_gpu, nvenc_quality_offset, show_ffmpeg_command,
         # open_output_when_done) reserved for Step 4c+ when GPU pipeline lands.
 
+    def _update_empty_hints(self):
+        """Toggle the empty-state placeholders based on current state."""
+        if hasattr(self, "empty_videos_hint"):
+            self.empty_videos_hint.setVisible(not self.videos)
+        if hasattr(self, "empty_slots_hint"):
+            any_slot_filled = any(c.currentText() for c in self.sequential_combos)
+            self.empty_slots_hint.setVisible(
+                self.sequential_mode and not any_slot_filled
+            )
+
+    def _on_slot_text_changed(self, _text):
+        """A sequential combo's selection changed - refresh hints + Start state."""
+        self._update_empty_hints()
+        self._update_start_button_state()
+        self._update_slot_clear_buttons()
+
+    def _update_slot_clear_buttons(self):
+        """Show a slot's X button only when that slot has a preset selected."""
+        if not hasattr(self, "sequential_clear_btns"):
+            return
+        for combo, btn in zip(self.sequential_combos, self.sequential_clear_btns):
+            btn.setVisible(bool(combo.currentText()))
+
+    def _update_start_button_state(self):
+        """Disable Start unless videos, a preset, and a valid output dir are all present."""
+        if not hasattr(self, "btn_start"):
+            return
+        if self.is_rendering:
+            return
+        if not self.videos:
+            self.btn_start.setEnabled(False)
+            self.btn_start.setToolTip("Add videos first")
+            return
+        if self.sequential_mode:
+            has_preset = any(c.currentText() for c in self.sequential_combos)
+        else:
+            has_preset = bool(self.tree_encoders.selectedItems())
+        if not has_preset:
+            self.btn_start.setEnabled(False)
+            self.btn_start.setToolTip("Pick a preset first")
+            return
+        if not self.output_directory or not os.path.isdir(self.output_directory):
+            self.btn_start.setEnabled(False)
+            self.btn_start.setToolTip("Choose output folder first")
+            return
+        self.btn_start.setEnabled(True)
+        self.btn_start.setToolTip("Begin rendering (F5)")
+
+    def _apply_slot_defaults(self):
+        """Restore X-Render slot selections from config_video_renderer.json on startup."""
+        slots = self.config.get("sequential_slots", [])
+        if not slots:
+            return
+        for i, name in enumerate(slots):
+            if i >= SEQUENTIAL_SLOT_COUNT:
+                break
+            if not name:
+                continue
+            combo = self.sequential_combos[i]
+            idx = combo.findText(name)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+
     def save_config(self) -> None:
         """Lưu cấu hình vào config_video_renderer.json."""
         try:
@@ -748,6 +862,9 @@ class VideoRendererTool(QMainWindow):
                     "output_dir": self.output_directory,
                     "encoder_options": self.selected_encoders,
                     "num_threads": self.num_threads,
+                    "sequential_slots": [
+                        c.currentText() for c in self.sequential_combos
+                    ],
                 }
             )
             core_config.save(Path(self.CONFIG_FILE), existing)
@@ -854,6 +971,8 @@ class VideoRendererTool(QMainWindow):
         select_btn = self.findChild(QPushButton, "select_btn")
         if select_btn:
             select_btn.setText(f"📥 Select ({len(self.videos)})")
+        self._update_empty_hints()
+        self._update_start_button_state()
 
     def get_video_duration(self, video_path: str) -> str:
         """Lấy thời lượng video sử dụng FFprobe."""
@@ -942,6 +1061,7 @@ class VideoRendererTool(QMainWindow):
             if output_dir:
                 self.output_directory = output_dir
                 self.dir_label.setText(f"{self.output_directory}")
+                self._update_start_button_state()
         except Exception as e:
             QMessageBox.critical(
                 self, "Error", f"Cannot select output directory: {str(e)}"
@@ -1654,10 +1774,13 @@ class VideoRendererTool(QMainWindow):
             combo.setEnabled(self.sequential_mode)
         if self.sequential_mode:
             self.sequential_encoders = [
-                self.sequential_combos[i].currentText() for i in range(5)
+                self.sequential_combos[i].currentText()
+                for i in range(SEQUENTIAL_SLOT_COUNT)
             ]
         else:
-            self.sequential_encoders = [None] * 5
+            self.sequential_encoders = [None] * SEQUENTIAL_SLOT_COUNT
+        self._update_empty_hints()
+        self._update_start_button_state()
 
     def show_help(self):
         """Hiển thị dialog help"""
