@@ -215,7 +215,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - Step 3b-B Decision 2 deferral closed: empty_videos_hint + empty_slots_hint widgets + _update_empty_hints handler + clear_btn (slot X) tooltip now ship in Step 4c.
   BEFORE: Step 3b-B PARALLEL Decision 2 deferred both empty-state hints because they depend on _update_empty_hints handler wiring + sequential-mode slot UI which weren't in F4 scope. The clear_btn (slot X) tooltip was also deferred for the same reason.
   AFTER: F5 sequential-mode slot UI port lands the full 3-widget surface — empty_videos_hint + empty_slots_hint + clear_btn (with "Clear this slot" tooltip) — plus the _update_empty_hints / _update_slot_clear_buttons handlers + 3 wiring sites (update_video_list / on_mode_changed / _on_slot_text_changed).
-  WHY: F5 was the natural home for these deferrals; Step 3b-B's deferral was correct (pre-slot-UI implementation would have been zombie widgets); Step 4c is when the dependencies actually exist. [<commit>]
+  WHY: F5 was the natural home for these deferrals; Step 3b-B's deferral was correct (pre-slot-UI implementation would have been zombie widgets); Step 4c is when the dependencies actually exist. [4391372]
 
 - PORT_NOTES Bug 4 — output_collision setting had no effect (always renamed) — closed.
   BEFORE: auto_render.py L143-144 unconditionally called naming_utils.avoid_collision for non-image-encoder outputs, ignoring any user setting. Phase 1 PORT_NOTES line 222 documented the bug; Step 3a's avoid_collision call was the unconditional v2 site.
