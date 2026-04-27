@@ -32,9 +32,19 @@ _CODEC_MAP = {
     # gpu_codec setting; not auto-mapped here. Pass through unchanged.
 }
 
-# CRF -> CQ offset per ADR-0007 D3. Hardcoded +2 (NOT user-configurable).
-# Per-codec rules locked after D9 VMAF validation gate runs on RTX 4080.
-CRF_TO_CQ_OFFSET = 2
+# CRF -> CQ offset per ADR-0007 D3. Per-codec dict (Step 4e-fix-2 calibration).
+# Originally scalar +2 (Step 4d-i); empirically calibrated per-codec after Step 4e-fix-1
+# validation showed all 3 codecs needed adjustment, not just av1 as ADR-0007 D9 anticipated.
+# Values determined by Step 4e-fix-2 retest against 4-clip reference set on RTX 4080.
+CRF_TO_CQ_OFFSET = {
+    "h264_nvenc": 0,  # was implicit +2; mean 97.92 at +2 -> targeting >= 98.0
+    "hevc_nvenc": 0,  # was implicit +2; mean 97.99 at +2 -> targeting >= 98.0
+    "av1_nvenc": -1,  # was implicit +2; p5 95.18 at +2 -> targeting >= 97.0
+}
+
+# Backward-compat default for any codec not in the dict above (defensive coding):
+# falls back to +2 (original ADR-0007 D3 hypothesis) so unknown codecs don't crash.
+_CQ_OFFSET_DEFAULT = 2
 
 
 def translate_to_nvenc(
@@ -77,7 +87,13 @@ def translate_to_nvenc(
         if p == "-crf" and i + 1 < len(params):
             try:
                 crf_value = int(params[i + 1])
-                cq_value = crf_value + CRF_TO_CQ_OFFSET
+                # Per-codec offset lookup (Step 4e-fix-2). Falls back to default if codec unknown.
+                offset = (
+                    CRF_TO_CQ_OFFSET.get(codec, _CQ_OFFSET_DEFAULT)
+                    if isinstance(CRF_TO_CQ_OFFSET, dict)
+                    else CRF_TO_CQ_OFFSET
+                )
+                cq_value = crf_value + offset
                 out.extend(["-cq:v", str(cq_value), "-rc:v", "vbr", "-b:v", "0"])
             except ValueError:
                 # Non-integer CRF (rare, e.g. fractional); pass through unchanged.

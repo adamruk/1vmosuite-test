@@ -4,8 +4,9 @@
     {
       "clip": "clip1_motion",
       "codec": "h264",
-      "vmaf_mean": 98.421065,
-      "vmaf_p5": 97.120406,
+      "cq_value": 20,
+      "vmaf_mean": 98.704563,
+      "vmaf_p5": 97.339586,
       "mean_pass": true,
       "p5_pass": true,
       "verdict": "PASS"
@@ -13,8 +14,9 @@
     {
       "clip": "clip1_motion",
       "codec": "hevc",
-      "vmaf_mean": 98.65261,
-      "vmaf_p5": 97.285903,
+      "cq_value": 20,
+      "vmaf_mean": 98.899651,
+      "vmaf_p5": 97.598363,
       "mean_pass": true,
       "p5_pass": true,
       "verdict": "PASS"
@@ -22,8 +24,9 @@
     {
       "clip": "clip1_motion",
       "codec": "av1",
-      "vmaf_mean": 99.200714,
-      "vmaf_p5": 98.056694,
+      "cq_value": 19,
+      "vmaf_mean": 99.452355,
+      "vmaf_p5": 98.399686,
       "mean_pass": true,
       "p5_pass": true,
       "verdict": "PASS"
@@ -31,8 +34,9 @@
     {
       "clip": "clip2_face",
       "codec": "h264",
-      "vmaf_mean": 98.784326,
-      "vmaf_p5": 96.02611,
+      "cq_value": 20,
+      "vmaf_mean": 98.993938,
+      "vmaf_p5": 96.435381,
       "mean_pass": true,
       "p5_pass": false,
       "verdict": "FAIL"
@@ -40,8 +44,9 @@
     {
       "clip": "clip2_face",
       "codec": "hevc",
-      "vmaf_mean": 98.923298,
-      "vmaf_p5": 96.311361,
+      "cq_value": 20,
+      "vmaf_mean": 99.099567,
+      "vmaf_p5": 96.664258,
       "mean_pass": true,
       "p5_pass": false,
       "verdict": "FAIL"
@@ -49,8 +54,9 @@
     {
       "clip": "clip2_face",
       "codec": "av1",
-      "vmaf_mean": 99.34566,
-      "vmaf_p5": 97.012442,
+      "cq_value": 19,
+      "vmaf_mean": 99.454897,
+      "vmaf_p5": 97.241775,
       "mean_pass": true,
       "p5_pass": true,
       "verdict": "PASS"
@@ -58,8 +64,9 @@
     {
       "clip": "clip3_typical",
       "codec": "h264",
-      "vmaf_mean": 97.214582,
-      "vmaf_p5": 93.965849,
+      "cq_value": 20,
+      "vmaf_mean": 97.522291,
+      "vmaf_p5": 94.391454,
       "mean_pass": false,
       "p5_pass": false,
       "verdict": "FAIL"
@@ -67,8 +74,9 @@
     {
       "clip": "clip3_typical",
       "codec": "hevc",
-      "vmaf_mean": 97.148232,
-      "vmaf_p5": 94.096526,
+      "cq_value": 20,
+      "vmaf_mean": 97.466645,
+      "vmaf_p5": 94.546731,
       "mean_pass": false,
       "p5_pass": false,
       "verdict": "FAIL"
@@ -76,8 +84,9 @@
     {
       "clip": "clip3_typical",
       "codec": "av1",
-      "vmaf_mean": 98.13412,
-      "vmaf_p5": 95.472415,
+      "cq_value": 19,
+      "vmaf_mean": 98.314055,
+      "vmaf_p5": 95.818939,
       "mean_pass": true,
       "p5_pass": false,
       "verdict": "FAIL"
@@ -85,8 +94,9 @@
     {
       "clip": "clip4_diverse",
       "codec": "h264",
-      "vmaf_mean": 97.26131,
-      "vmaf_p5": 93.597124,
+      "cq_value": 20,
+      "vmaf_mean": 97.613579,
+      "vmaf_p5": 94.194779,
       "mean_pass": false,
       "p5_pass": false,
       "verdict": "FAIL"
@@ -94,8 +104,9 @@
     {
       "clip": "clip4_diverse",
       "codec": "hevc",
-      "vmaf_mean": 97.236114,
-      "vmaf_p5": 93.574754,
+      "cq_value": 20,
+      "vmaf_mean": 97.567165,
+      "vmaf_p5": 94.17357,
       "mean_pass": false,
       "p5_pass": false,
       "verdict": "FAIL"
@@ -103,8 +114,9 @@
     {
       "clip": "clip4_diverse",
       "codec": "av1",
-      "vmaf_mean": 98.113965,
-      "vmaf_p5": 95.178379,
+      "cq_value": 19,
+      "vmaf_mean": 98.305411,
+      "vmaf_p5": 95.665916,
       "mean_pass": true,
       "p5_pass": false,
       "verdict": "FAIL"
@@ -114,141 +126,158 @@
     {
       "clip": "clip1_motion",
       "codec": "h264",
-      "cpu_time_s": 1.8,
-      "gpu_time_s": 0.71,
+      "cq_value": 20,
+      "cpu_time_s": 1.83,
+      "gpu_time_s": 0.78,
       "cpu_size": 4857042,
-      "gpu_size": 6229145,
+      "gpu_size": 7752829,
       "cpu_ok": true,
       "gpu_ok": true
     },
     {
       "clip": "clip1_motion",
       "codec": "hevc",
-      "cpu_time_s": 6.64,
-      "gpu_time_s": 0.82,
+      "cq_value": 20,
+      "cpu_time_s": 6.17,
+      "gpu_time_s": 0.72,
       "cpu_size": 5399190,
-      "gpu_size": 6105239,
+      "gpu_size": 7664315,
       "cpu_ok": true,
       "gpu_ok": true
     },
     {
       "clip": "clip1_motion",
       "codec": "av1",
-      "cpu_time_s": 6.43,
-      "gpu_time_s": 0.74,
-      "cpu_size": 7352122,
-      "gpu_size": 7861200,
+      "cq_value": 19,
+      "cpu_time_s": 6.92,
+      "gpu_time_s": 0.77,
+      "cpu_size": 7352038,
+      "gpu_size": 10288373,
       "cpu_ok": true,
       "gpu_ok": true
     },
     {
       "clip": "clip2_face",
       "codec": "h264",
-      "cpu_time_s": 2.03,
-      "gpu_time_s": 0.71,
-      "cpu_size": 5071790,
-      "gpu_size": 6880856,
-      "cpu_ok": true,
-      "gpu_ok": true
-    },
-    {
-      "clip": "clip2_face",
-      "codec": "hevc",
-      "cpu_time_s": 7.37,
-      "gpu_time_s": 0.78,
-      "cpu_size": 5362615,
-      "gpu_size": 6575272,
-      "cpu_ok": true,
-      "gpu_ok": true
-    },
-    {
-      "clip": "clip2_face",
-      "codec": "av1",
-      "cpu_time_s": 7.2,
-      "gpu_time_s": 0.71,
-      "cpu_size": 6893343,
-      "gpu_size": 7903001,
-      "cpu_ok": true,
-      "gpu_ok": true
-    },
-    {
-      "clip": "clip3_typical",
-      "codec": "h264",
-      "cpu_time_s": 1.84,
-      "gpu_time_s": 0.73,
-      "cpu_size": 5112557,
-      "gpu_size": 7175806,
-      "cpu_ok": true,
-      "gpu_ok": true
-    },
-    {
-      "clip": "clip3_typical",
-      "codec": "hevc",
-      "cpu_time_s": 7.36,
-      "gpu_time_s": 0.79,
-      "cpu_size": 6260859,
-      "gpu_size": 7017689,
-      "cpu_ok": true,
-      "gpu_ok": true
-    },
-    {
-      "clip": "clip3_typical",
-      "codec": "av1",
-      "cpu_time_s": 8.52,
-      "gpu_time_s": 0.95,
-      "cpu_size": 8429870,
-      "gpu_size": 9314533,
-      "cpu_ok": true,
-      "gpu_ok": true
-    },
-    {
-      "clip": "clip4_diverse",
-      "codec": "h264",
-      "cpu_time_s": 1.72,
-      "gpu_time_s": 0.78,
-      "cpu_size": 5235242,
-      "gpu_size": 7359238,
-      "cpu_ok": true,
-      "gpu_ok": true
-    },
-    {
-      "clip": "clip4_diverse",
-      "codec": "hevc",
-      "cpu_time_s": 8.16,
+      "cq_value": 20,
+      "cpu_time_s": 2.01,
       "gpu_time_s": 0.76,
+      "cpu_size": 5071790,
+      "gpu_size": 8518595,
+      "cpu_ok": true,
+      "gpu_ok": true
+    },
+    {
+      "clip": "clip2_face",
+      "codec": "hevc",
+      "cq_value": 20,
+      "cpu_time_s": 7.47,
+      "gpu_time_s": 0.74,
+      "cpu_size": 5362615,
+      "gpu_size": 8148810,
+      "cpu_ok": true,
+      "gpu_ok": true
+    },
+    {
+      "clip": "clip2_face",
+      "codec": "av1",
+      "cq_value": 19,
+      "cpu_time_s": 7.6,
+      "gpu_time_s": 0.82,
+      "cpu_size": 6893291,
+      "gpu_size": 10203986,
+      "cpu_ok": true,
+      "gpu_ok": true
+    },
+    {
+      "clip": "clip3_typical",
+      "codec": "h264",
+      "cq_value": 20,
+      "cpu_time_s": 1.99,
+      "gpu_time_s": 0.82,
+      "cpu_size": 5112557,
+      "gpu_size": 9020650,
+      "cpu_ok": true,
+      "gpu_ok": true
+    },
+    {
+      "clip": "clip3_typical",
+      "codec": "hevc",
+      "cq_value": 20,
+      "cpu_time_s": 7.67,
+      "gpu_time_s": 0.85,
+      "cpu_size": 6260859,
+      "gpu_size": 8849027,
+      "cpu_ok": true,
+      "gpu_ok": true
+    },
+    {
+      "clip": "clip3_typical",
+      "codec": "av1",
+      "cq_value": 19,
+      "cpu_time_s": 8.82,
+      "gpu_time_s": 0.8,
+      "cpu_size": 8429934,
+      "gpu_size": 12069809,
+      "cpu_ok": true,
+      "gpu_ok": true
+    },
+    {
+      "clip": "clip4_diverse",
+      "codec": "h264",
+      "cq_value": 20,
+      "cpu_time_s": 1.86,
+      "gpu_time_s": 0.82,
+      "cpu_size": 5235242,
+      "gpu_size": 9354859,
+      "cpu_ok": true,
+      "gpu_ok": true
+    },
+    {
+      "clip": "clip4_diverse",
+      "codec": "hevc",
+      "cq_value": 20,
+      "cpu_time_s": 7.36,
+      "gpu_time_s": 0.78,
       "cpu_size": 6643206,
-      "gpu_size": 7222072,
+      "gpu_size": 9156218,
       "cpu_ok": true,
       "gpu_ok": true
     },
     {
       "clip": "clip4_diverse",
       "codec": "av1",
-      "cpu_time_s": 8.83,
-      "gpu_time_s": 0.84,
-      "cpu_size": 9057341,
-      "gpu_size": 9575331,
+      "cq_value": 19,
+      "cpu_time_s": 8.46,
+      "gpu_time_s": 0.79,
+      "cpu_size": 9057413,
+      "gpu_size": 12562749,
       "cpu_ok": true,
       "gpu_ok": true
     }
   ],
   "per_codec_summary": {
     "h264": {
-      "mean_avg": 97.92032075,
-      "p5_min": 93.597124,
+      "mean_avg": 98.20859275,
+      "p5_min": 94.194779,
       "all_pass": false
     },
     "hevc": {
-      "mean_avg": 97.99006349999999,
-      "p5_min": 93.574754,
+      "mean_avg": 98.258257,
+      "p5_min": 94.17357,
       "all_pass": false
     },
     "av1": {
-      "mean_avg": 98.69861474999999,
-      "p5_min": 95.178379,
+      "mean_avg": 98.8816795,
+      "p5_min": 95.665916,
       "all_pass": false
     }
   },
-  "revision": "Step 4e-fix-1 (4-clip revised set)",
-  "total_elapsed_s": 222.1
+  "revision": "Step 4e-fix-2 (per-codec offset calibration)",
+  "offsets_used": {
+    "h264_nvenc": 0,
+    "hevc_nvenc": 0,
+    "av1_nvenc": -1
+  },
+  "total_elapsed_s": 215.2
 }

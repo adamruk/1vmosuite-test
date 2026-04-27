@@ -139,6 +139,12 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- core/preset_translator.py CRF_TO_CQ_OFFSET: scalar +2 -> per-codec dict {h264_nvenc:0, hevc_nvenc:0, av1_nvenc:-1} + _CQ_OFFSET_DEFAULT=2 fallback. Step 4e-fix-2 Path A calibration per ADR-0007 D9 anticipated outcome.
+  BEFORE: scalar offset +2 (Step 4d-i shipped this) producing mean VMAF 97.92-98.70 and p5 93.57-95.18 across 4 reference clips. 9 of 12 pairings failed D9 thresholds.
+  AFTER: per-codec dict producing mean 98.21-98.88 and p5 94.17-95.67. 4 of 12 pairings PASS (clip1_motion all 3 + clip2_face av1). Improvement real but insufficient: mean +0.18 to +0.29 per codec; p5 +0.49 to +0.60 per codec. Path A alone cannot clear D9 at preset p4/multipass=0.
+  WHY: empirical data from Step 4e-fix-1 showed all 3 codecs (not just av1) needed adjustment. Per-codec values determined by retest. Backward-compat scalar handling via isinstance(CRF_TO_CQ_OFFSET, dict) check + fallback constant. Step 4e-fix-3 will adopt ADR-0007 D7 "Max Quality Mode" (preset p7 + multipass=2) to address p5-tail outliers structurally that offset shifts cannot reach. ADR-0007 (Status: Accepted) NOT edited - D9 anticipated this iteration cycle ("Per-codec adjustment if validation forces it"). [<commit>]
+- benchmarks/vmaf_validation_v2.5.md: Step 4e-fix-2 results section appended; Status updated to FAIL (Step 4e-fix-3 needed); Revision History extended with Step 4e-fix-2 entry. Original 3-clip + Step 4e-fix-1 4-clip results preserved verbatim per ADR best practice (empirical evidence layered, not deleted).
+
 - benchmarks/vmaf_validation_v2.5.md: revised with 4-clip set per Step 4e-fix-1 hybrid remediation. Replaced clip3_x3speed (artificial worst-case x3-speed-modified content) with clip3_typical (D:/render/9.mp4, real-time speed). Added clip4_diverse (D:/render/6.mp4) for content diversity.
   BEFORE: 3-clip run (Step 4e commit 4cff4f0) failed 5 of 9 pairings; suspected clip3_x3speed was artificially difficult. Hypothesis: replacing with typical content would resolve failures.
   AFTER: 4-clip run with revised set FAILS 9 of 12 pairings. Only clip1_motion (escalator/easy content) passes across all 3 codecs. clip2_face passes av1 only. clip3_typical and clip4_diverse FAIL all 3 codecs. Hybrid hypothesis DISPROVEN: typical 1vmo content also fails the +2 CRF->CQ rule, not just x3-speed-modified content.

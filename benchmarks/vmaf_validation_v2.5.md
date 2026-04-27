@@ -1,15 +1,17 @@
 # VMAF Validation: v2.5 GPU Pipeline
 
-**Status:** **FAIL** - per-codec offset adjustment required
-**Latest run:** 2026-04-28 04:30 (revised 4-clip set per Step 4e-fix-1)
+**Status:** **FAIL** - further calibration needed (Step 4e-fix-3)
+**Latest run:** 2026-04-28 04:58 (Step 4e-fix-2 - per-codec offset calibration)
 **ADR:** ADR-0007 D9
 **Hardware:** RTX 4080 Laptop GPU (Ada Lovelace), driver 591.44
 **FFmpeg:** ffmpeg version N-120402-g7c5319e692-20250729 Copyright (c) 2000-2025 the FFmpeg developers
 
 ## Revision History
 
-- **2026-04-28 Step 4e (commit 4cff4f0):** Original 3-clip run. Verdict FAIL (5 of 9 missed p5 >= 97.0).
-- **2026-04-28 Step 4e-fix-1 (this revision):** Hybrid remediation per Adam. Replaced clip3_x3speed (artificial worst case) with clip3_typical (D:/render/9.mp4). Added clip4_diverse (D:/render/6.mp4). Pass criterion UNCHANGED (ADR-0007 D9 immutable).
+- **2026-04-28 Step 4e (commit 4cff4f0):** Original 3-clip run. Verdict FAIL.
+- **2026-04-28 Step 4e-fix-1 (commit c1f5ea8):** Hybrid remediation (replace clip3 + add clip4). Verdict FAIL - disproved hypothesis that x3-speed was the only outlier.
+- **2026-04-28 Step 4e-fix-2 (this run):** Path A - per-codec offset calibration in core/preset_translator.py CRF_TO_CQ_OFFSET (h264:0, hevc:0, av1:-1). Verdict: FAIL
+
 
 ## Pass Criterion (ADR-0007 D9, UNCHANGED)
 
@@ -86,6 +88,66 @@
 - clip4_diverse / h264: mean=97.26131, p5=93.597124, mean_pass=False, p5_pass=False
 - clip4_diverse / hevc: mean=97.236114, p5=93.574754, mean_pass=False, p5_pass=False
 - clip4_diverse / av1: mean=98.113965, p5=95.178379, mean_pass=True, p5_pass=False
+
+
+## Step 4e-fix-2 results (per-codec offset calibration)
+
+Per-codec CRF->CQ offsets calibrated empirically:
+
+| Codec | Old offset | New offset | Old mean | New mean | Old p5 | New p5 |
+|-------|------------|------------|----------|----------|--------|--------|
+| h264_nvenc | +2 | +0 | 97.92 | 98.21 | 93.60 | 94.19 |
+| hevc_nvenc | +2 | +0 | 97.99 | 98.26 | 93.57 | 94.17 |
+| av1_nvenc | +2 | -1 | 98.70 | 98.88 | 95.18 | 95.67 |
+
+### Results Table (Step 4e-fix-2)
+
+| Clip | Codec | CQ | VMAF Mean | VMAF p5 | Verdict |
+|------|-------|-----|-----------|---------|---------|
+| clip1_motion | h264 | 20 | 98.70 | 97.34 | PASS |
+| clip1_motion | hevc | 20 | 98.90 | 97.60 | PASS |
+| clip1_motion | av1 | 19 | 99.45 | 98.40 | PASS |
+| clip2_face | h264 | 20 | 98.99 | 96.44 | FAIL |
+| clip2_face | hevc | 20 | 99.10 | 96.66 | FAIL |
+| clip2_face | av1 | 19 | 99.45 | 97.24 | PASS |
+| clip3_typical | h264 | 20 | 97.52 | 94.39 | FAIL |
+| clip3_typical | hevc | 20 | 97.47 | 94.55 | FAIL |
+| clip3_typical | av1 | 19 | 98.31 | 95.82 | FAIL |
+| clip4_diverse | h264 | 20 | 97.61 | 94.19 | FAIL |
+| clip4_diverse | hevc | 20 | 97.57 | 94.17 | FAIL |
+| clip4_diverse | av1 | 19 | 98.31 | 95.67 | FAIL |
+
+### File-size deltas (Step 4e-fix-2)
+
+Lower CQ = larger files. Tradeoff visibility for tag-readiness assessment.
+
+| Clip | Codec | CPU MB | GPU MB | GPU/CPU ratio |
+|------|-------|--------|--------|---------------|
+| clip1_motion | h264 | 4.6 | 7.4 | 1.60x |
+| clip1_motion | hevc | 5.1 | 7.3 | 1.42x |
+| clip1_motion | av1 | 7.0 | 9.8 | 1.40x |
+| clip2_face | h264 | 4.8 | 8.1 | 1.68x |
+| clip2_face | hevc | 5.1 | 7.8 | 1.52x |
+| clip2_face | av1 | 6.6 | 9.7 | 1.48x |
+| clip3_typical | h264 | 4.9 | 8.6 | 1.76x |
+| clip3_typical | hevc | 6.0 | 8.4 | 1.41x |
+| clip3_typical | av1 | 8.0 | 11.5 | 1.43x |
+| clip4_diverse | h264 | 5.0 | 8.9 | 1.79x |
+| clip4_diverse | hevc | 6.3 | 8.7 | 1.38x |
+| clip4_diverse | av1 | 8.6 | 12.0 | 1.39x |
+
+### Verdict
+
+**FAIL.** Per-codec offsets reduced means/p5 but not enough to clear all thresholds. Step 4e-fix-3 needed (further offset reduction). Failures:
+
+- clip2_face / h264 (CQ=20): mean=98.993938, p5=96.435381
+- clip2_face / hevc (CQ=20): mean=99.099567, p5=96.664258
+- clip3_typical / h264 (CQ=20): mean=97.522291, p5=94.391454
+- clip3_typical / hevc (CQ=20): mean=97.466645, p5=94.546731
+- clip3_typical / av1 (CQ=19): mean=98.314055, p5=95.818939
+- clip4_diverse / h264 (CQ=20): mean=97.613579, p5=94.194779
+- clip4_diverse / hevc (CQ=20): mean=97.567165, p5=94.17357
+- clip4_diverse / av1 (CQ=19): mean=98.305411, p5=95.665916
 
 ## Original 3-clip run (2026-04-28, commit 4cff4f0)
 
