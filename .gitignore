@@ -37,3 +37,7 @@ config_video_merger.json
 # Claude Code local prefs (personal, not project)
 .claude/settings.local.json
 .claude/cache/
+
+# VMAF validation working files — large binaries regenerable via the orchestrator script.
+# JSON outputs (results.json + per-pairing vmaf logs) ARE committed for machine inspection.
+benchmarks/_vmaf_work/*.mp4
