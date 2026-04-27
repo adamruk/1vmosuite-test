@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from datetime import datetime
 import json
 from typing import List, Dict, Any, Optional
 from PyQt5.QtWidgets import (
@@ -46,6 +45,7 @@ from core.preset_loader import (
     derive_slug,
 )
 from core import ffmpeg_runner as core_ffmpeg_runner
+from core import naming_utils
 from core.user_data import resolve_or_die, migrate_legacy_configs
 
 
@@ -104,7 +104,7 @@ class RenderWorker(QObject):
                     f"Processing: {os.path.basename(current_input)} with {encoder_name} ({progress_info})",
                 )
                 self.progress_updated.emit(self.thread_index, 0)
-                timestamp = datetime.now().strftime("%y%m%d_%H%M%S")
+                timestamp = naming_utils.timestamp()
                 video_name = os.path.splitext(os.path.basename(self.video_path))[0]
                 encoder_parts = encoder_name.split("|", 1)
                 encoder_name = (
@@ -130,6 +130,9 @@ class RenderWorker(QObject):
                     else:
                         output_filename = f"{timestamp}_{safe_encoder_name}_{safe_video_name}_step{i + 1}.mp4"
                 output_file = os.path.join(self.output_dir, output_filename)
+                output_file = naming_utils.clip_to_limit(output_file)
+                if not is_image_encoder:
+                    output_file = naming_utils.avoid_collision(output_file)
                 command = [
                     str(self.ffmpeg_path),
                     "-i",

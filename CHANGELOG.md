@@ -58,6 +58,8 @@ What makes it a good entry: one concrete user-visible change, a measurable claim
 First release of the revived codebase. Covers the decompile-and-restore effort and Phase 1 modernization work in progress.
 
 ### Added
+
+- core/naming_utils.py: NEW module providing filename construction utilities (timestamp, safe_part, clip_to_limit, avoid_collision) with TOCTOU-safe avoid_collision baked in from day 1 — closes PORT_NOTES Bug 9 (the Phase 1 source had the TOCTOU race; v2 ships fixed). Pure stdlib, no PyQt5 dependency. Wired into auto_render.py at 2 surgical sites (Site 1 timestamp swap + Site 3 output-file collision-avoidance). Site 2 safe_part budget integration + F4 onboarding/polish deferred to Step 3b. [<commit>]
 - GPU encoding pipeline via NVENC — **in progress, Phase 1 (detection).** Will ship with hardware capability probing, encoder auto-selection, and CPU fallback. Entry will be finalized with benchmark and ADR links before v2.0.0 is cut.
 - `docs/PHASE_1_STOP_CONDITIONS.md` — lightweight Phase 1 stop-condition document (time budget, 3 hard stops, 3 soft stops) with a binding verification-and-permission protocol. Protocol prohibits automated helpers from rolling back, disabling features, or declaring phase halts autonomously — they must verify signals, produce a structured report, and wait for Adam's explicit decision before proceeding. References `FFMPEG_CPU_TO_NVENC_REFERENCE.md` §1/§6/§7.
 - `bench.py` — standalone benchmark tool for measuring ffmpeg commands. Two modes: quick (wall-clock + file size, ~10s overhead) and full (adds VMAF mean and 5th-percentile, ~60s overhead). Outputs structured JSON to `bench_results/`. Used to produce the libx264 baseline measurements that drive Phase 1 NVENC migration decisions. Documentation: `benchmarks/README_BENCH_TOOL.md`.
@@ -114,6 +116,15 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- auto_render.py: timestamp generation switched from inline `datetime.now().strftime("%y%m%d_%H%M%S")` (13 chars, 2-digit year) to `naming_utils.timestamp()` (15 chars, 4-digit year per ISO 8601 sortability convention).
+  BEFORE: 2-digit year ambiguous past 2099, 13-char overhead in 59-char filename budget.
+  AFTER: 4-digit year unambiguous for archival sort, 15-char overhead (2 chars more from filename budget).
+  WHY: ISO 8601 best practice; 2-char budget loss tolerable with naming_utils middle-truncation handling. [<commit>]
+- auto_render.py: output_file construction now passes through naming_utils.clip_to_limit (last-resort 59-char guard) + naming_utils.avoid_collision (TOCTOU-safe collision handling) for non-image-encoder outputs. Image-encoder branch (%03d sequences) bypasses avoid_collision because ffmpeg auto-increments those.
+  BEFORE: output_file constructed inline; no length guard; ffmpeg `-y` silently overwrites colliding outputs from parallel workers.
+  AFTER: explicit length-clip + atomic-create collision avoidance for non-sequence outputs.
+  WHY: prevents silent overwrite of in-flight encodes when 2 workers target the same output stem. [<commit>]
+
 - docs(governance): Phase 2.5 pickup amendments across 4 governance docs.
   BEFORE: docs/PHASE_2_PORT_NOTES.md was the original Phase 1 -> v2 port spec, written before Path B (c03433a) and the gblur swap (89dcdce + 2629ffe) shipped — 6 of 8 bugs and 2 of 3 known issues were stale-listed as "to port"; docs/ROADMAP.md Pending blockers table only contained Phase 2d (Phase 2.5 invisible); ADR-0007 did not exist; BACKLOG.md had no entry for the Step 5.5 ETA feature.
   AFTER: PORT_NOTES has a top-of-doc "## Status — what has already shipped in v2" section consolidating all 6 shipped bug fixes + 2 shipped known issues + 1 remaining open issue (Bug 9 TOCTOU); suggested-port-order step 12 rewritten to reflect Bug 9 as sole remainder. ROADMAP Pending blockers gained a Phase 2.5 row above Phase 2d + a Phase 2.5.1 row for Step 5.5 ETA. ADR-0007-gpu-pipeline.md created (Status: Proposed) with 9 decisions seeded for F3 implementation in Step 4. BACKLOG.md gained B-010 (scheduled, post-v2.5-complete pre-Phase-2d).
@@ -160,6 +171,11 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `docs/ROADMAP.md` Done section. BEFORE: 2c-c-6 in Pending blockers; no v2c-c-complete row. AFTER: 2c-c-6 row in Done with feat hash + [v2c-c-6] tag; new "Phase 2c done" row in Done with same feat hash + [v2c-c-complete] tag noting Mac deferral. WHY: Phase 2c stabilization closes here; Phase 2.5 (PORT_NOTES port) and Phase 2d (PySide6 migration) are separate forward work. [d856bd3] [v2c-c-6]
 
 ### Fixed
+
+- PORT_NOTES Bug 9 — TOCTOU race in avoid_collision — closed at port time.
+  BEFORE: Phase 1 naming_utils.avoid_collision used `os.path.exists()` then return without atomic reservation; concurrent workers could race past the check and both target the same path.
+  AFTER: avoid_collision uses atomic `open(candidate, 'x').close()` exclusive create per CPython 3.3+ 'x' mode (maps to O_CREAT | O_EXCL on POSIX, CreateFileW + CREATE_NEW on Windows). FileExistsError on race triggers numbered-suffix retry.
+  WHY: the only true open issue from PORT_NOTES — bug never had a v2 footprint to preserve, so fixing at port-time is cheaper than verbatim-port + immediate-fix theatre. [<commit>]
 - `docs/decisions/ADR-0001-phase-2-methodology-reconciliation.md` header. BEFORE: missing required `Decision makers:` field per scripts/adr_lint.py. AFTER: added `**Decision makers:** Adam (project lead)` after Date line. WHY: B-001 closure; adr_lint now passes. [df1125a] [B-001]
 - `docs/decisions/ADR-0002-product-trajectory.md` header + Revision History. BEFORE: Status "Accepted (2026-04-22)" but Date "2026-04-21" (mismatch). AFTER: Date updated to 2026-04-22 (canonical per Status); added Revision History bullet documenting the reconciliation. WHY: B-002 closure; eliminates ADR-0002 governance ambiguity. [df1125a] [B-002]
 - `docs/decisions/ADR-0004-cross-platform-mac-support.md` header. BEFORE: missing required `Date:` and `Decision makers:` fields per scripts/adr_lint.py. AFTER: added `**Date:** 2026-04-23` (matching Status string) and `**Decision makers:** Adam (project lead)`. WHY: B-003 closure; adr_lint now passes. [df1125a] [B-003]
