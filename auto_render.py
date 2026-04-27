@@ -1065,13 +1065,24 @@ class VideoRendererTool(QMainWindow):
                 startupinfo=startupinfo,
                 creationflags=core_ffmpeg_runner.hidden_creationflags(),
             )
-            duration_seconds = float(result.stdout.strip())
+            # Defensive parse per Step 4d-fix-1: ffprobe may return empty stdout
+            # if file is still being finalized, codec metadata is missing, or
+            # ffprobe itself failed. Return placeholder rather than crashing the
+            # render-completion handler. Non-zero returncode also returns placeholder.
+            stdout_stripped = result.stdout.strip()
+            if result.returncode != 0 or not stdout_stripped:
+                return "—"
+            try:
+                duration_seconds = float(stdout_stripped)
+            except ValueError:
+                return "—"
             hours = int(duration_seconds // 3600)
             minutes = int(duration_seconds % 3600 // 60)
             seconds = int(duration_seconds % 60)
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        except Exception as e:
-            raise Exception(f"Failed to get video duration: {str(e)}")
+        except Exception:
+            # Belt-and-suspenders: never crash the caller even on subprocess failure.
+            return "—"
 
     def get_video_resolution(self, video_path: str) -> str:
         """Lấy độ phân giải video sử dụng FFprobe."""
@@ -1454,8 +1465,14 @@ class VideoRendererTool(QMainWindow):
             return
         worker = self.sender()
         output_path = os.path.join(self.output_directory, output_filename)
-        resolution = self.get_video_resolution(output_path)
-        duration = self.get_video_duration(output_path)
+        try:
+            resolution = self.get_video_resolution(output_path)
+        except Exception:
+            resolution = "—"
+        try:
+            duration = self.get_video_duration(output_path)
+        except Exception:
+            duration = "—"
         item = getattr(worker, "tree_item", None)
         if item is not None and item.text(5) == "🟡 Processing":
             item.setText(2, output_filename)
