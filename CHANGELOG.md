@@ -113,6 +113,10 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `tests/README.md` "Smoke runner convention" section: documents naming (check_/test_), output shape, tempdir constraint, aggregator script, and per-sub-phase log convention. ~30 lines. Per PARALLEL discovery D7=b. [d856bd3] [v2c-c-6]
 
 ### Changed
+- assets/Encoder.txt: replaced `gblur=sigma=20` with `boxblur=20:2` in 14 preset(s) using blurred-background effects (across 1vmo Ultimate, Blur, Zoom, Resolution preset groups).
+  BEFORE: gblur=sigma=20 — true 2D Gaussian convolution, ~120-pixel kernel diameter at sigma=20, single-threaded with no SIMD, ~14,400 multiply-adds per pixel.
+  AFTER: boxblur=20:2 — separable box filter, O(1) per pixel via sliding-window running totals; two-pass approximation of Gaussian per central limit theorem.
+  WHY: ~20-50× faster encode at 1080p with visually equivalent result for UI/censorship/depth-of-field effects in blur-using presets. Per PARALLEL discovery 2026-04-27 D4 (Phase 2.5 quick-win, asset-only). [<commit>]
 - Phase 2a: shared code extracted into `core/` package across five sub-phases — `core/config.py` (2a/1), `core/file_picker.py` (2a/2), `core/widgets.py` (2a/3), `core/preset_loader.py` (2a/4), `core/ffmpeg_runner.py` (2a/5a + 5b: binary resolution + subprocess lifecycle). Pure internal refactor, no user-visible behavior change. Enables Phase 2c JSON preset migration and Phase 2d PyQt5→PySide6 migration without per-app drift. Tag `phase-2a-complete` at `3731230`. [9f5eeab] [bf6f968] [106e8b1] [a56e10c] [7b30a87] [8d26072]
 - `core/preset_loader.py` gains `load_presets_json` and `save_presets_json` (Phase 2c-b); `tools/generate_encoder_json.py` switched to `save_presets_json` for single-source-of-truth serialization. Existing `load_presets()` unchanged. `auto_render.py` still uses the old path (switchover in 2c-c). [57564fe]
 - `.gitignore` — originally excluded runtime config files written by apps during smoke tests; now also excludes Claude Code personal state (`.claude/settings.local.json`, `.claude/cache/`). [caf1f46] [f08b08e]
