@@ -113,6 +113,10 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `tests/README.md` "Smoke runner convention" section: documents naming (check_/test_), output shape, tempdir constraint, aggregator script, and per-sub-phase log convention. ~30 lines. Per PARALLEL discovery D7=b. [d856bd3] [v2c-c-6]
 
 ### Changed
+- assets/Encoder.json: regenerated via tools/generate_encoder_json.py to propagate the gblur->boxblur swap into the JSON preset path (consumed by auto_render.py under ENCODER_USE_JSON=1).
+  BEFORE: 14 gblur=sigma=20 occurrences mirroring assets/Encoder.txt pre-swap state (89dcdce). Under ENCODER_USE_JSON=1 the perf gain from Step 1 was symbolic only.
+  AFTER: 14 boxblur=20:2 occurrences matching assets/Encoder.txt post-swap state. Schema unchanged; only the affected preset filter strings changed. Verified diff is purely substitution (no schema drift, no field reordering).
+  WHY: completes the gblur->boxblur perf optimization across both preset formats. Tools-driven regen (not manual edit) preserves the deterministic single-source-of-truth contract from tools/generate_encoder_json.py. Surfaced by Step 1 self-review BEHAVIOR NOTE BN1. [<commit>]
 - assets/Encoder.txt: replaced `gblur=sigma=20` with `boxblur=20:2` in 14 preset(s) using blurred-background effects (across 1vmo Ultimate, Blur, Zoom, Resolution preset groups).
   BEFORE: gblur=sigma=20 — true 2D Gaussian convolution, ~120-pixel kernel diameter at sigma=20, single-threaded with no SIMD, ~14,400 multiply-adds per pixel.
   AFTER: boxblur=20:2 — separable box filter, O(1) per pixel via sliding-window running totals; two-pass approximation of Gaussian per central limit theorem.

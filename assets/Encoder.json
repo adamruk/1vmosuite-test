@@ -9,7 +9,7 @@
       "details": "📑 Details,Thu nhỏ video xuống 99% với nền mờ, Tạo lớp nền mờ với độ sigma 20, Giữ nguyên tỉ lệ khung hình gốc, Sử dụng mã hóa H.264 với CRF 16 và preset slow, Chuyển đổi sang định dạng màu yuv420p",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]scale=iw*0.99:ih*0.99:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]scale=iw*0.99:ih*0.99:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-vcodec",
         "libx264",
         "-crf",
@@ -30,7 +30,7 @@
       "details": "📑 Details,Thu nhỏ video xuống 95% với nền mờ, Tạo lớp nền mờ với độ sigma 20, Giữ nguyên tỉ lệ khung hình gốc, Sử dụng mã hóa H.264 với CRF 16 và preset slow, Chuyển đổi sang định dạng màu yuv420p",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]scale=iw*0.95:ih*0.95:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]scale=iw*0.95:ih*0.95:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-vcodec",
         "libx264",
         "-crf",
@@ -51,7 +51,7 @@
       "details": "📑 Details,Thu nhỏ video xuống 90% với nền mờ, Tạo lớp nền mờ với độ sigma 20, Giữ nguyên tỉ lệ khung hình gốc, Sử dụng mã hóa H.264 với CRF 16 và preset slow, Chuyển đổi sang định dạng màu yuv420p",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]scale=iw*0.90:ih*0.90:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]scale=iw*0.90:ih*0.90:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-vcodec",
         "libx264",
         "-crf",
@@ -463,7 +463,7 @@
       "details": "📑 Details,Tạo hiệu ứng điện ảnh chuyên nghiệp, Tăng độ sắc nét với unsharp 7:7:2.0, Điều chỉnh độ tương phản 1.2 và độ bão hòa 1.1, Tăng gamma lên 1.1 để làm nổi bật chi tiết, Giảm nhiễu với hqdn3d 1.5:1.5:6.0:6.0, Thu nhỏ video xuống 95% với nền mờ",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]unsharp=7:7:2.0,eq=contrast=1.2:saturation=1.1:gamma=1.1,hqdn3d=1.5:1.5:6.0:6.0,scale=iw*0.95:ih*0.95:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]unsharp=7:7:2.0,eq=contrast=1.2:saturation=1.1:gamma=1.1,hqdn3d=1.5:1.5:6.0:6.0,scale=iw*0.95:ih*0.95:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-vcodec",
         "libx264",
         "-crf",
@@ -547,7 +547,7 @@
       "details": "📑 Details,Chuyển đổi video sang phong cách phim noir cổ điển, Tăng độ sắc nét với unsharp 7:7:2.0, Tăng độ tương phản 1.5 và giảm độ bão hòa 0.2, Giảm gamma xuống 0.8 để tạo hiệu ứng tối, Giảm nhiễu với hqdn3d 1.5:1.5:6:6, Thu nhỏ video xuống 87% với nền mờ",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]unsharp=7:7:2.0,eq=contrast=1.5:saturation=0.2:gamma=0.8,hqdn3d=1.5:1.5:6:6,scale=iw*0.87:ih*0.87:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]unsharp=7:7:2.0,eq=contrast=1.5:saturation=0.2:gamma=0.8,hqdn3d=1.5:1.5:6:6,scale=iw*0.87:ih*0.87:force_original_aspect_ratio=decrease[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-vcodec",
         "libx264",
         "-crf",
@@ -656,7 +656,7 @@
       "details": "📑 Details,Tạo lớp layer mờ phía sau, giữ nguyên chiều rộng, fix chiều cao video xuống 20% mỗi cạnh, Giữ nguyên tỉ lệ khung hình, Tạo hiệu ứng mờ với độ sigma 20, Căn nội dung chính về phía dưới khung hình",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]scale=iw*1:ih*0.8[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:main_h-overlay_h"
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]scale=iw*1:ih*0.8[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:main_h-overlay_h"
       ]
     },
     {
@@ -667,7 +667,7 @@
       "details": "📑 Details,Tạo lớp layer mờ phía sau, giữ nguyên chiều rộng và cao, thu nhỏ video xuống 90%, Giữ nguyên tỉ lệ khung hình, Tạo hiệu ứng mờ với độ sigma 20, Căn giữa nội dung chính trong khung hình",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]scale=iw*0.9:ih*0.9[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]scale=iw*0.9:ih*0.9[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
       ]
     },
     {
@@ -678,7 +678,7 @@
       "details": "📑 Details,Tạo lớp layer mờ phía sau, giữ nguyên chiều rộng, fix chiều cao video xuống 20% mỗi cạnh, Giữ nguyên tỉ lệ khung hình, Tạo hiệu ứng mờ với độ sigma 20, Căn giữa nội dung chính trong khung hình",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]scale=iw*1:ih*0.8[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]scale=iw*1:ih*0.8[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
       ]
     },
     {
@@ -689,7 +689,7 @@
       "details": "📑 Details,Tạo lớp layer mờ phía sau, giữ nguyên chiều rộng và cao, thu nhỏ video xuống 90%, Giữ nguyên tỉ lệ khung hình, Tạo hiệu ứng mờ với độ sigma 20, Căn nội dung chính về phía trên khung hình",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]scale=iw*0.9:ih*0.9[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]scale=iw*0.9:ih*0.9[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
       ]
     },
     {
@@ -700,7 +700,7 @@
       "details": "📑 Details,Tạo lớp layer mờ phía sau, giữ nguyên chiều cao, fix chiều rộng video xuống 20% mỗi cạnh, Giữ nguyên tỉ lệ khung hình, Tạo hiệu ứng mờ với độ sigma 20, Căn giữa nội dung chính trong khung hình",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20[blurred];[original]scale=iw*0.8:ih*1[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2[blurred];[original]scale=iw*0.8:ih*1[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2"
       ]
     },
     {
@@ -730,7 +730,7 @@
       "details": "📑 Details,Phóng to nội dung chính lên 120% với nền mờ, Tạo lớp nền mờ với độ sigma 20, Căn giữa nội dung đã phóng to trong khung hình, Sử dụng mã hóa H.264 với CRF 18 và preset superfast",
       "params": [
         "-filter_complex",
-        "[0:v]split=2[main][bg];[bg]gblur=sigma=20,scale=720:1280[blurred];[main]scale=iw*1.2:ih*1.2[main_scaled];[blurred][main_scaled]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]split=2[main][bg];[bg]boxblur=20:2,scale=720:1280[blurred];[main]scale=iw*1.2:ih*1.2[main_scaled];[blurred][main_scaled]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-vcodec",
         "libx264",
         "-crf",
@@ -1610,7 +1610,7 @@
       "details": "📑 Details,Chuyển đổi sang tỉ lệ khung hình 9:16, Điều chỉnh kích thước theo chiều cao với tỉ lệ 9:16, Tạo lớp nền mờ với độ sigma 20, Giữ nguyên chất lượng video gốc",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20,scale=-2:ih*9/16[blurred];[original]scale=-2:ih*9/16[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2,scale=-2:ih*9/16[blurred];[original]scale=-2:ih*9/16[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-c:a",
         "copy"
       ]
@@ -1623,7 +1623,7 @@
       "details": "📑 Details,Chuyển đổi sang tỉ lệ khung hình 9:16, Điều chỉnh kích thước theo chiều cao với tỉ lệ 9:16, Tạo lớp nền mờ với độ sigma 20, Sử dụng mã hóa H.264 với CRF 18 và preset superfast",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20,scale=-2:ih*9/16[blurred];[original]scale=-2:ih*9/16[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2,scale=-2:ih*9/16[blurred];[original]scale=-2:ih*9/16[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-c:v",
         "libx264",
         "-crf",
@@ -1644,7 +1644,7 @@
       "details": "📑 Details,Chuyển đổi sang tỉ lệ khung hình 9:16, Điều chỉnh kích thước theo chiều cao với tỉ lệ 9:16, Tạo lớp nền mờ với độ sigma 20, Sử dụng mã hóa H.264 với CRF 16 và preset slow",
       "params": [
         "-filter_complex",
-        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]gblur=sigma=20,scale=-2:ih*9/16[blurred];[original]scale=-2:ih*9/16[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
+        "[0:v]scale=iw:ih,split=2[original][blurred];[blurred]boxblur=20:2,scale=-2:ih*9/16[blurred];[original]scale=-2:ih*9/16[foreground];[blurred][foreground]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2",
         "-c:v",
         "libx264",
         "-crf",
