@@ -59,6 +59,9 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Added
 
+- settings_dialog.py: NEW module (243 lines, verbatim port from Phase 1) providing modal Settings dialog with 3 tabs (General / Rendering / Advanced). Loads/writes config_video_renderer.json directly via utf-8 json.dump (matches core/config.py encoding contract). Module-level DEFAULTS dict with 9 keys: output_dir, num_threads, use_gpu, nvenc_quality_offset, gpu_error_action, output_collision, show_ffmpeg_command, open_output_when_done, tour_seen. Wired into auto_render.py via toolbar button (settings_btn before help_btn) + open_settings + _reload_config_settings methods.
+- auto_render.py: 5 new config keys plumbed through VideoRendererTool: output_collision (Bug 4 closure default "rename"), gpu_error_action (Step 4c reserve, default "retry_cpu"), nvenc_quality_offset (Step 4f reserve), show_ffmpeg_command (Step 4f reserve), open_output_when_done (Step 4f reserve). Settings dialog persists; reload_config_settings applies runtime-changeable bits on OK accept.
+
 - auto_render.py F4 onboarding/polish (Phase 2.5 F4 spec):
   - 11 tooltip changes: 7 new tooltips on existing widgets (select_btn, delete_btn, help_btn, btn_add_encoder, btn_edit_encoder, btn_delete_encoder, update_btn) + 4 reworded for shortcut hints (dir_btn, open_btn, btn_start, btn_cancel).
   - 5 keyboard shortcuts: Ctrl+O (Add videos), F1 (Help), F5 (Start render), Esc (Cancel render), Del (Remove selected video from queue, scoped to tree_videos).
@@ -123,6 +126,11 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `tests/README.md` "Smoke runner convention" section: documents naming (check_/test_), output shape, tempdir constraint, aggregator script, and per-sub-phase log convention. ~30 lines. Per PARALLEL discovery D7=b. [d856bd3] [v2c-c-6]
 
 ### Changed
+
+- auto_render.py RenderWorker.__init__: signature extended with output_collision="rename" and gpu_error_action="retry_cpu" kw params (defaults match current v2 behavior — no behavior change for callers that don't pass them). Body adds self.output_collision = output_collision and self.gpu_error_action = gpu_error_action assignments. output_collision is consumed in process() Site 4 (Bug 4 closure); gpu_error_action is reserved for Step 4c when GPU pipeline lands and Bug 2 closure becomes possible.
+  BEFORE: RenderWorker.__init__ took only existing 2.5a params; output_collision logic was hardcoded in process() (always avoid_collision).
+  AFTER: ctor accepts output_collision + gpu_error_action; main window plumbs from config via VideoRendererTool.__init__ (self.output_collision = self.config.get("output_collision", "rename")) and passes to RenderWorker. Default values preserve current behavior; Settings dialog change actually takes effect after _reload_config_settings populates self.output_collision then next render reads from there.
+  WHY: enables Bug 4 closure (output_collision honored) and pre-plumbs Bug 2 closure target (gpu_error_action) for Step 4c. [<commit>]
 
 - ADR-0007 (GPU Pipeline architecture for F3): Status promoted from Proposed to Accepted; all 11 [COMMENTARY PLACEHOLDER] blocks filled with finalized commentary.
   BEFORE: Status was Proposed (Step 2 created the structural outline with 9 decisions D1-D9 + Rationale + Alternatives, all marked with [COMMENTARY PLACEHOLDER — Adam: ...] for voice fill); 11 placeholders gating ADR acceptance per ADR best practice (decisions must be locked before implementation).
@@ -189,6 +197,15 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `docs/ROADMAP.md` Done section. BEFORE: 2c-c-6 in Pending blockers; no v2c-c-complete row. AFTER: 2c-c-6 row in Done with feat hash + [v2c-c-6] tag; new "Phase 2c done" row in Done with same feat hash + [v2c-c-complete] tag noting Mac deferral. WHY: Phase 2c stabilization closes here; Phase 2.5 (PORT_NOTES port) and Phase 2d (PySide6 migration) are separate forward work. [d856bd3] [v2c-c-6]
 
 ### Fixed
+
+- PORT_NOTES Bug 4 — output_collision setting had no effect (always renamed) — closed.
+  BEFORE: auto_render.py L143-144 unconditionally called naming_utils.avoid_collision for non-image-encoder outputs, ignoring any user setting. Phase 1 PORT_NOTES line 222 documented the bug; Step 3a's avoid_collision call was the unconditional v2 site.
+  AFTER: auto_render.py L143+ implements 3-way branch on self.output_collision per PORT_NOTES Bug 4 fix sketch — "overwrite" no-op (ffmpeg -y handles), "skip" emits error_occurred + returns if file exists, "rename" (default) calls avoid_collision (preserving image-encoder %03d carve-out). self.output_collision wired through VideoRendererTool.__init__ (config-loaded) + RenderWorker.__init__ (kw param, default "rename") + RenderWorker.process() Site 4.
+  WHY: Bug 4 was the only Phase-2.5 deferred bug whose fix had clear behavior (vs Bug 9 TOCTOU which Step 3a closed at port time). Settings dialog scaffold makes the user-facing surface real. Default value preserves current v2 behavior verbatim — invisible upgrade for existing users.
+- auto_render.py save_config silent-data-loss class — closed.
+  BEFORE: save_config (L699-712) overwrote config_video_renderer.json with a 4-key dict literal {input_files, output_dir, encoder_options, num_threads}, wiping ALL other keys on every save. Same class of bug as the EncoderDialog silent-data-loss closed in 2c-c-4 (ADR-0006). The moment SettingsDialog ships and writes its 5+ new keys, the next save_config call would erase them.
+  AFTER: save_config now reads existing config first via core_config.load(default={}), dict.update()s with main-window-managed keys, writes back. SettingsDialog-managed keys (output_collision, gpu_error_action, nvenc_quality_offset, show_ffmpeg_command, open_output_when_done, plus tour_seen and any future additions) survive each save_config call. Pattern matches PORT_NOTES line 112-116 contract verbatim.
+  WHY: prevents shipping Settings dialog with the same silent-data-loss bug class that ADR-0006's EncoderDialog fix solved. Without this rewrite, output_collision (Bug 4 fix) would be cosmetic only — user picks "skip" in Settings, next save_config overwrites it back to whatever default loaded last.
 
 - PORT_NOTES Bug 9 — TOCTOU race in avoid_collision — closed at port time.
   BEFORE: Phase 1 naming_utils.avoid_collision used `os.path.exists()` then return without atomic reservation; concurrent workers could race past the check and both target the same path.

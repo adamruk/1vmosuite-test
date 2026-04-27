@@ -47,6 +47,7 @@ from core.preset_loader import (
 )
 from core import ffmpeg_runner as core_ffmpeg_runner
 from core import naming_utils
+from settings_dialog import SettingsDialog
 from core.user_data import resolve_or_die, migrate_legacy_configs
 
 
@@ -74,6 +75,8 @@ class RenderWorker(QObject):
         ffmpeg_path: str,
         output_dir: str,
         encoder_params_list: List[List[str]],
+        output_collision: str = "rename",
+        gpu_error_action: str = "retry_cpu",
     ):
         super().__init__()
         self.video_path = video_path
@@ -82,6 +85,8 @@ class RenderWorker(QObject):
         self.ffmpeg_path = ffmpeg_path
         self.output_dir = output_dir
         self.encoder_params_list = encoder_params_list
+        self.output_collision = output_collision
+        self.gpu_error_action = gpu_error_action
         self.is_cancelled = False
 
     def _has_vcodec(self, params):
@@ -140,8 +145,18 @@ class RenderWorker(QObject):
                         output_filename = f"{timestamp}_{safe_encoder_name}_{safe_video_name}_step{i + 1}.mp4"
                 output_file = os.path.join(self.output_dir, output_filename)
                 output_file = naming_utils.clip_to_limit(output_file)
-                if not is_image_encoder:
-                    output_file = naming_utils.avoid_collision(output_file)
+                # Bug 4 fix: honor output_collision setting (3-way branch per PORT_NOTES).
+                if self.output_collision == "overwrite":
+                    pass  # ffmpeg -y handles it
+                elif self.output_collision == "skip":
+                    if os.path.exists(output_file):
+                        self.error_occurred.emit(
+                            f"Skipped (exists): {os.path.basename(output_file)}"
+                        )
+                        return
+                else:  # "rename" default
+                    if not is_image_encoder:
+                        output_file = naming_utils.avoid_collision(output_file)
                 command = [
                     str(self.ffmpeg_path),
                     "-i",
@@ -281,6 +296,8 @@ class VideoRendererTool(QMainWindow):
 
         self.config = self.load_config()
         self.num_threads = self.config.get("num_threads", 3)
+        self.output_collision = self.config.get("output_collision", "rename")
+        self.gpu_error_action = self.config.get("gpu_error_action", "retry_cpu")
         self.encoder_options = self.load_encoder_options()
         self.setup_ui()
         self.setup_style()
@@ -378,10 +395,15 @@ class VideoRendererTool(QMainWindow):
         video_controls.addWidget(select_btn)
         video_controls.addWidget(delete_btn)
         video_controls.addStretch()
+        settings_btn = self.create_video_button(
+            "Settings", self.open_settings, "#fff3e0", "#e65100", "#ffe0b2"
+        )
+        settings_btn.setToolTip("Open Settings dialog")
         help_btn = self.create_video_button(
             "❓ Help", self.show_help, "#e3f2fd", "#1976d2", "#bbdefb"
         )
         help_btn.setToolTip("Open user guide")
+        video_controls.addWidget(settings_btn)
         video_controls.addWidget(help_btn)
         step1_label = QLabel("📥 Step 1: Add videos")
         step1_label.setStyleSheet(
@@ -696,16 +718,39 @@ class VideoRendererTool(QMainWindow):
                 return {}
         return core_config.load(Path(self.CONFIG_FILE), default={})
 
+    def open_settings(self) -> None:
+        """Open the Settings dialog modally and apply changes on OK."""
+        from PyQt5.QtWidgets import QDialog
+
+        dlg = SettingsDialog(self, Path(self.CONFIG_FILE))
+        if dlg.exec_() == QDialog.Accepted:
+            self._reload_config_settings()
+
+    def _reload_config_settings(self) -> None:
+        """Reload config_video_renderer.json and apply runtime-changeable bits."""
+        cfg = core_config.load(Path(self.CONFIG_FILE), default={})
+        # Persist Settings-managed values onto self for next render.
+        self.output_collision = cfg.get("output_collision", "rename")
+        self.gpu_error_action = cfg.get("gpu_error_action", "retry_cpu")
+        # Other Settings keys (use_gpu, nvenc_quality_offset, show_ffmpeg_command,
+        # open_output_when_done) reserved for Step 4c+ when GPU pipeline lands.
+
     def save_config(self) -> None:
         """Lưu cấu hình vào config_video_renderer.json."""
         try:
-            config = {
-                "input_files": self.videos,
-                "output_dir": self.output_directory,
-                "encoder_options": self.selected_encoders,
-                "num_threads": self.num_threads,
-            }
-            core_config.save(Path(self.CONFIG_FILE), config)
+            # Merge-then-write per PORT_NOTES line 112-116: load existing config first
+            # so SettingsDialog-managed keys (output_collision, gpu_error_action, etc.)
+            # are NOT wiped when main window saves its own state.
+            existing = core_config.load(Path(self.CONFIG_FILE), default={})
+            existing.update(
+                {
+                    "input_files": self.videos,
+                    "output_dir": self.output_directory,
+                    "encoder_options": self.selected_encoders,
+                    "num_threads": self.num_threads,
+                }
+            )
+            core_config.save(Path(self.CONFIG_FILE), existing)
         except (OSError, TypeError) as e:
             QMessageBox.warning(
                 self, "Error", f"Failed to save configuration: {str(e)}"
@@ -1118,6 +1163,8 @@ class VideoRendererTool(QMainWindow):
                             str(self.FFMPEG_PATH),
                             self.output_directory,
                             encoder_params_list,
+                            output_collision=self.output_collision,
+                            gpu_error_action=self.gpu_error_action,
                         )
                         worker.progress_updated.connect(self.update_thread_progress)
                         worker.status_updated.connect(self.update_thread_status)
