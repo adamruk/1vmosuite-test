@@ -230,7 +230,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - Bug 2 closure: gpu_error_action="skip_file" now emits error_occurred when GPU encode fails, allowing the batch to advance to the next task per the existing error-handler chain.
   BEFORE: Step 4b shipped gpu_error_action=skip_file as a Settings option but the behavior was unwired (RenderWorker had no GPU branch). Choosing skip_file in Settings did nothing — GPU failures still went through retry_cpu fallback regardless. Hung-batch risk if RenderWorker.process() ever raised.
   AFTER: process() detects rc != 0 + self.gpu_enabled + not is_image_encoder + gpu_error_action == "skip_file" -> emits self.output_updated + self.error_occurred + return early. Existing error_occurred slot decrements active_threads counter and starts the next task. Batch advances cleanly.
-  WHY: PORT_NOTES Bug 2 + ADR-0007 D5 ("batch always continues") + Step 4b's plumbing groundwork. Bug 2 closure was deferred from Step 4b because behavior depended on the GPU branch in process(); Step 4d-ii is the natural home. [<commit>]
+  WHY: PORT_NOTES Bug 2 + ADR-0007 D5 ("batch always continues") + Step 4b's plumbing groundwork. Bug 2 closure was deferred from Step 4b because behavior depended on the GPU branch in process(); Step 4d-ii is the natural home. [f419acc]
 
 - Step 3b-B Decision 2 deferral closed: empty_videos_hint + empty_slots_hint widgets + _update_empty_hints handler + clear_btn (slot X) tooltip now ship in Step 4c.
   BEFORE: Step 3b-B PARALLEL Decision 2 deferred both empty-state hints because they depend on _update_empty_hints handler wiring + sequential-mode slot UI which weren't in F4 scope. The clear_btn (slot X) tooltip was also deferred for the same reason.
