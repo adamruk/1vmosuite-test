@@ -59,6 +59,14 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Added
 
+- auto_render.py F4 onboarding/polish (Phase 2.5 F4 spec):
+  - 11 tooltip changes: 7 new tooltips on existing widgets (select_btn, delete_btn, help_btn, btn_add_encoder, btn_edit_encoder, btn_delete_encoder, update_btn) + 4 reworded for shortcut hints (dir_btn, open_btn, btn_start, btn_cancel).
+  - 5 keyboard shortcuts: Ctrl+O (Add videos), F1 (Help), F5 (Start render), Esc (Cancel render), Del (Remove selected video from queue, scoped to tree_videos).
+  - 2 disabled-state-respecting wrapper methods (_on_start_shortcut + _on_stop_shortcut) per Phase 1 contract — F5/Esc only fire when their respective buttons are enabled.
+  - 2 imports: QShortcut (PyQt5.QtWidgets) + QKeySequence (PyQt5.QtGui).
+  - 4 step labels above each section: "📥 Step 1: Add videos", "🎬 Step 2: Pick presets", "📁 Step 3: Choose output folder", "▶️ Step 4: Start rendering" with Phase 1 verbatim QSS.
+  Per PARALLEL discovery 2026-04-27 Decisions 2+3: emoji + descriptive labels, defer empty-state hints (depend on _update_empty_hints + sequential-mode UI), single feat commit. Settings dialog tooltips (settings_btn, gpu_toggle, clear_btn, btn_start state machine) deferred to Step 4 with parent feature ports. [<commit>]
+
 - core/naming_utils.py: NEW module providing filename construction utilities (timestamp, safe_part, clip_to_limit, avoid_collision) with TOCTOU-safe avoid_collision baked in from day 1 — closes PORT_NOTES Bug 9 (the Phase 1 source had the TOCTOU race; v2 ships fixed). Pure stdlib, no PyQt5 dependency. Wired into auto_render.py at 2 surgical sites (Site 1 timestamp swap + Site 3 output-file collision-avoidance). Site 2 safe_part budget integration + F4 onboarding/polish deferred to Step 3b. [6fda9d8]
 - GPU encoding pipeline via NVENC — **in progress, Phase 1 (detection).** Will ship with hardware capability probing, encoder auto-selection, and CPU fallback. Entry will be finalized with benchmark and ADR links before v2.0.0 is cut.
 - `docs/PHASE_1_STOP_CONDITIONS.md` — lightweight Phase 1 stop-condition document (time budget, 3 hard stops, 3 soft stops) with a binding verification-and-permission protocol. Protocol prohibits automated helpers from rolling back, disabling features, or declaring phase halts autonomously — they must verify signals, produce a structured report, and wait for Adam's explicit decision before proceeding. References `FFMPEG_CPU_TO_NVENC_REFERENCE.md` §1/§6/§7.

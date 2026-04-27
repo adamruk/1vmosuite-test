@@ -11,27 +11,28 @@ import json
 from typing import List, Dict, Any, Optional
 from PyQt5.QtWidgets import (
     QApplication,
-    QMainWindow,
-    QWidget,
-    QPushButton,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QProgressBar,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QTextEdit,
-    QFrame,
-    QMessageBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
     QLineEdit,
-    QComboBox,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
     QRadioButton,
+    QShortcut,
     QSizePolicy,
+    QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QKeySequence
 from help_dialog import HelpDialog
 from updater import DriveUpdater
 import gpu_detect
@@ -304,6 +305,13 @@ class VideoRendererTool(QMainWindow):
                 self.btn_delete.setEnabled(True)
         self.load_encoders_to_tree()
 
+        # Keyboard shortcuts (Phase 2.5 F4 onboarding)
+        QShortcut(QKeySequence("Ctrl+O"), self, self.select_videos)
+        QShortcut(QKeySequence("F1"), self, self.show_help)
+        QShortcut(QKeySequence("F5"), self, self._on_start_shortcut)
+        QShortcut(QKeySequence(Qt.Key_Escape), self, self._on_stop_shortcut)
+        QShortcut(QKeySequence(Qt.Key_Delete), self.tree_videos, self.delete_videos)
+
     def setup_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -359,10 +367,12 @@ class VideoRendererTool(QMainWindow):
         select_btn = self.create_video_button(
             "📥 Select (0)", self.select_videos, "#e3f2fd", "#1976d2", "#bbdefb"
         )
+        select_btn.setToolTip("Add video files (Ctrl+O)")
         select_btn.setObjectName("select_btn")
         delete_btn = self.create_video_button(
             "🗑️ Delete", self.delete_videos, "#ffcdd2", "#c62828", "#ef9a9a", delete=True
         )
+        delete_btn.setToolTip("Remove selected videos from queue (Del)")
         delete_btn.setEnabled(False)
         self.btn_delete = delete_btn
         video_controls.addWidget(select_btn)
@@ -371,7 +381,13 @@ class VideoRendererTool(QMainWindow):
         help_btn = self.create_video_button(
             "❓ Help", self.show_help, "#e3f2fd", "#1976d2", "#bbdefb"
         )
+        help_btn.setToolTip("Open user guide")
         video_controls.addWidget(help_btn)
+        step1_label = QLabel("📥 Step 1: Add videos")
+        step1_label.setStyleSheet(
+            "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
+        )
+        input_layout.addWidget(step1_label)
         input_layout.addLayout(video_controls)
         self.tree_videos = QTreeWidget()
         self.tree_videos.setHeaderLabels(["No.", "Filename", "Duration", "Resolution"])
@@ -385,9 +401,11 @@ class VideoRendererTool(QMainWindow):
         self.btn_add_encoder = self.create_video_button(
             "♻️ Add", self.add_encoder, "#e3f2fd", "#1976d2", "#bbdefb"
         )
+        self.btn_add_encoder.setToolTip("Create a new render preset")
         self.btn_edit_encoder = self.create_video_button(
             "🛠️ Edit", self.edit_encoder, "#fff3e0", "#e65100", "#ffe0b2"
         )
+        self.btn_edit_encoder.setToolTip("Edit the selected preset")
         self.btn_delete_encoder = self.create_video_button(
             "🗑️ Delete",
             self.delete_encoder,
@@ -396,9 +414,11 @@ class VideoRendererTool(QMainWindow):
             "#ef9a9a",
             delete=True,
         )
+        self.btn_delete_encoder.setToolTip("Delete the selected preset")
         update_btn = self.create_video_button(
             "🔄 Refresh", self.reload_all, "#e8f5e9", "#2e7d32", "#c8e6c9"
         )
+        update_btn.setToolTip("Reload presets from Encoder.txt")
         self.group_combo = QComboBox()
         self.group_combo.setFixedWidth(150)
         self.group_combo.setFixedHeight(25)
@@ -412,6 +432,11 @@ class VideoRendererTool(QMainWindow):
         encoder_controls.addStretch()
         encoder_controls.addWidget(QLabel("Filter"))
         encoder_controls.addWidget(self.group_combo)
+        step2_label = QLabel("🎬 Step 2: Pick presets")
+        step2_label.setStyleSheet(
+            "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
+        )
+        config_layout.addWidget(step2_label)
         config_layout.addLayout(encoder_controls)
         self.tree_encoders = QTreeWidget()
         self.tree_encoders.setHeaderLabels(
@@ -528,14 +553,14 @@ class VideoRendererTool(QMainWindow):
         dir_btn = QPushButton("📍 Directory")
         dir_btn.setFixedWidth(150)
         dir_btn.setFixedHeight(35)
-        dir_btn.setToolTip("Select Output Directory")
+        dir_btn.setToolTip("Choose output folder")
         dir_btn.clicked.connect(self.select_output_directory)
         self.dir_label = QLabel("Not selected")
         self.dir_label.setStyleSheet("padding-left: 10px; padding-right: 10px;")
         open_btn = QPushButton("📂 Open")
         open_btn.setFixedWidth(150)
         open_btn.setFixedHeight(35)
-        open_btn.setToolTip("Open Output Directory")
+        open_btn.setToolTip("Open output folder in Explorer")
         open_btn.clicked.connect(self.open_output_directory)
         top_controls.addWidget(dir_btn)
         top_controls.addWidget(self.dir_label, stretch=1)
@@ -545,19 +570,29 @@ class VideoRendererTool(QMainWindow):
         self.btn_start = QPushButton("🚀 Start")
         self.btn_start.setFixedWidth(150)
         self.btn_start.setFixedHeight(30)
-        self.btn_start.setToolTip("Start Rendering")
+        self.btn_start.setToolTip("Begin rendering (F5)")
         self.btn_start.clicked.connect(self.start_render)
         self.btn_cancel = QPushButton("🛑 Stop")
         self.btn_cancel.setFixedWidth(150)
         self.btn_cancel.setFixedHeight(30)
-        self.btn_cancel.setToolTip("Stop Rendering")
+        self.btn_cancel.setToolTip("Cancel current renders (Esc)")
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setProperty("delete", True)
         self.btn_cancel.clicked.connect(self.cancel_render)
         bottom_controls.addWidget(self.btn_start)
         bottom_controls.addWidget(self.btn_cancel)
         bottom_controls.addStretch(1)
+        step3_label = QLabel("📁 Step 3: Choose output folder")
+        step3_label.setStyleSheet(
+            "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
+        )
+        controls_layout.addWidget(step3_label)
         controls_layout.addLayout(top_controls)
+        step4_label = QLabel("▶️ Step 4: Start rendering")
+        step4_label.setStyleSheet(
+            "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
+        )
+        controls_layout.addWidget(step4_label)
         controls_layout.addLayout(bottom_controls)
         output_layout.addWidget(controls_frame)
         self.tree_output = core_widgets.create_output_tree(
@@ -723,6 +758,16 @@ class VideoRendererTool(QMainWindow):
         if user_presets:
             presets.extend(user_presets)
         return presets
+
+    def _on_start_shortcut(self):
+        """F5 shortcut handler - only fires if start button is enabled (per Phase 1 contract)."""
+        if self.btn_start.isEnabled():
+            self.start_render()
+
+    def _on_stop_shortcut(self):
+        """Esc shortcut handler - only fires if cancel button is enabled (per Phase 1 contract)."""
+        if self.btn_cancel.isEnabled():
+            self.cancel_render()
 
     def select_videos(self):
         """Chọn nhiều video từ thư mục đầu vào."""
