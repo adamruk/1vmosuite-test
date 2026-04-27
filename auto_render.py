@@ -31,7 +31,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QSemaphore
 from PyQt5.QtGui import QIcon, QKeySequence
 from help_dialog import HelpDialog
 from updater import DriveUpdater
@@ -48,6 +48,7 @@ from core.preset_loader import (
 from core import ffmpeg_runner as core_ffmpeg_runner
 from core import naming_utils
 from settings_dialog import SettingsDialog
+from core import preset_translator
 from core.user_data import resolve_or_die, migrate_legacy_configs
 
 SEQUENTIAL_SLOT_COUNT = 8
@@ -79,6 +80,11 @@ class RenderWorker(QObject):
         encoder_params_list: List[List[str]],
         output_collision: str = "rename",
         gpu_error_action: str = "retry_cpu",
+        gpu_enabled: bool = False,
+        gpu_codec: str = "h264_nvenc",
+        gpu_preset: str = "p4",
+        gpu_max_quality_mode: bool = False,
+        gpu_semaphore=None,
     ):
         super().__init__()
         self.video_path = video_path
@@ -89,6 +95,11 @@ class RenderWorker(QObject):
         self.encoder_params_list = encoder_params_list
         self.output_collision = output_collision
         self.gpu_error_action = gpu_error_action
+        self.gpu_enabled = gpu_enabled
+        self.gpu_codec = gpu_codec
+        self.gpu_preset = gpu_preset
+        self.gpu_max_quality_mode = gpu_max_quality_mode
+        self.gpu_semaphore = gpu_semaphore
         self.is_cancelled = False
 
     def _has_vcodec(self, params):
@@ -159,6 +170,16 @@ class RenderWorker(QObject):
                 else:  # "rename" default
                     if not is_image_encoder:
                         output_file = naming_utils.avoid_collision(output_file)
+                # GPU pipeline (ADR-0007 D2/D3/D7): translate encoder_params for NVENC.
+                # Phase 1 fallback contract: save ORIGINAL params before translator mutates them.
+                encoder_params_original = list(encoder_params)
+                if self.gpu_enabled and not is_image_encoder:
+                    encoder_params = preset_translator.translate_to_nvenc(
+                        encoder_params,
+                        codec=self.gpu_codec,
+                        preset=self.gpu_preset,
+                        max_quality_mode=self.gpu_max_quality_mode,
+                    )
                 command = [
                     str(self.ffmpeg_path),
                     "-i",
@@ -166,7 +187,10 @@ class RenderWorker(QObject):
                 ] + encoder_params
                 if not is_image_encoder:
                     if not self._has_vcodec(encoder_params):
-                        command.extend(["-c:v", "libx264"])
+                        if self.gpu_enabled:
+                            command.extend(["-c:v", self.gpu_codec])
+                        else:
+                            command.extend(["-c:v", "libx264"])
                     if not self._has_acodec(encoder_params):
                         command.extend(["-c:a", "aac"])
                 command.extend(["-y", str(Path(output_file))])
@@ -176,6 +200,10 @@ class RenderWorker(QObject):
                 self.output_updated.emit(
                     f"Command: {' '.join((str(x) for x in command))}\n\n"
                 )
+                # QSemaphore gate per ADR-0007 D6: limit concurrent NVENC sessions.
+                _gpu_path_taken = self.gpu_enabled and not is_image_encoder
+                if _gpu_path_taken and self.gpu_semaphore is not None:
+                    self.gpu_semaphore.acquire()
                 rc = core_ffmpeg_runner.run_ffmpeg(
                     command,
                     dialect="legacy_stderr",
@@ -185,6 +213,42 @@ class RenderWorker(QObject):
                     on_output_line=lambda line: self.output_updated.emit(line + "\n"),
                     should_cancel=lambda: self.is_cancelled,
                 )
+                if _gpu_path_taken and self.gpu_semaphore is not None:
+                    self.gpu_semaphore.release()
+                # CPU fallback per ADR-0007 D5: GPU encode failed, honor gpu_error_action.
+                # Bug 2 closure: skip_file branch emits error_occurred so existing handler advances batch.
+                if rc != 0 and _gpu_path_taken:
+                    if self.gpu_error_action == "skip_file":
+                        self.output_updated.emit(
+                            "\nGPU encode failed, skipping per gpu_error_action=skip_file.\n"
+                        )
+                        self.error_occurred.emit(
+                            f"Skipped (GPU failed): {os.path.basename(output_file)}"
+                        )
+                        return
+                    # Default retry_cpu: rebuild command with original (untranslated) params.
+                    self.output_updated.emit("\nGPU encode failed, retrying on CPU.\n")
+                    cpu_command = [
+                        str(self.ffmpeg_path),
+                        "-i",
+                        str(Path(current_input)),
+                    ] + encoder_params_original
+                    if not self._has_vcodec(encoder_params_original):
+                        cpu_command.extend(["-c:v", "libx264"])
+                    if not self._has_acodec(encoder_params_original):
+                        cpu_command.extend(["-c:a", "aac"])
+                    cpu_command.extend(["-y", str(Path(output_file))])
+                    rc = core_ffmpeg_runner.run_ffmpeg(
+                        cpu_command,
+                        dialect="legacy_stderr",
+                        on_progress=lambda pct: self.progress_updated.emit(
+                            self.thread_index, pct
+                        ),
+                        on_output_line=lambda line: self.output_updated.emit(
+                            line + "\n"
+                        ),
+                        should_cancel=lambda: self.is_cancelled,
+                    )
                 if self.is_cancelled:
                     self.status_updated.emit(self.thread_index, "Cancelled")
                     self.progress_updated.emit(self.thread_index, 0)
@@ -300,6 +364,12 @@ class VideoRendererTool(QMainWindow):
         self.num_threads = self.config.get("num_threads", 3)
         self.output_collision = self.config.get("output_collision", "rename")
         self.gpu_error_action = self.config.get("gpu_error_action", "retry_cpu")
+        self.gpu_enabled = self.config.get("gpu_enabled", False)
+        self.gpu_codec = self.config.get("gpu_codec", "h264_nvenc")
+        self.gpu_preset = self.config.get("gpu_preset", "p4")
+        self.gpu_max_quality_mode = self.config.get("gpu_max_quality_mode", False)
+        self.gpu_max_concurrent = self.config.get("gpu_max_concurrent", 2)
+        self._gpu_semaphore = QSemaphore(self.gpu_max_concurrent)
         self.encoder_options = self.load_encoder_options()
         self.setup_ui()
         self.setup_style()
@@ -1285,6 +1355,11 @@ class VideoRendererTool(QMainWindow):
                             encoder_params_list,
                             output_collision=self.output_collision,
                             gpu_error_action=self.gpu_error_action,
+                            gpu_enabled=self.gpu_enabled,
+                            gpu_codec=self.gpu_codec,
+                            gpu_preset=self.gpu_preset,
+                            gpu_max_quality_mode=self.gpu_max_quality_mode,
+                            gpu_semaphore=self._gpu_semaphore,
                         )
                         worker.progress_updated.connect(self.update_thread_progress)
                         worker.status_updated.connect(self.update_thread_status)
