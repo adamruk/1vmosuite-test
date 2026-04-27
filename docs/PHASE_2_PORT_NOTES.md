@@ -6,6 +6,42 @@ document is a checklist, not a diff; you'll be cherry-picking changes.
 
 ---
 
+## Status — what has already shipped in v2
+
+This section is amended-on-pickup (Phase 2.5 entry, 2026-04-27). The original
+Phase 1 -> v2 port spec below is preserved as historical context; the Status
+block here records what is already in v2 and does NOT need re-porting.
+
+**Bug fixes table — port status:**
+
+| # | Bug | v2 status |
+|---|---|---|
+| 1 | Trailing `-c:v` overrode preset codec | SHIPPED in v2 via Path B [c03433a] (`_has_vcodec` helper) |
+| 2 | `gpu_error_action='skip_file'` hung batch | TO PORT in Phase 2.5 (depends on Settings dialog F1) |
+| 3 | `closeEvent` crashed on None workers | SHIPPED in v2 via Path B [c03433a] (None-worker guard) |
+| 4 | `output_collision` setting had no effect | TO PORT in Phase 2.5 (depends on Settings dialog F1) |
+| 5 | `QThread.started` double-spawn / RuntimeError | SHIPPED in v2 via Path B [c03433a] (`started.disconnect`) |
+| 6 | Out-of-order completion stamped wrong row | SHIPPED in v2 via Path B [c03433a] (`tree_item`/`task_index` stamp) |
+| 7 | `output_text` (FFmpeg log) unbounded growth | SHIPPED in v2 via Path B [c03433a] (`setMaximumBlockCount(2000)`) |
+| 8 | Config files cp1252 -> utf-8 | SHIPPED in v2 via core/config.py (lines 26 + 46 use `encoding='utf-8'`) |
+
+**Known issues — port status:**
+
+| Issue | v2 status |
+|---|---|
+| 1. Bug 9 TOCTOU in `naming_utils.avoid_collision` | STILL OPEN — port to Phase 2.5 with naming_utils (F2). Only true open deferred issue. |
+| 2. `-c:a copy` overridden by `-c:a aac` | SHIPPED in v2 via Path B [c03433a] (`_has_acodec` helper) |
+| 3. `gblur=sigma=20` perf bottleneck | SHIPPED in v2 via [89dcdce] + [2629ffe] (`boxblur=20:2` in 14 presets across .txt and .json) |
+
+**Baseline drift since spec was written:** EncoderDialog has been rewired in
+2c-c-3 + 2c-c-4 (preset ID schema v2, prefix-namespaced IDs). The PORT_NOTES
+spec below predates this work; some integration points may have shifted. Port
+work in Phase 2.5 should treat the current EncoderDialog as the v2 baseline,
+not the Phase 1 source referenced in this spec.
+
+---
+
+
 ## TL;DR
 
 - Big GPU/NVENC story, Settings dialog, onboarding polish, 59-char filename
@@ -335,8 +371,7 @@ Single Encoder.txt edit per preset, no source change needed.
 9. **Asset edit**: `assets/Encoder.txt` line 100 (`9:16 CRF High`).
 10. **Build artifacts**: bundled config, README.txt at top of dist.
 11. **PyInstaller build** with the recipe below.
-12. **Decide on the 3 known issues**: fix Bug 9 atomicity? swap gblur
-    for boxblur? add `_has_acodec`?
+12. **Decide on Bug 9 TOCTOU atomicity** (only remaining open issue — gblur swap shipped via [89dcdce] + [2629ffe], `_has_acodec` shipped via Path B [c03433a]).
 
 Most invasive single edit is the `process()` rewrite. Take a backup
 before that one specifically. The rest are additive.

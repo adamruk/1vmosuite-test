@@ -33,6 +33,8 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 
 | Phase | Scope summary | Est | Detail |
 |---|---|---|---|
+| **2.5** | PORT_NOTES port from Phase 1: Settings dialog (F1), naming_utils + 59-char filename (F2), GPU/NVENC pipeline (F3, see ADR-0007), onboarding & polish (F4), default render slots (F5). Plus Bugs 2 + 4 (gated on F1) + Bug 9 TOCTOU (bundled with F2). | [TBD] | Spec: docs/PHASE_2_PORT_NOTES.md; F3 design: docs/decisions/ADR-0007-gpu-pipeline.md |
+| **2.5.1** | Per-task + batch ETA in auto_render.py. Builds on F3 GPU pipeline (Step 5.5, post-v2.5-complete tag, pre-Phase-2d migration start). | [TBD] | BACKLOG: B-010 |
 | **2d** | PyQt5 → PySide6 migration. Mac-quality-forced for current team. PySide6 6.9.1 target (not 6.9.2). 30-line `core/_qt.py` scaffold, libcst rewriter, Nuitka packaging. | 3-4 weeks | Playbook TBD |
 
 **Phase 2 done = all rows above shipped.** Estimate: ~100-155 hours solo. At 6 hrs/day × 5 days = 3-5 calendar weeks. At 4 hrs/day × 5 days = 5-8 weeks.

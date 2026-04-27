@@ -32,6 +32,21 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ---
 
+## B-010: Per-task + batch ETA in auto_render.py
+
+- **Status:** scheduled
+- **Pickup:** post-v2.5-complete tag, pre-Phase-2d migration start (Step 5.5 in docs/ROADMAP.md)
+- **Scope:** ~80-120 LoC; QLabel display in auto_render.py + new core/eta_estimator.py helper; EMA smoothing window 5-10 progress updates; per-task ETA + batch ETA math
+- **Source:** ffmpeg progress parser already extracts out_time_us in core/ffmpeg_runner.py (Phase 2a/5b)
+- **Dependencies (all land in Phase 2.5):**
+  - F3 GPU pipeline (Step 4) — single ETA implementation covers CPU + NVENC paths, no rewrite later
+  - Settings dialog (Step 4) — ETA on/off + smoothing window as settings options
+  - Slot defaults (Step 4) — multi-task batch context for batch-ETA math
+  - F4 onboarding tooltip infrastructure (Step 3) — for "±30% in first quarter, calibrating..." hover-help
+- **Why pre-Phase-2d:** ~+1% to the 8,612 LoC migration sweep (cheap); avoids writing PySide6 from scratch without templates
+- **Trigger for pickup:** v2.5-complete tag landed
+- **Surfaced by:** Adam, planning chat 2026-04-27 (during Phase 2.5 step 1.5 verification)
+
 ## Resolved
 
 - **B-001** — ADR-0001 missing Decision makers field. Resolved [df1125a] 2026-04-27.
