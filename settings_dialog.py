@@ -34,12 +34,18 @@ DEFAULTS = {
     "output_dir": "",
     "num_threads": 3,
     "use_gpu": True,
-    "nvenc_quality_offset": 3,
     "gpu_error_action": "retry_cpu",
     "output_collision": "overwrite",
     "show_ffmpeg_command": True,
     "open_output_when_done": False,
     "tour_seen": True,
+    # Phase 2.5b GPU pipeline keys per ADR-0007 D8.
+    "gpu_enabled": False,
+    "gpu_codec": "h264_nvenc",
+    "gpu_preset": "p4",
+    "gpu_max_concurrent": 2,
+    "gpu_container_override": None,
+    "gpu_max_quality_mode": False,
 }
 
 
@@ -47,7 +53,6 @@ class SettingsDialog(QDialog):
     GPU_ERROR_OPTIONS = [
         ("retry_cpu", "Retry on CPU"),
         ("skip_file", "Skip file"),
-        ("stop_batch", "Stop batch"),
     ]
     COLLISION_OPTIONS = [
         ("overwrite", "Overwrite"),
@@ -68,6 +73,7 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._build_general_tab(), "General")
         self.tabs.addTab(self._build_rendering_tab(), "Rendering")
         self.tabs.addTab(self._build_advanced_tab(), "Advanced")
+        self.tabs.addTab(self._build_gpu_pipeline_tab(), "GPU Pipeline")
         layout.addWidget(self.tabs)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -128,16 +134,6 @@ class SettingsDialog(QDialog):
             "Effective only if a supported NVIDIA GPU is detected."
         )
         form.addRow("", self.use_gpu_check)
-
-        self.quality_offset_spin = QSpinBox()
-        self.quality_offset_spin.setRange(-5, 5)
-        self.quality_offset_spin.setValue(int(self._get("nvenc_quality_offset")))
-        self.quality_offset_spin.setToolTip(
-            "Offset added to a preset's libx264 -crf value when translating "
-            "to NVENC -cq. NVENC's CQ scale tends to need a slightly higher "
-            "number for matched perceptual quality. Default +3."
-        )
-        form.addRow("Quality offset for NVENC:", self.quality_offset_spin)
 
         self.gpu_error_combo = QComboBox()
         for value, label in self.GPU_ERROR_OPTIONS:
@@ -209,11 +205,64 @@ class SettingsDialog(QDialog):
         self.output_dir_edit.setText(DEFAULTS["output_dir"])
         self.threads_spin.setValue(DEFAULTS["num_threads"])
         self.use_gpu_check.setChecked(DEFAULTS["use_gpu"])
-        self.quality_offset_spin.setValue(DEFAULTS["nvenc_quality_offset"])
         self._set_combo_data(self.gpu_error_combo, DEFAULTS["gpu_error_action"])
         self._set_combo_data(self.collision_combo, DEFAULTS["output_collision"])
         self.show_cmd_check.setChecked(DEFAULTS["show_ffmpeg_command"])
         self.open_done_check.setChecked(DEFAULTS["open_output_when_done"])
+
+    def _build_gpu_pipeline_tab(self):
+        """Build the GPU Pipeline tab with NVENC controls per ADR-0007 D2/D3/D4/D6/D7/D8."""
+        page = QWidget()
+        form = QFormLayout(page)
+
+        # Master enable (canonical key per ADR-0007 D8; mirrors legacy use_gpu)
+        self.gpu_enabled_check = QCheckBox("Enable GPU encoding (NVENC)")
+        self.gpu_enabled_check.setChecked(bool(self._get("gpu_enabled")))
+        form.addRow("", self.gpu_enabled_check)
+
+        # Codec dropdown per ADR-0007 D4
+        self.gpu_codec_combo = QComboBox()
+        for value, label in [
+            ("h264_nvenc", "H.264 (NVENC) - fast, universal"),
+            ("hevc_nvenc", "HEVC (NVENC) - smaller files"),
+            ("av1_nvenc", "AV1 (NVENC) - smallest, experimental"),
+        ]:
+            self.gpu_codec_combo.addItem(label, value)
+        self._set_combo_data(self.gpu_codec_combo, self._get("gpu_codec"))
+        form.addRow("Codec:", self.gpu_codec_combo)
+
+        # Preset dropdown per ADR-0007 D2 (p1-p7)
+        self.gpu_preset_combo = QComboBox()
+        for p_value in ["p1", "p2", "p3", "p4", "p5", "p6", "p7"]:
+            self.gpu_preset_combo.addItem(p_value, p_value)
+        self._set_combo_data(self.gpu_preset_combo, self._get("gpu_preset"))
+        form.addRow("Preset (p1=fast, p7=quality):", self.gpu_preset_combo)
+
+        # Concurrent sessions per ADR-0007 D6
+        self.gpu_max_concurrent_spin = QSpinBox()
+        self.gpu_max_concurrent_spin.setRange(1, 8)
+        self.gpu_max_concurrent_spin.setValue(int(self._get("gpu_max_concurrent") or 2))
+        form.addRow("Max concurrent NVENC sessions:", self.gpu_max_concurrent_spin)
+
+        # Container override per ADR-0007 D4
+        self.gpu_container_combo = QComboBox()
+        self.gpu_container_combo.addItem("Use codec default (mp4 / mkv)", None)
+        for ext in ["mp4", "mkv", "mov"]:
+            self.gpu_container_combo.addItem(f".{ext}", ext)
+        current_override = self._get("gpu_container_override")
+        idx = self.gpu_container_combo.findData(current_override)
+        if idx >= 0:
+            self.gpu_container_combo.setCurrentIndex(idx)
+        form.addRow("Container override:", self.gpu_container_combo)
+
+        # Max-quality mode per ADR-0007 D7 (multipass=2 + p7)
+        self.gpu_max_quality_check = QCheckBox(
+            "Max quality mode (multipass=2; slower but higher VMAF)"
+        )
+        self.gpu_max_quality_check.setChecked(bool(self._get("gpu_max_quality_mode")))
+        form.addRow("", self.gpu_max_quality_check)
+
+        return page
 
     # --- save --------------------------------------------------------------
 
@@ -221,11 +270,18 @@ class SettingsDialog(QDialog):
         self.config["output_dir"] = self.output_dir_edit.text().strip()
         self.config["num_threads"] = self.threads_spin.value()
         self.config["use_gpu"] = self.use_gpu_check.isChecked()
-        self.config["nvenc_quality_offset"] = self.quality_offset_spin.value()
         self.config["gpu_error_action"] = self.gpu_error_combo.currentData()
         self.config["output_collision"] = self.collision_combo.currentData()
         self.config["show_ffmpeg_command"] = self.show_cmd_check.isChecked()
         self.config["open_output_when_done"] = self.open_done_check.isChecked()
+        # Phase 2.5b GPU pipeline writes per ADR-0007 D8
+        self.config["gpu_enabled"] = self.gpu_enabled_check.isChecked()
+        self.config["use_gpu"] = self.gpu_enabled_check.isChecked()  # legacy alias
+        self.config["gpu_codec"] = self.gpu_codec_combo.currentData()
+        self.config["gpu_preset"] = self.gpu_preset_combo.currentData()
+        self.config["gpu_max_concurrent"] = self.gpu_max_concurrent_spin.value()
+        self.config["gpu_container_override"] = self.gpu_container_combo.currentData()
+        self.config["gpu_max_quality_mode"] = self.gpu_max_quality_check.isChecked()
         if self._tour_reset_flag:
             self.config["tour_seen"] = False
         try:

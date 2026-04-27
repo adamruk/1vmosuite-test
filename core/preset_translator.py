@@ -1,0 +1,109 @@
+"""CRF -> CQ preset translator for NVENC GPU encoding.
+
+Translates ffmpeg parameter lists from CPU codecs (libx264/libx265) to NVENC
+codecs (h264_nvenc/hevc_nvenc/av1_nvenc) per ADR-0007 D2/D3/D7.
+
+Per ADR-0007 D3: CRF -> CQ +2 rule with vbr rate control.
+Per ADR-0007 D2: legacy presets (slow/hq/llhq/hp) mapped to p1-p7 family.
+Per ADR-0007 D7: multipass=0 default; multipass=2 only when max_quality_mode.
+
+Used by RenderWorker.process() in Step 4d-ii to translate encoder_params before
+ffmpeg invocation. encoder_params_original is preserved by the caller for CPU
+fallback per ADR-0007 D5.
+"""
+
+# Legacy preset name -> p-family mapping per ADR-0007 D2.
+# Phase 1 used this same mapping for translator output; preserved verbatim.
+_PRESET_MAP = {
+    "ultrafast": "p1",
+    "veryfast": "p2",
+    "fast": "p3",
+    "medium": "p5",
+    "slow": "p7",
+    "slower": "p7",
+    "veryslow": "p7",
+}
+
+# CPU codec -> NVENC codec mapping per ADR-0007 D4.
+_CODEC_MAP = {
+    "libx264": "h264_nvenc",
+    "libx265": "hevc_nvenc",
+    # libsvtav1 / libaom-av1 -> av1_nvenc requires explicit user opt-in via
+    # gpu_codec setting; not auto-mapped here. Pass through unchanged.
+}
+
+# CRF -> CQ offset per ADR-0007 D3. Hardcoded +2 (NOT user-configurable).
+# Per-codec rules locked after D9 VMAF validation gate runs on RTX 4080.
+CRF_TO_CQ_OFFSET = 2
+
+
+def translate_to_nvenc(
+    params: list[str],
+    codec: str = "h264_nvenc",
+    preset: str = "p4",
+    max_quality_mode: bool = False,
+) -> list[str]:
+    """Translate CPU encoder params to NVENC equivalents.
+
+    Args:
+        params: ffmpeg parameter list, e.g. ["-c:v", "libx264", "-crf", "20", ...]
+        codec: target NVENC codec ("h264_nvenc" / "hevc_nvenc" / "av1_nvenc")
+        preset: NVENC preset (p1-p7); default "p4" per ADR-0007 D2
+        max_quality_mode: if True, append -multipass 2 per ADR-0007 D7
+
+    Returns:
+        Translated parameter list. Unknown codecs / parameters pass through unchanged.
+    """
+    out: list[str] = []
+    i = 0
+    saw_preset = False
+
+    while i < len(params):
+        p = params[i]
+
+        # -c:v / -vcodec -> map to NVENC codec
+        if p in ("-c:v", "-vcodec") and i + 1 < len(params):
+            input_codec = params[i + 1]
+            mapped = _CODEC_MAP.get(input_codec, input_codec)
+            # If user explicitly chose codec via Settings, respect codec arg over preset map.
+            if input_codec in _CODEC_MAP:
+                out.extend([p, codec])
+            else:
+                out.extend([p, mapped])
+            i += 2
+            continue
+
+        # -crf -> -cq:v with +2 rule + vbr rate control + b:v 0 trap-avoid
+        if p == "-crf" and i + 1 < len(params):
+            try:
+                crf_value = int(params[i + 1])
+                cq_value = crf_value + CRF_TO_CQ_OFFSET
+                out.extend(["-cq:v", str(cq_value), "-rc:v", "vbr", "-b:v", "0"])
+            except ValueError:
+                # Non-integer CRF (rare, e.g. fractional); pass through unchanged.
+                out.extend([p, params[i + 1]])
+            i += 2
+            continue
+
+        # -preset -> map legacy name to p-family per ADR-0007 D2
+        if p == "-preset" and i + 1 < len(params):
+            mapped = _PRESET_MAP.get(params[i + 1], preset)
+            out.extend([p, mapped])
+            saw_preset = True
+            i += 2
+            continue
+
+        out.append(p)
+        i += 1
+
+    # If input had no -c:v at all, do NOT inject one — caller (RenderWorker) handles
+    # default codec injection per existing _has_vcodec check.
+
+    # If input had no -preset, append the default per ADR-0007 D2.
+    if not saw_preset:
+        out.extend(["-preset", preset])
+
+    # Append -multipass per ADR-0007 D7. multipass=0 default; 2 if max_quality_mode.
+    out.extend(["-multipass", "2" if max_quality_mode else "0"])
+
+    return out
