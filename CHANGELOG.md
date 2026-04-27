@@ -116,6 +116,11 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- auto_render.py: filename construction now pre-allocates per-segment budget per PORT_NOTES filename pipeline contract.
+  BEFORE: safe_video_name and safe_encoder_name were char-filter joins (`"".join(c for c in name if c.isalnum() or c in [" ","-","_"])`) with no length budget; under long video names + long preset names the full filename frequently exceeded MAX_FILENAME=59, triggering naming_utils.clip_to_limit's last-resort guard which truncates the BASE — meaning the encoder-name portion could be silently truncated mid-token, losing identity.
+  AFTER: per-iteration tail_max computed from the 4 possible f-string output_filename branches (`_final.mp4` / `_%03d.jpg` / `_step{N}.mp4` / `_step{N}_%03d.jpg`); fixed_overhead = len(timestamp) + 2 + tail_max; avail = MAX_FILENAME - fixed_overhead; split 1:2 between encoder (max(3, avail // 3)) and video (max(3, avail - enc_budget)). naming_utils.safe_part applies the budget. Whitespace in video names now collapses to underscore per Phase 1 safe_part contract (was: preserved as space).
+  WHY: clip_to_limit at L134 is a fail-safe; budget pre-allocation is the primary correctness mechanism. Pre-allocation prevents mid-token truncation of preset identity in long-name scenarios. Per PORT_NOTES line 102-105 filename pipeline spec + PARALLEL discovery 2026-04-27 Decision 1 = (b) restructure with explicit budget vars. [<commit>]
+
 - auto_render.py: timestamp generation switched from inline `datetime.now().strftime("%y%m%d_%H%M%S")` (13 chars, 2-digit year) to `naming_utils.timestamp()` (15 chars, 4-digit year per ISO 8601 sortability convention).
   BEFORE: 2-digit year ambiguous past 2099, 13-char overhead in 59-char filename budget.
   AFTER: 4-digit year unambiguous for archival sort, 15-char overhead (2 chars more from filename budget).

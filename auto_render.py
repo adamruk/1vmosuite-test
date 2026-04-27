@@ -110,12 +110,20 @@ class RenderWorker(QObject):
                 encoder_name = (
                     encoder_parts[1] if len(encoder_parts) > 1 else encoder_name
                 )
-                safe_video_name = "".join(
-                    (c for c in video_name if c.isalnum() or c in [" ", "-", "_"])
-                )
-                safe_encoder_name = "".join(
-                    (c for c in encoder_name if c.isalnum() or c in [" ", "-", "_"])
-                )
+                # Filename budget pre-allocation (PORT_NOTES filename pipeline contract):
+                # compute tail_max for this iteration, then split remaining budget enc/vid 1:2.
+                if i == len(self.encoder_names) - 1:
+                    tail_max = 10  # "_final.mp4" or "_%03d.jpg"
+                else:
+                    tail_max = 14 + len(str(i + 1))  # "_step{N}_%03d.jpg" worst-case
+                fixed_overhead = (
+                    len(timestamp) + 2 + tail_max
+                )  # 2 = the two underscores in "{ts}_{enc}_{vid}{tail}"
+                avail = naming_utils.MAX_FILENAME - fixed_overhead
+                enc_budget = max(3, avail // 3)
+                vid_budget = max(3, avail - enc_budget)
+                safe_encoder_name = naming_utils.safe_part(encoder_name, enc_budget)
+                safe_video_name = naming_utils.safe_part(video_name, vid_budget)
                 is_image_encoder = any(
                     (param in ["-f", "image2"] for param in encoder_params)
                 )
