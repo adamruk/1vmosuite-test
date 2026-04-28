@@ -6,6 +6,7 @@
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 import json
 from typing import List, Dict, Any, Optional
@@ -1244,7 +1245,9 @@ class VideoRendererTool(QMainWindow):
                 total_tasks = len(self.videos)
             else:
                 total_tasks = len(self.videos) * len(self.selected_encoders)
-            self.progress_label.setText(f"Progress: 0/{total_tasks} renders")
+            self.progress_label.setText(
+                f"Progress: 0/{total_tasks} renders | ETA: calculating..."
+            )
             self.current_label.setText("Currently Rendering: None")
             self.tree_output.clear()
             self.output_mapping.clear()
@@ -1258,6 +1261,9 @@ class VideoRendererTool(QMainWindow):
             self.total_tasks = total_tasks
             self.active_threads = 0
             self.completed_tasks = 0
+            self.batch_start_time = time.time()
+            self.task_durations: list[float] = []
+            self.last_task_start_time = self.batch_start_time
             self.all_tasks = []
             if self.sequential_mode:
                 for video_idx, video_path in enumerate(self.videos):
@@ -1459,6 +1465,33 @@ class VideoRendererTool(QMainWindow):
             self.output_text.verticalScrollBar().maximum()
         )
 
+    def _compute_eta_string(self) -> str:
+        """Compute recency-weighted ETA string (last 5 tasks).
+
+        Returns "M:SS" or "H:MM:SS" depending on magnitude.
+        Returns "calculating..." if no completed tasks yet.
+        """
+        if not self.task_durations:
+            return "calculating..."
+        # Recency-weighted: average of last 5 task durations
+        recent = self.task_durations[-5:]
+        avg_per_task = sum(recent) / len(recent)
+        remaining = max(0, self.total_tasks - self.completed_tasks)
+        eta_seconds = int(avg_per_task * remaining)
+        if eta_seconds >= 3600:
+            h, rem = divmod(eta_seconds, 3600)
+            m, s = divmod(rem, 60)
+            return f"{h}:{m:02d}:{s:02d}"
+        m, s = divmod(eta_seconds, 60)
+        return f"{m}:{s:02d}"
+
+    def _record_task_duration(self) -> None:
+        """Record duration of the just-completed task."""
+        now = time.time()
+        elapsed = now - self.last_task_start_time
+        self.task_durations.append(elapsed)
+        self.last_task_start_time = now
+
     def on_render_completed(self, output_filename: str):
         """Xử lý khi render hoàn thành."""
         if not self.is_rendering:
@@ -1484,8 +1517,9 @@ class VideoRendererTool(QMainWindow):
         box_index = getattr(worker, "task_index", self.completed_tasks)
         self.update_box_color(box_index, "green")
         self.completed_tasks += 1
+        self._record_task_duration()
         self.progress_label.setText(
-            f"Progress: {self.completed_tasks}/{self.total_tasks} renders"
+            f"Progress: {self.completed_tasks}/{self.total_tasks} renders | ETA: {self._compute_eta_string()}"
         )
         self.active_threads -= 1
         thread_index = worker.thread_index
@@ -1545,8 +1579,9 @@ class VideoRendererTool(QMainWindow):
         box_index = getattr(worker, "task_index", self.completed_tasks)
         self.update_box_color(box_index, "red")
         self.completed_tasks += 1
+        self._record_task_duration()
         self.progress_label.setText(
-            f"Progress: {self.completed_tasks}/{self.total_tasks} renders"
+            f"Progress: {self.completed_tasks}/{self.total_tasks} renders | ETA: {self._compute_eta_string()}"
         )
         thread_index = worker.thread_index
         if 0 <= thread_index < len(self.render_workers):
