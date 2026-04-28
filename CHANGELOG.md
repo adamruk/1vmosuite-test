@@ -261,7 +261,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - auto_render.py start_render: pre-batch worker label reset (Phase 1 anchor #8). Completes the Phase 1 worker state machine port begun in fix-2 (e671042) and continued in anchor #9 (801f5f0).
   BEFORE: starting a second batch in the same session left worker labels showing the prior batch's final state ("Completed prior_video.mp4" / "Failed: ...") until the first new "Processing:" status_updated arrived from a worker. Visible staleness across batch boundaries.
   AFTER: reset block added after clear_progress_boxes() in start_render. Iterates self._worker_state, sets each entry back to {state: "idle", basename: "", percent: 0, error: ""}, then calls _render_worker_label(idx) to repaint as "Worker N - Ready". hasattr() guard preserves backward-compat if state machine ever absent.
-  WHY: completes Phase 1 batch-boundary semantics. Without it, second-batch UX shows stale prior-batch labels until first status arrives. Phase 1 audit identified this as anchor #8; it was missed in fix-2 scope. Idempotent and gated by hasattr, safe under any caller order. ~10 LoC. [<commit>]
+  WHY: completes Phase 1 batch-boundary semantics. Without it, second-batch UX shows stale prior-batch labels until first status arrives. Phase 1 audit identified this as anchor #8; it was missed in fix-2 scope. Idempotent and gated by hasattr, safe under any caller order. ~10 LoC. [701bf53]
 
 
 - auto_render.py on_render_error: failed-state worker label showed "Failed: Error" instead of actual ffmpeg error message.
