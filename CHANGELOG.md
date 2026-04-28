@@ -261,7 +261,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - auto_render.py on_render_error: failed-state worker label showed "Failed: Error" instead of actual ffmpeg error message.
   BEFORE: Step 5.5-fix-2 worker state machine routes "Error" status string from RenderWorker.status_updated through the prefix classifier in update_thread_status, which sets state="failed" but populates error="Error" (the bare status string, not the full error). This left _render_worker_label rendering "❌ Worker N — Failed: Error" — uninformative.
   AFTER: anchor #9 from Phase 1 audit injected into on_render_error after worker = self.sender(). Updates self._worker_state[worker.thread_index]["error"] with the actual error_message payload from the error_occurred signal, then re-renders label. Shows "❌ Worker N — Failed: <actual ffmpeg error>" matching Phase 1 fidelity.
-  WHY: completes Phase 1 worker state machine port. Smoke test post-fix-2 confirmed state machine works but error labels were less useful than Phase 1 because update_thread_status only sees the prefix string, not the error detail. PARALLEL audit identified this gap explicitly as anchor #9. ~8 LoC. [<commit>]
+  WHY: completes Phase 1 worker state machine port. Smoke test post-fix-2 confirmed state machine works but error labels were less useful than Phase 1 because update_thread_status only sees the prefix string, not the error detail. PARALLEL audit identified this gap explicitly as anchor #9. ~8 LoC. [801f5f0]
 
 
 - auto_render.py _start_next_task: IndexError on `self.all_tasks[self.current_task_index]` when mid-batch errors fire during in-flight tail.
