@@ -256,6 +256,12 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- auto_render.py progress_label: ETA suffix was truncating in narrow-window UI mode. Smoke test (Step 5.5 post-tag) showed "Progress: 10/26 renders | ETA: 0:" cut off where Currently Rendering label began.
+  BEFORE: Step 5.5 used " | ETA: ..." separator (single horizontal line) at 3 progress_label.setText sites. In default app window width, the combined string exceeded available label width, clipping ETA value.
+  AFTER: Replaced " | " separator with "
+" newline so ETA renders on its own line below "Progress: N/M renders". QLabel auto-expands height for multi-line content. All 3 update sites changed (start_render init + on_render_completed + on_render_error).
+  WHY: ETA must be visible in default window mode without manual resizing for the feature to be useful. Newline-separated 2-line layout is the minimum-cost fix; alternative was a separate eta_label widget which would touch the layout structure. [<commit>]
+
 - get_video_duration crash fix + on_render_completed defensive wrapping (pre-existing bug class surfaced during Step 4d-ii smoke test 2026-04-28).
   BEFORE: get_video_duration called float(result.stdout.strip()) without checking result.returncode or guarding against empty stdout. When ffprobe returned empty stdout (race condition on output file finalization, ffprobe failure, or missing metadata), float("") raised ValueError -> wrapped as Exception -> crashed on_render_completed at render 4/26 during smoke test. on_render_completed had no try/except around either get_video_* call, so the crash propagated to a fatal app crash mid-batch.
   AFTER: get_video_duration now checks result.returncode + non-empty stdout before parsing; catches ValueError on float() conversion; returns "—" placeholder on any failure (3 return paths). on_render_completed wraps both helper calls in individual try/except blocks (belt-and-suspenders) so future subprocess/parsing changes can never crash the render-completion handler. The "—" placeholder displays in the Duration tree column when ffprobe fails — informational, not fatal. NOTE: get_video_resolution was already defensive (returns "Loading..." on empty stdout via `or` fallback + except returns "Loading..." too); not modified per CLAUDE.md §6 minimum-fix.

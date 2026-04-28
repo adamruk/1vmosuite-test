@@ -1246,7 +1246,7 @@ class VideoRendererTool(QMainWindow):
             else:
                 total_tasks = len(self.videos) * len(self.selected_encoders)
             self.progress_label.setText(
-                f"Progress: 0/{total_tasks} renders | ETA: calculating..."
+                f"Progress: 0/{total_tasks} renders\nETA: calculating..."
             )
             self.current_label.setText("Currently Rendering: None")
             self.tree_output.clear()
@@ -1519,7 +1519,7 @@ class VideoRendererTool(QMainWindow):
         self.completed_tasks += 1
         self._record_task_duration()
         self.progress_label.setText(
-            f"Progress: {self.completed_tasks}/{self.total_tasks} renders | ETA: {self._compute_eta_string()}"
+            f"Progress: {self.completed_tasks}/{self.total_tasks} renders\nETA: {self._compute_eta_string()}"
         )
         self.active_threads -= 1
         thread_index = worker.thread_index
@@ -1581,7 +1581,7 @@ class VideoRendererTool(QMainWindow):
         self.completed_tasks += 1
         self._record_task_duration()
         self.progress_label.setText(
-            f"Progress: {self.completed_tasks}/{self.total_tasks} renders | ETA: {self._compute_eta_string()}"
+            f"Progress: {self.completed_tasks}/{self.total_tasks} renders\nETA: {self._compute_eta_string()}"
         )
         thread_index = worker.thread_index
         if 0 <= thread_index < len(self.render_workers):
