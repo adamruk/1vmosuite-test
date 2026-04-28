@@ -1286,10 +1286,11 @@ class VideoRendererTool(QMainWindow):
         if not self.is_rendering:
             return
         else:
-            if (
-                self.current_task_index >= len(self.all_tasks)
-                and self.completed_tasks >= self.total_tasks
-            ):
+            if self.current_task_index >= len(self.all_tasks):
+                if self.completed_tasks < self.total_tasks:
+                    # Queue exhausted but in-flight tasks still pending; do not dispatch.
+                    return
+                # Both queue exhausted AND all tasks done; fall through to terminal cleanup.
                 for thread in self.render_threads:
                     if thread.isRunning():
                         try:

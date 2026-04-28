@@ -256,6 +256,11 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- auto_render.py _start_next_task: IndexError on `self.all_tasks[self.current_task_index]` when mid-batch errors fire during in-flight tail.
+  BEFORE: terminal AND-check `if current_task_index >= len(all_tasks) and completed_tasks >= total_tasks` bailed for cleanup ONLY when both conditions met. on_render_error (L1597) calls _start_next_task UNGUARDED. When errors fire while queue is exhausted but completion still lags, AND fails, else-branch finds free worker thread, attempts all_tasks[current_task_index] (out of bounds) -> IndexError.
+  AFTER: restructured AND into nested ifs. Outer if checks queue-exhaustion alone; inner if handles terminal cleanup when completion also done; returns early in either case. Dispatch path is now safe regardless of caller.
+  WHY: pre-existing bug (Phase 1 + 2026-04-26 hygiene). Surfaced by Adam during real-world batch test post-tag. PARALLEL audit confirmed Step 5.5 ETA commits did not touch any current_task_index line. Architecturally correct fix names the conflated-condition bug rather than papering over symptoms at the on_render_error call site. [<commit>]
+
 - auto_render.py progress_label: ETA suffix was truncating in narrow-window UI mode. Smoke test (Step 5.5 post-tag) showed "Progress: 10/26 renders | ETA: 0:" cut off where Currently Rendering label began.
   BEFORE: Step 5.5 used " | ETA: ..." separator (single horizontal line) at 3 progress_label.setText sites. In default app window width, the combined string exceeded available label width, clipping ETA value.
   AFTER: Replaced " | " separator with "
