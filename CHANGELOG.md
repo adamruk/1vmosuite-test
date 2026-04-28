@@ -258,6 +258,12 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- auto_render.py on_render_error: failed-state worker label showed "Failed: Error" instead of actual ffmpeg error message.
+  BEFORE: Step 5.5-fix-2 worker state machine routes "Error" status string from RenderWorker.status_updated through the prefix classifier in update_thread_status, which sets state="failed" but populates error="Error" (the bare status string, not the full error). This left _render_worker_label rendering "❌ Worker N — Failed: Error" — uninformative.
+  AFTER: anchor #9 from Phase 1 audit injected into on_render_error after worker = self.sender(). Updates self._worker_state[worker.thread_index]["error"] with the actual error_message payload from the error_occurred signal, then re-renders label. Shows "❌ Worker N — Failed: <actual ffmpeg error>" matching Phase 1 fidelity.
+  WHY: completes Phase 1 worker state machine port. Smoke test post-fix-2 confirmed state machine works but error labels were less useful than Phase 1 because update_thread_status only sees the prefix string, not the error detail. PARALLEL audit identified this gap explicitly as anchor #9. ~8 LoC. [<commit>]
+
+
 - auto_render.py _start_next_task: IndexError on `self.all_tasks[self.current_task_index]` when mid-batch errors fire during in-flight tail.
   BEFORE: terminal AND-check `if current_task_index >= len(all_tasks) and completed_tasks >= total_tasks` bailed for cleanup ONLY when both conditions met. on_render_error (L1597) calls _start_next_task UNGUARDED. When errors fire while queue is exhausted but completion still lags, AND fails, else-branch finds free worker thread, attempts all_tasks[current_task_index] (out of bounds) -> IndexError.
   AFTER: restructured AND into nested ifs. Outer if checks queue-exhaustion alone; inner if handles terminal cleanup when completion also done; returns early in either case. Dispatch path is now safe regardless of caller.

@@ -1635,6 +1635,14 @@ class VideoRendererTool(QMainWindow):
             self.output_text.verticalScrollBar().maximum()
         )
         worker = self.sender()
+        if (
+            worker
+            and hasattr(self, "_worker_state")
+            and 0 <= worker.thread_index < len(self._worker_state)
+        ):
+            self._worker_state[worker.thread_index]["error"] = error_message
+            self._worker_state[worker.thread_index]["state"] = "failed"
+            self._render_worker_label(worker.thread_index)
         if worker:
             encoder_name = (
                 worker.encoder_names[0] if worker.encoder_names else "Loading..."
