@@ -663,14 +663,18 @@ class VideoRendererTool(QMainWindow):
         thread_layout.setContentsMargins(5, 2, 5, 2)
         self.thread_bars = []
         self.thread_labels = []
+        self._worker_state = [
+            {"state": "idle", "basename": "", "percent": 0, "error": ""}
+            for _ in range(self.num_threads)
+        ]
         for i in range(self.num_threads):
             thread_row = QHBoxLayout()
             thread_row.setSpacing(5)
             label = QLabel(f"#{i + 1}")
             label.setFixedWidth(30)
             thread_row.addWidget(label)
-            status = QLabel("Idle")
-            status.setFixedWidth(200)
+            status = QLabel(f"\U0001f7e2 Worker {i + 1} \u2014 Ready")
+            status.setMinimumWidth(280)
             status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             thread_row.addWidget(status)
             progress = QProgressBar()
@@ -1426,7 +1430,11 @@ class VideoRendererTool(QMainWindow):
                     if i >= self.completed_tasks:
                         self.update_box_color(i, "red")
             for i in range(len(self.thread_labels)):
-                self.thread_labels[i].setText("Cancelled")
+                if hasattr(self, "_worker_state") and i < len(self._worker_state):
+                    self._worker_state[i]["state"] = "cancelled"
+                    self._render_worker_label(i)
+                else:
+                    self.thread_labels[i].setText("Cancelled")
                 self.thread_bars[i].setValue(0)
             self.btn_cancel.setEnabled(False)
             self.btn_start.setEnabled(True)
@@ -1449,15 +1457,80 @@ class VideoRendererTool(QMainWindow):
             else:
                 return True
 
+    def _render_worker_label(self, idx):
+        """Render thread_labels[idx] from self._worker_state[idx] dict.
+
+        States: idle / running / completed / failed / cancelled.
+        """
+        if not (0 <= idx < len(self.thread_labels)):
+            return
+        if not hasattr(self, "_worker_state") or idx >= len(self._worker_state):
+            return
+        st = self._worker_state[idx]
+        n = idx + 1
+        s = st["state"]
+        if s == "running":
+            text = f"\U0001f7e1 Worker {n} \u2014 Rendering {st['basename']} ({st['percent']}%)"
+        elif s == "completed":
+            text = f"\u2705 Worker {n} \u2014 Completed {st['basename']}"
+        elif s == "failed":
+            err = st["error"] or "unknown error"
+            if len(err) > 40:
+                err = err[:37] + "..."
+            text = f"\u274c Worker {n} \u2014 Failed: {err}"
+        elif s == "cancelled":
+            text = f"\u23f9 Worker {n} \u2014 Cancelled"
+        else:
+            text = f"\U0001f7e2 Worker {n} \u2014 Ready"
+        self.thread_labels[idx].setText(text)
+
     def update_thread_progress(self, thread_index: int, progress: int):
         """Cập nhật tiến độ của thread."""
         if 0 <= thread_index < len(self.thread_bars):
             self.thread_bars[thread_index].setValue(progress)
+        if hasattr(self, "_worker_state") and 0 <= thread_index < len(
+            self._worker_state
+        ):
+            self._worker_state[thread_index]["percent"] = progress
+            if self._worker_state[thread_index]["state"] == "running":
+                self._render_worker_label(thread_index)
 
     def update_thread_status(self, thread_index: int, status: str):
-        """Cập nhật trạng thái của thread."""
-        if 0 <= thread_index < len(self.thread_labels):
+        """Map worker status string to per-thread state, then re-render label.
+
+        Worker still emits the same strings as before; we classify them
+        client-side into ready/running/completed/failed/cancelled and format
+        with the worker number, basename, and percent.
+        """
+        if not (0 <= thread_index < len(self.thread_labels)):
+            return
+        if not hasattr(self, "_worker_state") or thread_index >= len(
+            self._worker_state
+        ):
             self.thread_labels[thread_index].setText(status)
+            return
+        st = self._worker_state[thread_index]
+        if status == "Idle":
+            st["state"] = "idle"
+        elif status.startswith("Processing:"):
+            st["state"] = "running"
+            try:
+                after = status.split("Processing:", 1)[1].strip()
+                st["basename"] = after.split(" with ", 1)[0]
+            except Exception:
+                pass
+        elif status.startswith("Completed"):
+            st["state"] = "completed"
+        elif status.startswith("Error"):
+            st["state"] = "failed"
+            if not st["error"]:
+                st["error"] = status
+        elif status == "Cancelled":
+            st["state"] = "cancelled"
+        else:
+            self.thread_labels[thread_index].setText(status)
+            return
+        self._render_worker_label(thread_index)
 
     def update_ffmpeg_output(self, output: str):
         """Cập nhật output của FFmpeg."""
