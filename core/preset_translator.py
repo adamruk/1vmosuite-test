@@ -46,6 +46,16 @@ CRF_TO_CQ_OFFSET = {
 # falls back to +2 (original ADR-0007 D3 hypothesis) so unknown codecs don't crash.
 _CQ_OFFSET_DEFAULT = 2
 
+# NVENC preset + multipass defaults per ADR-0007 D7 "Max Quality Mode" (Step 4e-fix-3).
+# Originally hardcoded as preset=p4 + multipass=0 in the orchestrator (Step 4d-i).
+# After Step 4e-fix-2 confirmed Path A (offset calibration) hit a quality ceiling at
+# p4/multipass=0, ADR-0007 D7 anticipated escalation to "Max Quality Mode": preset=p7
+# (slowest/highest-quality NVENC preset family per D2) + multipass=2 (two-pass analysis
+# catches p5-tail outliers per D7). Values determined by Step 4e-fix-3 retest against
+# the 4-clip reference set on RTX 4080.
+NVENC_PRESET_DEFAULT = "p7"
+NVENC_MULTIPASS_DEFAULT = "2"
+
 
 def translate_to_nvenc(
     params: list[str],

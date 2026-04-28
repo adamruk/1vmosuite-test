@@ -1,7 +1,7 @@
 # VMAF Validation: v2.5 GPU Pipeline
 
-**Status:** **FAIL** - further calibration needed (Step 4e-fix-3)
-**Latest run:** 2026-04-28 04:58 (Step 4e-fix-2 - per-codec offset calibration)
+**Status:** **FAIL** - further calibration needed (Step 4e-fix-4)
+**Latest run:** 2026-04-28 05:47 (Step 4e-fix-3 - Max Quality Mode preset=p7 multipass=2)
 **ADR:** ADR-0007 D9
 **Hardware:** RTX 4080 Laptop GPU (Ada Lovelace), driver 591.44
 **FFmpeg:** ffmpeg version N-120402-g7c5319e692-20250729 Copyright (c) 2000-2025 the FFmpeg developers
@@ -9,8 +9,9 @@
 ## Revision History
 
 - **2026-04-28 Step 4e (commit 4cff4f0):** Original 3-clip run. Verdict FAIL.
-- **2026-04-28 Step 4e-fix-1 (commit c1f5ea8):** Hybrid remediation (replace clip3 + add clip4). Verdict FAIL - disproved hypothesis that x3-speed was the only outlier.
-- **2026-04-28 Step 4e-fix-2 (this run):** Path A - per-codec offset calibration in core/preset_translator.py CRF_TO_CQ_OFFSET (h264:0, hevc:0, av1:-1). Verdict: FAIL
+- **2026-04-28 Step 4e-fix-1 (commit c1f5ea8):** Hybrid remediation (replace clip3 + add clip4). Verdict FAIL.
+- **2026-04-28 Step 4e-fix-2 (commit bf3fa39):** Path A - per-codec offset calibration. Verdict FAIL (improvement real but insufficient).
+- **2026-04-28 Step 4e-fix-3 (this run):** Max Quality Mode per ADR-0007 D7 - preset=p7 + multipass=2. Verdict: FAIL
 
 
 ## Pass Criterion (ADR-0007 D9, UNCHANGED)
@@ -89,6 +90,64 @@
 - clip4_diverse / hevc: mean=97.236114, p5=93.574754, mean_pass=False, p5_pass=False
 - clip4_diverse / av1: mean=98.113965, p5=95.178379, mean_pass=True, p5_pass=False
 
+
+
+## Step 4e-fix-3 results (Max Quality Mode per ADR-0007 D7)
+
+NVENC preset p7 + multipass=2; per-codec offsets unchanged from fix-2.
+
+| Codec | fix-2 mean | fix-3 mean | delta mean | fix-2 p5 | fix-3 p5 | delta p5 |
+|-------|------------|------------|------------|----------|----------|----------|
+| h264_nvenc | 98.21 | 98.25 | +0.04 | 94.19 | 94.23 | +0.04 |
+| hevc_nvenc | 98.26 | 98.29 | +0.03 | 94.17 | 94.21 | +0.04 |
+| av1_nvenc | 98.88 | 98.89 | +0.01 | 95.67 | 95.70 | +0.03 |
+
+### Results Table (Step 4e-fix-3)
+
+| Clip | Codec | CQ | Preset | MP | VMAF Mean | VMAF p5 | Verdict |
+|------|-------|-----|--------|----|-----------|---------|---------|
+| clip1_motion | h264 | 20 | p7 | 2 | 98.73 | 97.33 | PASS |
+| clip1_motion | hevc | 20 | p7 | 2 | 98.91 | 97.63 | PASS |
+| clip1_motion | av1 | 19 | p7 | 2 | 99.46 | 98.40 | PASS |
+| clip2_face | h264 | 20 | p7 | 2 | 99.02 | 96.53 | FAIL |
+| clip2_face | hevc | 20 | p7 | 2 | 99.13 | 96.68 | FAIL |
+| clip2_face | av1 | 19 | p7 | 2 | 99.46 | 97.22 | PASS |
+| clip3_typical | h264 | 20 | p7 | 2 | 97.58 | 94.40 | FAIL |
+| clip3_typical | hevc | 20 | p7 | 2 | 97.49 | 94.60 | FAIL |
+| clip3_typical | av1 | 19 | p7 | 2 | 98.32 | 95.85 | FAIL |
+| clip4_diverse | h264 | 20 | p7 | 2 | 97.66 | 94.23 | FAIL |
+| clip4_diverse | hevc | 20 | p7 | 2 | 97.61 | 94.21 | FAIL |
+| clip4_diverse | av1 | 19 | p7 | 2 | 98.31 | 95.70 | FAIL |
+
+### Encode Performance (Max Quality Mode tradeoff)
+
+| Clip | Codec | CPU Time | GPU Time | Speedup | CPU MB | GPU MB | GPU/CPU |
+|------|-------|----------|----------|---------|--------|--------|---------|
+| clip1_motion | h264 | 1.81s | 1.11s | 1.6x | 4.6 | 7.5 | 1.63x |
+| clip1_motion | hevc | 7.08s | 1.24s | 5.7x | 5.1 | 7.2 | 1.40x |
+| clip1_motion | av1 | 6.85s | 1.15s | 6.0x | 7.0 | 9.8 | 1.40x |
+| clip2_face | h264 | 1.94s | 1.26s | 1.5x | 4.8 | 8.1 | 1.67x |
+| clip2_face | hevc | 7.51s | 1.34s | 5.6x | 5.1 | 7.7 | 1.50x |
+| clip2_face | av1 | 7.93s | 1.17s | 6.8x | 6.6 | 9.6 | 1.46x |
+| clip3_typical | h264 | 2.14s | 1.41s | 1.5x | 4.9 | 8.8 | 1.81x |
+| clip3_typical | hevc | 8.94s | 1.38s | 6.5x | 6.0 | 8.3 | 1.40x |
+| clip3_typical | av1 | 11.06s | 1.36s | 8.1x | 8.0 | 11.5 | 1.43x |
+| clip4_diverse | h264 | 1.92s | 1.29s | 1.5x | 5.0 | 9.0 | 1.81x |
+| clip4_diverse | hevc | 8.91s | 1.38s | 6.5x | 6.3 | 8.7 | 1.37x |
+| clip4_diverse | av1 | 8.15s | 1.28s | 6.4x | 8.6 | 11.9 | 1.38x |
+
+### Verdict
+
+**FAIL.** Max Quality Mode reduced p5 misses but did not clear all D9 thresholds. Step 4e-fix-4 needed (tune=hq experiment OR tolerance amendment via ADR-0008). Failures:
+
+- clip2_face / h264 (CQ=20): mean=99.024188, p5=96.525605
+- clip2_face / hevc (CQ=20): mean=99.132545, p5=96.679899
+- clip3_typical / h264 (CQ=20): mean=97.580375, p5=94.400864
+- clip3_typical / hevc (CQ=20): mean=97.493628, p5=94.597759
+- clip3_typical / av1 (CQ=19): mean=98.324598, p5=95.848745
+- clip4_diverse / h264 (CQ=20): mean=97.656827, p5=94.228361
+- clip4_diverse / hevc (CQ=20): mean=97.605502, p5=94.207198
+- clip4_diverse / av1 (CQ=19): mean=98.313643, p5=95.699353
 
 ## Step 4e-fix-2 results (per-codec offset calibration)
 
