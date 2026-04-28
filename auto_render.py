@@ -1256,6 +1256,15 @@ class VideoRendererTool(QMainWindow):
             self.tree_output.clear()
             self.output_mapping.clear()
             self.clear_progress_boxes()
+
+            # Reset every worker label back to Ready before a new batch begins.
+            if hasattr(self, "_worker_state"):
+                for idx, st in enumerate(self._worker_state):
+                    st["state"] = "idle"
+                    st["basename"] = ""
+                    st["percent"] = 0
+                    st["error"] = ""
+                    self._render_worker_label(idx)
             for i in range(total_tasks):
                 box = self.create_progress_box(i)
                 self.progress_boxes.append(box)
