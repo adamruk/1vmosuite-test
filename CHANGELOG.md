@@ -260,7 +260,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
   BEFORE: Step 5.5 used " | ETA: ..." separator (single horizontal line) at 3 progress_label.setText sites. In default app window width, the combined string exceeded available label width, clipping ETA value.
   AFTER: Replaced " | " separator with "
 " newline so ETA renders on its own line below "Progress: N/M renders". QLabel auto-expands height for multi-line content. All 3 update sites changed (start_render init + on_render_completed + on_render_error).
-  WHY: ETA must be visible in default window mode without manual resizing for the feature to be useful. Newline-separated 2-line layout is the minimum-cost fix; alternative was a separate eta_label widget which would touch the layout structure. [<commit>]
+  WHY: ETA must be visible in default window mode without manual resizing for the feature to be useful. Newline-separated 2-line layout is the minimum-cost fix; alternative was a separate eta_label widget which would touch the layout structure. [519c0d5]
 
 - get_video_duration crash fix + on_render_completed defensive wrapping (pre-existing bug class surfaced during Step 4d-ii smoke test 2026-04-28).
   BEFORE: get_video_duration called float(result.stdout.strip()) without checking result.returncode or guarding against empty stdout. When ffprobe returned empty stdout (race condition on output file finalization, ffprobe failure, or missing metadata), float("") raised ValueError -> wrapped as Exception -> crashed on_render_completed at render 4/26 during smoke test. on_render_completed had no try/except around either get_video_* call, so the crash propagated to a fatal app crash mid-batch.
