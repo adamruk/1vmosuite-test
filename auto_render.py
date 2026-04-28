@@ -546,6 +546,16 @@ class VideoRendererTool(QMainWindow):
         )
         config_layout.addWidget(step2_label)
         config_layout.addLayout(encoder_controls)
+        # B-018 Option B: selection-aware status label between buttons and tree.
+        # Text populated by _update_encoder_status_label on selection change.
+        # Fixed-height empty string preserves layout stability when message clears.
+        self.encoder_status_label = QLabel("")
+        self.encoder_status_label.setStyleSheet(
+            "color: #757575; font-style: italic; font-size: 12px; "
+            "padding: 2px 4px; min-height: 18px;"
+        )
+        self.encoder_status_label.setWordWrap(True)
+        config_layout.addWidget(self.encoder_status_label)
         self.tree_encoders = QTreeWidget()
         self.tree_encoders.setHeaderLabels(
             ["No.", "Group", "Name", "Description", "Details"]
@@ -558,6 +568,10 @@ class VideoRendererTool(QMainWindow):
             self._update_encoder_buttons_enabled
         )
         self.tree_encoders.itemSelectionChanged.connect(self._update_start_button_state)
+        # B-018 Option B: selection-aware status label
+        self.tree_encoders.itemSelectionChanged.connect(
+            self._update_encoder_status_label
+        )
         config_layout.addWidget(self.tree_encoders)
         mode_frame = QFrame(objectName="mode_frame")
         mode_frame.setFrameStyle(QFrame.StyledPanel)
@@ -1789,6 +1803,26 @@ class VideoRendererTool(QMainWindow):
         )
         self.btn_edit_encoder.setEnabled(not any_builtin)
         self.btn_delete_encoder.setEnabled(not any_builtin)
+
+    def _update_encoder_status_label(self) -> None:
+        """B-018 Option B: show context-aware help text based on selection.
+
+        Built-in preset selected -> explain why Edit/Delete are disabled and
+        point user to Add for customization. Otherwise -> empty string
+        (label still occupies layout space, no tree jump on transition).
+        """
+        selected = self.tree_encoders.selectedItems()
+        any_builtin = any(
+            (item.data(0, Qt.UserRole + 1) or "").startswith("builtin:")
+            for item in selected
+        )
+        if any_builtin:
+            self.encoder_status_label.setText(
+                "\U0001f4cc Built-in preset \u2014 read-only. "
+                "Use \u267b\ufe0f Add to create a custom preset you can edit/delete."
+            )
+        else:
+            self.encoder_status_label.setText("")
 
     def add_encoder(self) -> None:
         """Thêm encoder mới"""
