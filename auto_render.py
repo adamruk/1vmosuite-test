@@ -509,7 +509,9 @@ class VideoRendererTool(QMainWindow):
         self.btn_edit_encoder = self.create_video_button(
             "🛠️ Edit", self.edit_encoder, "#fff3e0", "#e65100", "#ffe0b2"
         )
-        self.btn_edit_encoder.setToolTip("Edit the selected preset")
+        self.btn_edit_encoder.setToolTip(
+            "Edit the selected preset (built-in presets are read-only)"
+        )
         self.btn_delete_encoder = self.create_video_button(
             "🗑️ Delete",
             self.delete_encoder,
@@ -518,7 +520,9 @@ class VideoRendererTool(QMainWindow):
             "#ef9a9a",
             delete=True,
         )
-        self.btn_delete_encoder.setToolTip("Delete the selected preset")
+        self.btn_delete_encoder.setToolTip(
+            "Delete the selected preset (built-in presets are read-only)"
+        )
         update_btn = self.create_video_button(
             "🔄 Refresh", self.reload_all, "#e8f5e9", "#2e7d32", "#c8e6c9"
         )

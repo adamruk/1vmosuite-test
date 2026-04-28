@@ -261,6 +261,12 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- auto_render.py: Edit/Delete preset button tooltips clarified to explain disabled state for built-in presets.
+  BEFORE: tooltips read "Edit the selected preset" and "Delete the selected preset" — generic, did not explain why the buttons are grayed when a built-in preset is selected. Per ADR-0006, built-in presets are intentionally non-editable (silent-data-loss prevention from 2c-c-4); 100% of fresh-install presets are built-in (109 from Encoder.txt + 2 hardcoded), so users see grayed buttons immediately and assume the app is broken.
+  AFTER: tooltips now read "Edit the selected preset (built-in presets are read-only)" and "Delete the selected preset (built-in presets are read-only)". Static enrichment — tooltip text doesn't change with selection state, but always communicates the constraint. Resolves the "is this broken?" UX confusion surfaced during v2.5.1 smoke test (Adam, 2026-04-28). B-018 Option 1 of 4 (smallest UX fix). Cloning affordance (Option 2) deferred for later focused UX commit.
+  WHY: ADR-0006 implementation conforms to spec but lacks user-facing explanation. Italic visual cue requires non-italic reference for comparison; fresh install has zero non-italic presets so cue fails to register. Tooltip enrichment is the cheapest path to honest UX. [<commit>]
+
+
 - assets/Encoder.txt + assets/Encoder.json: 11 preset variants had stale Phase 1 path prefix in -i arguments, causing ffmpeg to fail with "Error opening input files: No such file or directory" on every render attempt.
   BEFORE: 11 presets (10 Layer Overlay variants at Encoder.txt lines 11-20 + 1 Line preset at line 109) used "-i Code/assets/data/<file>.png" — a path inherited verbatim from the Phase 1 PyInstaller-decompiled "Code/" source directory layout. v2 has no "Code/" subdirectory; assets live at "assets/data/" directly. ffmpeg resolved the path against CWD and found nothing. All 11 presets failed silently for users until a render was attempted.
   AFTER: replaced "Code/assets/data/" with "assets/data/" across all 21 occurrences in Encoder.txt (11 -i command paths + 10 documentation strings in the 📑 Details fields where the old path was quoted as guidance text). Regenerated Encoder.json via tools/generate_encoder_json.py (deterministic regen per ADR-0006 schema v2 contract). All 16 referenced PNG assets verified present and git-tracked at assets/data/. Smoke-loaded all 11 fixed presets via preset_loader; zero stale references remain.
