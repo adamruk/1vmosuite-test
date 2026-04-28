@@ -24,6 +24,72 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ---
 
+## B-014: _reload_config_settings refreshes only 2 of ~10 Settings keys
+
+- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; Phase 2d candidate)
+- **Priority:** HIGH (functional gap surfaces if user changes GPU keys live)
+- **Surfaced:** v2.5.1 PARALLEL audit on origin/main (2026-04-28)
+- **Context:** auto_render.py `_reload_config_settings` (called after Settings dialog OK) only re-reads `output_collision` + `gpu_error_action`. Stale comment says "Other Settings keys (use_gpu, nvenc_quality_offset, show_ffmpeg_command, open_output_when_done) reserved for Step 4c+ when GPU pipeline lands" — but Step 4c-4d-ii has shipped (GPU pipeline wired per CHANGELOG `[442d2eb]`). The comment never caught up.
+- **Implication:** User toggles `gpu_enabled` in Settings → clicks OK → Settings dialog persists to disk → `_reload_config_settings` runs but does NOT update `self.gpu_enabled` → next render uses OLD (app-startup) value. Settings change for GPU/num_threads/output_dir keys requires app restart to take effect. PORT_NOTES line 99-101 says `_reload_config_settings` should "apply output dir, GPU toggle (gated by capability), all five runtime keys" — current impl honors 2 of those.
+- **Resolution:** Extend `_reload_config_settings` to mirror the 5+ GPU keys read in `__init__` (gpu_enabled, gpu_codec, gpu_preset, gpu_max_concurrent, gpu_max_quality_mode). Verify each is consumed by next render dispatch. Likely also recreate `_gpu_semaphore` if `gpu_max_concurrent` changed.
+- **Trigger for pickup:** user reports GPU Settings change "not taking effect" OR Phase 2d touches Settings dialog code path.
+
+## B-015: translate_to_nvenc codec routing contradicts ADR-0007 D4
+
+- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; LOW priority)
+- **Priority:** LOW (niche — only affects libx265 presets when user has gpu_codec=h264_nvenc)
+- **Surfaced:** v2.5.1 PARALLEL audit (2026-04-28)
+- **Context:** core/preset_translator.py `translate_to_nvenc` computes `mapped = _CODEC_MAP.get(input_codec, input_codec)` (which would map libx265->hevc_nvenc per D4) but then ignores `mapped` in the `if input_codec in _CODEC_MAP:` branch and uses the `codec` kwarg instead. Comment says "respect codec arg over preset map" — intentional, but contradicts ADR-0007 D4 which states `libx265 -> hevc_nvenc`.
+- **Implication:** User has libx265 preset + gpu_codec=h264_nvenc (default) → preset gets translated to h264_nvenc, NOT hevc_nvenc. Codec intent of preset overridden by user's default. Quality/compatibility consequences depending on use case.
+- **Resolution:** Either (a) honor `_CODEC_MAP` per-preset mapping, OR (b) update ADR-0007 D4 commentary in a new ADR to reflect actual single-knob behavior. Document chosen direction in the implementing commit. Dead `mapped` variable in else-branch can be cleaned up regardless.
+- **Trigger for pickup:** post-tag review or first user report involving libx265 preset on GPU.
+
+## B-016: anchor #8 missing thread_bars[idx].setValue(0)
+
+- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; cosmetic)
+- **Priority:** LOW (cosmetic flicker for ~100ms across batch boundary)
+- **Surfaced:** v2.5.1 PARALLEL audit (2026-04-28)
+- **Context:** anchor #8 (commit 701bf53) resets `_worker_state[idx]['percent']=0` in start_render but does NOT reset the visible QProgressBar via `self.thread_bars[idx].setValue(0)`. cancel_render does both; start_render does only the data side.
+- **Implication:** Starting batch 2 in same session → labels reset to "Ready" (good) but QProgressBar visual stays at batch 1's final percent (often 100%) for ~100ms until the first new progress event. Cosmetic flicker only.
+- **Resolution:** Add `self.thread_bars[idx].setValue(0)` inside the anchor #8 loop in start_render. Symmetry with cancel_render. ~1 LoC change.
+- **Trigger for pickup:** Phase 2d touches the worker UI OR opportunistic during any future `start_render` edit.
+
+## B-017: 11 Encoder.txt presets had stale Code/assets/data/ paths — RESOLVED
+
+- **Status:** RESOLVED (closed by v2.5.1 fix-3, commit c60baf5, 2026-04-28)
+- **Resolution evidence:** all 11 affected preset variants (10 Layer Overlay + 1 Line) verified rendering successfully via smoke test on 5 input videos; output filenames written; ffmpeg console clean. CHANGELOG entry under [Unreleased] ### Fixed documents BEFORE/AFTER/WHY with PATH-SEMANTICS-NOTE caveat.
+- **Note for future:** moved here pre-emptively to keep B-NNN numbering monotonic. See "Resolved" section for canonical resolved-items list per BACKLOG.md resolution policy.
+
+## B-018: Edit/Delete buttons grayed for ALL presets in fresh install (UX gap, not a bug)
+
+- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; UX polish)
+- **Priority:** MEDIUM (user-facing confusion — looks broken)
+- **Surfaced:** v2.5.1 user smoke test + PARALLEL audit (2026-04-28)
+- **Context:** Per ADR-0006, built-in presets (id starts with "builtin:") are intentionally non-editable to prevent the silent-data-loss class fixed in 2c-c-4. Implementation conforms exactly to ADR-0006 spec: button-disable wired via tree_encoders.itemSelectionChanged at L553-554 + model-layer guard in edit_encoder L1838 + delete_encoder L1883 + italic visual cue at L1765-1768.
+- **The bootstrap problem:** ALL 111 presets shipped in fresh install are built-in (109 from Encoder.txt + 2 hardcoded Text defaults). User-namespace empty until user explicitly clicks Add. So 100% of selections trigger the disable logic. From user POV: "Edit/Delete don't work on any preset, must be broken." From codebase POV: documented invariant working correctly.
+- **Why italic isn't enough:** italic styling on column 2 only registers as "different" if there's a non-italic reference for comparison. Fresh install has zero non-italic presets. ADR-0006 acknowledged italic as "visible read-only" but didn't anticipate the bootstrap problem.
+- **Tooltip lies:** Edit/Delete tooltips say "Edit the selected preset" / "Delete the selected preset" but the button is disabled — misleading.
+- **No clone path:** zero matches for clone/duplicate/copy.preset/save_as/new.from in auto_render.py. User cannot start customizing without Add-from-scratch + manual re-typing of name + params + description.
+- **Resolution options (ranked by UX value, all LOW risk additive — none break ADR-0006):**
+  - Option 1 (~4 LoC): tooltip enrichment — append "(built-in presets are read-only)" to Edit/Delete button tooltips at L512+L521 OR install dynamic tooltip swap inside `_update_encoder_buttons_enabled`.
+  - Option 2 (~30 LoC): Add "Clone" button next to Edit/Delete. When built-in selected, Clone copies preset with id="user:<slug>" and opens EncoderDialog for renaming. Solves bootstrap problem.
+  - Option 3 (~5 LoC): visual cue strengthening — 🔒 prefix or gray text color in addition to italic.
+  - Option 4 (~40 LoC): Combined — tooltip + Clone. Resolves both "why disabled?" (tooltip) and "what do I do instead?" (Clone) at once.
+- **PARALLEL recommendation:** Option 1 first (cheap, immediately resolves "is this broken?" confusion). Option 4 is the long-term answer if user-customization is to be a first-class feature.
+- **Trigger for pickup:** post-tag UX polish phase OR first explicit user request to edit a preset.
+
+## B-019: "Completed processing N video(s)!" success-toned message fires on all-fail batch
+
+- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; cosmetic)
+- **Priority:** LOW (misleading wording in all-fail edge case)
+- **Surfaced:** v2.5.1 user smoke test (Line preset failed batch, 2026-04-28)
+- **Context:** `_start_next_task` terminal cleanup branch shows "Completed processing N video(s)!" QMessageBox when called after the final task. on_render_completed shows different wording: "Successfully rendered N video(s)!". When all tasks fail, last on_render_error -> _start_next_task -> cleanup -> "Completed processing" message. User sees success-toned wording even though every progress box is red.
+- **Implication:** Mild user confusion in catastrophic-failure case. Progress boxes are red but message wording sounds successful.
+- **Resolution:** Either (a) detect all-fail case in cleanup branch and show error-toned wording, OR (b) reword to neutral "Batch finished — see status column for results." Option (b) is simpler and accurate in all cases.
+- **Trigger for pickup:** post-tag UX polish OR opportunistic during any future _start_next_task edit.
+
+---
+
 ## Resolution policy
 
 - Items resolved: move to a "Resolved" section at bottom with commit hash and date.
@@ -83,6 +149,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Trigger for pickup:** v2.5-complete tag landed.
 
 ## Resolved
+- **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.
 
 - **B-001** — ADR-0001 missing Decision makers field. Resolved [df1125a] 2026-04-27.
 - **B-002** — ADR-0002 status/date mismatch. Resolved [df1125a] 2026-04-27 (canonical date: 2026-04-22).

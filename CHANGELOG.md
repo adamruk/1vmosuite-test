@@ -46,6 +46,9 @@ This block is illustrative, not part of the project history. It shows the shape 
 ```- `.claude/settings.json` + `.claude/hooks/check-changelog.sh` - CHANGELOG-enforcement hook. Blocks `git commit` via Claude Code's PreToolUse Bash hook if `CHANGELOG.md` is not in the staged diff, unless the commit message contains `[skip changelog]` (escape hatch for pure internal refactors per amended rule 7). Deterministic enforcement of CLAUDE.md section 4. [250668b]
 
 ### Changed
+
+- BACKLOG.md: B-014 (_reload_config_settings refreshes only 2 of ~10 Settings keys; HIGH priority Phase 2d candidate) + B-015 (translate_to_nvenc codec routing contradicts ADR-0007 D4; LOW niche) + B-016 (anchor #8 missing thread_bars setValue(0); LOW cosmetic flicker) + B-018 (Edit/Delete buttons grayed for ALL presets in fresh install per ADR-0006 bootstrap problem; MEDIUM UX gap with 4 fix options ranked) + B-019 ("Completed processing N video(s)!" success-toned message on all-fail batch; LOW cosmetic). B-017 closed by v2.5.1 fix-3 (commit c60baf5) and moved to Resolved section. All entries surfaced by v2.5.1 PARALLEL audit on origin/main 2026-04-28.
+
 - Default HEVC encoder switched from libx265 to hevc_nvenc on CUDA-capable systems — encodes 3.2× faster at matched VMAF ≥ 94 on the reference RTX 4070 preset sweep. Fallback to libx265 on CPU-only hosts unchanged. [bench/2026-04-18-nvenc-preset-vmaf-audit.md] [ADR-0001-nvenc-migration] [a1b2c3d, e4f5g6h]
 ```
 
