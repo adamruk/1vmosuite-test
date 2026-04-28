@@ -62,6 +62,26 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Trigger for pickup:** v2.5-complete tag landed. Re-evaluate priority based on (a) whether any user reports config corruption in the wild, (b) whether Phase 2d PySide6 migration touches core/config (good time to fold in), (c) whether atomic-write parity becomes a project-wide hygiene goal.
 - **Surfaced by:** Step 4d-i 2026-04-28 (post-Phase-1-discovery confirmation of Step 4b PARALLEL G3 finding).
 
+## B-012: ADR-0007 D7 implementation gap (Settings checkbox doesn't bundle preset+multipass)
+
+- **Status:** scheduled (deferred per Step 4e-fix-4 2026-04-28; addressed in post-tag review)
+- **Priority:** Low
+- **Surfaced:** Step 4e-fix-3 PARALLEL audit (2026-04-28)
+- **Context:** ADR-0007 D7 commentary specifies "Max Quality Mode bundles preset=p7 + multipass=2 + tune=hq into one user choice." Current implementation (settings_dialog.py L260 + core/preset_translator.py L122-123) only flips multipass; does NOT change preset to p7 or add tune=hq.
+- **Implication:** Toggling "Max Quality Mode" checkbox in Settings produces multipass=2 but preserves whatever preset the user selected (default p4). User-facing behavior does not match ADR-0007 D7 commentary. Empirical impact is small per fix-3 data (Max Quality Mode produced <0.05 VMAF lift even when preset=p7 was applied via the orchestrator), so the gap is more about doc/code alignment than user-visible quality.
+- **Resolution:** Either (a) update implementation to bundle preset+multipass+tune per D7 commentary, or (b) update D7 commentary in a future ADR to reflect current single-knob behavior. Decision deferred to post-tag review.
+- **Trigger for pickup:** v2.5-complete tag landed.
+
+## B-013: NVENC module constants wiring gap (declared but unused inside translate_to_nvenc)
+
+- **Status:** scheduled (deferred per Step 4e-fix-4 2026-04-28; addressed in post-tag review)
+- **Priority:** Low
+- **Surfaced:** Step 4e-fix-3 PARALLEL audit (2026-04-28)
+- **Context:** Step 4e-fix-3 added NVENC_PRESET_DEFAULT="p7" + NVENC_MULTIPASS_DEFAULT="2" module constants to core/preset_translator.py. These constants are documentation-only - the translate_to_nvenc body still uses kwarg defaults ("p4" / hardcoded "0"-or-"2" string literals based on max_quality_mode flag). Production gpu_preset default remains "p4" via separate config path (auto_render.py L85+L369 + settings_dialog.py L45).
+- **Implication:** Future readers may assume the module constants drive production behavior; they do not. Either wire them in or remove them.
+- **Resolution:** Either (a) make translate_to_nvenc default kwargs read from module constants, or (b) remove the unused constants and rely on the kwarg-default mechanism alone. Decision deferred to post-tag review.
+- **Trigger for pickup:** v2.5-complete tag landed.
+
 ## Resolved
 
 - **B-001** — ADR-0001 missing Decision makers field. Resolved [df1125a] 2026-04-27.
