@@ -375,6 +375,10 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - merge.py save_config: opacity slider value is now persisted correctly. Previously read from combo_overlay_group (group-name string) instead of slider_opacity.value() (integer 0-100), silently losing the user's opacity setting on every save. [N50-CRIT]
 - merge.py save_config: refactored to merge-then-write pattern (load existing config, update keys, save). Previously overwrote the file wholesale, which would wipe any keys owned by other code paths. Mirrors auto_render.py:945-967 pattern. [N5-merge]
 
+- merge.py: per-video coordinator errors now route to on_merge_error (counter + tree update) instead of on_coordinator_merge_error (modal dialog); N failed videos no longer produce N sequential modal dialogs. Outer coordinator-wide errors still show modal dialog. [Probe3-merge]
+
+- merge.py: _merge_coordinator set to None in on_merge_finished() to eliminate dangling C++ reference; disconnect guard broadened to catch RuntimeError in addition to TypeError. [Probe1-merge]
+
 ---
 
 _Pre-2.0 history: the suite originally shipped as four separate compiled `.exe` files (Auto Render v3.5, Cutter v3.5, Merge v3.7, Mixer v3.5). Original source was not preserved; v2.0.0 is a clean-break revival reconstructed via pylingual decompile. No retroactive changelog entries are maintained for the pre-revival generation._

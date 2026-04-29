@@ -76,6 +76,7 @@ class MergeCoordinator(QObject):
     video_ready = pyqtSignal(int, str, str, str, str, str)
     finished = pyqtSignal()
     error_occurred = pyqtSignal(str)
+    per_video_error = pyqtSignal(str)  # per-video errors → on_merge_error
 
     def __init__(
         self,
@@ -236,7 +237,7 @@ class MergeCoordinator(QObject):
                     error_msg = f"Lỗi khi xử lý video {output_index + 1}: {str(e)}"
                     print(f"Merge Error: {error_msg}")
                     self.logger.error(error_msg)
-                    self.error_occurred.emit(error_msg)
+                    self.per_video_error.emit(error_msg)
         except Exception as e:
             error_msg = f"Error merging: {str(e)}\n{traceback.format_exc()}"
             print(f"Merge Error: {error_msg}")
@@ -1665,7 +1666,7 @@ class VideoMergeTool(QMainWindow):
                     self._merge_coordinator.video_ready.disconnect()
                     self._merge_coordinator.finished.disconnect()
                     self._merge_coordinator.error_occurred.disconnect()
-                except TypeError:
+                except (TypeError, RuntimeError):
                     pass
             layout_mode = self.combo_layout.currentText()
             opacity = self.slider_opacity.value() if layout_mode == "Overlay" else 100
@@ -1711,6 +1712,7 @@ class VideoMergeTool(QMainWindow):
             self._merge_coordinator.error_occurred.connect(
                 self.on_coordinator_merge_error
             )
+            self._merge_coordinator.per_video_error.connect(self.on_merge_error)
             self._merge_thread.start()
 
     def cancel_merge(self):
@@ -1863,6 +1865,7 @@ class VideoMergeTool(QMainWindow):
         self.btn_start.setEnabled(True)
         self.btn_cancel.setEnabled(False)
         self.save_config()
+        self._merge_coordinator = None
 
     @pyqtSlot(str)
     def on_coordinator_merge_error(self, msg: str):
