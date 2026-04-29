@@ -313,20 +313,7 @@ class MergeWorker(QRunnable):
                 MergeWorker.running_workers.remove(self)
 
     def get_video_duration_seconds(self, video_path: str) -> float:
-        cmd = [
-            str(FFPROBE_PATH),
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            video_path,
-        ]
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-        )
-        return float(result.stdout.strip())
+        return core_ffmpeg_runner.probe_duration(FFPROBE_PATH, Path(video_path))
 
     def get_video_resolution(self, video_path: str) -> Tuple[int, int]:
         return core_ffmpeg_runner.probe_resolution(FFPROBE_PATH, Path(video_path))

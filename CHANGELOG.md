@@ -149,6 +149,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- merge.py MergeWorker.get_video_duration_seconds: refactored from inline ffprobe subprocess.run to core_ffmpeg_runner.probe_duration delegation. Mirrors the pattern already used by get_video_resolution in the same class and by cutter.py production code. [N4]
+
 - auto_render mode panel: renamed misleading "Step 3 - Assign to slots" label to "Optional: Assign to slots". Avoids collision with the real Step 3 (output folder) and removes duplicate `step3_label` local variable. [N48/N53]
 
 - benchmarks/vmaf_validation_v2.5.md: Step 4e-fix-4 section appended; Status updated from FAIL (under D9) to PASS (under ADR-0008 thresholds); Revision History extended with fix-4 entry.
