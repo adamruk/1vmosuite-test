@@ -30,7 +30,15 @@ from PyQt5.QtWidgets import (
     QSizePolicy,
     QSlider,
 )
-from PyQt5.QtCore import Qt, QThreadPool, QRunnable, pyqtSignal, QObject
+from PyQt5.QtCore import (
+    Qt,
+    QThreadPool,
+    QRunnable,
+    pyqtSignal,
+    pyqtSlot,
+    QObject,
+    QThread,
+)
 from PyQt5.QtGui import QIcon, QColor, QPainter, QPen
 from updater import DriveUpdater
 from help_dialog import HelpDialog
@@ -62,6 +70,180 @@ class WorkerSignals(QObject):
     output_updated = pyqtSignal(str)
     merge_completed = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
+
+
+class MergeCoordinator(QObject):
+    video_ready = pyqtSignal(int, str, str, str, str, str)
+    finished = pyqtSignal()
+    error_occurred = pyqtSignal(str)
+
+    def __init__(
+        self,
+        videos_groups,
+        cancel_event,
+        thread_pool,
+        layout_mode,
+        opacity,
+        audio_source,
+        audio_mode,
+        output_format,
+        slider_ratio,
+        is_boost_mode,
+        audio_files,
+        output_directory,
+        get_video_duration,
+        get_video_resolution,
+        on_progress,
+        on_status,
+        on_output,
+        on_completed,
+        on_error,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.videos_groups = videos_groups
+        self.cancel_event = cancel_event
+        self.thread_pool = thread_pool
+        self.layout_mode = layout_mode
+        self.opacity = opacity
+        self.audio_source = audio_source
+        self.audio_mode = audio_mode
+        self.output_format = output_format
+        self.slider_ratio = slider_ratio
+        self.is_boost_mode = is_boost_mode
+        self.audio_files = audio_files
+        self.output_directory = output_directory
+        self.get_video_duration = get_video_duration
+        self.get_video_resolution = get_video_resolution
+        self._on_progress = on_progress
+        self._on_status = on_status
+        self._on_output = on_output
+        self._on_completed = on_completed
+        self._on_error = on_error
+        self.logger = logging.getLogger(__name__)
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            max_videos = max(len(g) for g in self.videos_groups)
+            group_indices = [0] * len(self.videos_groups)
+            for output_index in range(max_videos):
+                if self.cancel_event.is_set():
+                    break
+                try:
+                    videos_to_merge = []
+                    for i, group in enumerate(self.videos_groups):
+                        if group:
+                            video_index = group_indices[i] % len(group)
+                            videos_to_merge.append(group[video_index])
+                            group_indices[i] += 1
+                    custom_audio = None
+                    if self.audio_source == "Custom Audio" and self.audio_files:
+                        if self.audio_mode == "🔁 Order":
+                            audio_index = output_index % len(self.audio_files)
+                            custom_audio = self.audio_files[audio_index]
+                        else:
+                            import random
+
+                            custom_audio = random.choice(self.audio_files)
+                    current_time = datetime.now().strftime("%d%m%y_%H%M%S")
+                    output_filename = f"merge_{current_time}_{output_index + 1}.mp4"
+                    output_path = os.path.join(self.output_directory, output_filename)
+                    output_duration = "00:00:00"
+                    output_resolution = "Unknown"
+                    output_format_str = "MP4"
+                    durations = [
+                        self.get_video_duration(video) for video in videos_to_merge
+                    ]
+                    output_duration = max(
+                        durations,
+                        key=lambda x: sum(
+                            (int(i) * j for i, j in zip(x.split(":"), [3600, 60, 1]))
+                        ),
+                    )
+                    if self.layout_mode == "Horizontal":
+                        heights = []
+                        widths = []
+                        for video in videos_to_merge:
+                            res = self.get_video_resolution(video)
+                            if res != "Unknown":
+                                w, h = map(int, res.split("x"))
+                                heights.append(h)
+                                widths.append(w)
+                        if heights and widths:
+                            max_height = max(heights)
+                            total_width = sum(widths)
+                            output_resolution = f"{total_width}x{max_height}"
+                    elif self.layout_mode == "Vertical":
+                        heights = []
+                        widths = []
+                        for video in videos_to_merge:
+                            res = self.get_video_resolution(video)
+                            if res != "Unknown":
+                                w, h = map(int, res.split("x"))
+                                heights.append(h)
+                                widths.append(w)
+                        if heights and widths:
+                            max_width = max(widths)
+                            total_height = sum(heights)
+                            output_resolution = f"{max_width}x{total_height}"
+                    elif self.layout_mode == "2x2 Grid":
+                        res = self.get_video_resolution(videos_to_merge[0])
+                        if res != "Unknown":
+                            w, h = map(int, res.split("x"))
+                            output_resolution = f"{w * 2}x{h * 2}"
+                    else:
+                        output_resolution = self.get_video_resolution(
+                            videos_to_merge[0]
+                        )
+                    input_names = ", ".join(
+                        os.path.basename(v) for v in videos_to_merge
+                    )
+                    if custom_audio:
+                        input_names = (
+                            input_names + f" + {os.path.basename(custom_audio)}"
+                        )
+                    self.video_ready.emit(
+                        output_index,
+                        input_names,
+                        output_filename,
+                        output_duration,
+                        output_resolution,
+                        output_format_str,
+                    )
+                    worker = MergeWorker(
+                        videos_to_merge,
+                        output_path,
+                        output_index,
+                        FFMPEG_PATH,
+                        "Random",
+                        self.layout_mode,
+                        self.opacity,
+                        self.audio_source,
+                        self.output_format,
+                        self.slider_ratio,
+                        custom_audio,
+                        self.is_boost_mode,
+                    )
+                    worker.setAutoDelete(True)
+                    worker.signals.progress_updated.connect(self._on_progress)
+                    worker.signals.status_updated.connect(self._on_status)
+                    worker.signals.output_updated.connect(self._on_output)
+                    worker.signals.merge_completed.connect(self._on_completed)
+                    worker.signals.error_occurred.connect(self._on_error)
+                    self.thread_pool.start(worker)
+                except Exception as e:
+                    error_msg = f"Lỗi khi xử lý video {output_index + 1}: {str(e)}"
+                    print(f"Merge Error: {error_msg}")
+                    self.logger.error(error_msg)
+                    self.error_occurred.emit(error_msg)
+        except Exception as e:
+            error_msg = f"Error merging: {str(e)}\n{traceback.format_exc()}"
+            print(f"Merge Error: {error_msg}")
+            self.logger.error(error_msg)
+            self.error_occurred.emit(error_msg)
+        finally:
+            self.finished.emit()
 
 
 class _RunnerHandle:
@@ -1466,27 +1648,6 @@ class VideoMergeTool(QMainWindow):
             if num_videos == 4:
                 video_groups.append(self.group4_videos)
             max_videos = max((len(group) for group in video_groups))
-            for i in range(max_videos):
-                self.progress_boxes.append(self.create_progress_box(i))
-                self.update_box_color(i, "default")
-            self.progress_label.setText(f"Progress: 0/{max_videos}")
-            self.processed_output = 0
-            threading.Thread(target=self.merge_videos, daemon=True).start()
-
-    def merge_videos(self):
-        try:
-            num_videos = int(self.combo_num_videos.currentText())
-            layout_mode = self.combo_layout.currentText()
-            audio_source = self.combo_audio.currentText()
-            opacity = self.slider_opacity.value() if layout_mode == "Overlay" else 100
-            video_groups = [self.group1_videos]
-            if num_videos >= 2:
-                video_groups.append(self.group2_videos)
-            if num_videos >= 3:
-                video_groups.append(self.group3_videos)
-            if num_videos == 4:
-                video_groups.append(self.group4_videos)
-            max_videos = max((len(group) for group in video_groups))
             if max_videos == 0:
                 QMessageBox.warning(self, "Warning", "No videos in any group!")
                 self.is_merging = False
@@ -1494,128 +1655,63 @@ class VideoMergeTool(QMainWindow):
                 self.btn_cancel.setEnabled(False)
                 self.save_config()
                 return
-            group_indices = [0] * len(video_groups)
-            for output_index in range(max_videos):
-                if self.cancel_event.is_set():
-                    break
+            for i in range(max_videos):
+                self.progress_boxes.append(self.create_progress_box(i))
+                self.update_box_color(i, "default")
+            self.progress_label.setText(f"Progress: 0/{max_videos}")
+            self.processed_output = 0
+            if hasattr(self, "_merge_coordinator") and self._merge_coordinator:
                 try:
-                    videos_to_merge = []
-                    for i, group in enumerate(video_groups):
-                        if group:
-                            video_index = group_indices[i] % len(group)
-                            videos_to_merge.append(group[video_index])
-                            group_indices[i] += 1
-                    custom_audio = None
-                    if audio_source == "Custom Audio" and self.audio_files:
-                        if self.combo_audio_mode.currentText() == "🔁 Order":
-                            audio_index = output_index % len(self.audio_files)
-                            custom_audio = self.audio_files[audio_index]
-                        else:
-                            import random
-
-                            custom_audio = random.choice(self.audio_files)
-                    current_time = datetime.now().strftime("%d%m%y_%H%M%S")
-                    output_filename = f"merge_{current_time}_{output_index + 1}.mp4"
-                    output_path = os.path.join(self.output_directory, output_filename)
-                    output_duration = "00:00:00"
-                    output_resolution = "Unknown"
-                    output_format = "MP4"
-                    durations = [
-                        self.get_video_duration(video) for video in videos_to_merge
-                    ]
-                    output_duration = max(
-                        durations,
-                        key=lambda x: sum(
-                            (int(i) * j for i, j in zip(x.split(":"), [3600, 60, 1]))
-                        ),
-                    )
-                    if layout_mode == "Horizontal":
-                        heights = []
-                        widths = []
-                        for video in videos_to_merge:
-                            res = self.get_video_resolution(video)
-                            if res != "Unknown":
-                                w, h = map(int, res.split("x"))
-                                heights.append(h)
-                                widths.append(w)
-                        if heights and widths:
-                            max_height = max(heights)
-                            total_width = sum(widths)
-                            output_resolution = f"{total_width}x{max_height}"
-                    else:
-                        if layout_mode == "Vertical":
-                            heights = []
-                            widths = []
-                            for video in videos_to_merge:
-                                res = self.get_video_resolution(video)
-                                if res != "Unknown":
-                                    w, h = map(int, res.split("x"))
-                                    heights.append(h)
-                                    widths.append(w)
-                            if heights and widths:
-                                max_width = max(widths)
-                                total_height = sum(heights)
-                                output_resolution = f"{max_width}x{total_height}"
-                        else:
-                            if layout_mode == "2x2 Grid":
-                                res = self.get_video_resolution(videos_to_merge[0])
-                                if res != "Unknown":
-                                    w, h = map(int, res.split("x"))
-                                    output_resolution = f"{w * 2}x{h * 2}"
-                            else:
-                                output_resolution = self.get_video_resolution(
-                                    videos_to_merge[0]
-                                )
-                    item = QTreeWidgetItem(self.tree_output)
-                    item.setText(0, str(output_index + 1))
-                    item.setText(
-                        1, ", ".join((os.path.basename(v) for v in videos_to_merge))
-                    )
-                    if custom_audio:
-                        item.setText(
-                            1, item.text(1) + f" + {os.path.basename(custom_audio)}"
-                        )
-                    item.setText(2, output_filename)
-                    item.setText(3, output_duration)
-                    item.setText(4, output_resolution)
-                    item.setText(5, output_format)
-                    item.setText(6, "⏳ Waiting...")
-                    worker = MergeWorker(
-                        videos_to_merge,
-                        output_path,
-                        output_index,
-                        FFMPEG_PATH,
-                        "Random",
-                        layout_mode,
-                        opacity,
-                        audio_source,
-                        self.combo_format.currentText(),
-                        self.slider_ratio.value(),
-                        custom_audio,
-                        self.is_boost_mode,
-                    )
-                    worker.setAutoDelete(True)
-                    worker.signals.progress_updated.connect(self.update_thread_progress)
-                    worker.signals.status_updated.connect(self.update_thread_status)
-                    worker.signals.output_updated.connect(self.update_ffmpeg_output)
-                    worker.signals.merge_completed.connect(self.on_merge_completed)
-                    worker.signals.error_occurred.connect(self.on_merge_error)
-                    self.thread_pool.start(worker)
-                except Exception as e:
-                    error_msg = f"Lỗi khi xử lý video {output_index + 1}: {str(e)}"
-                    print(f"Merge Error: {error_msg}")
-                    self.logger.error(error_msg)
-                    self.on_merge_error(error_msg)
-        except Exception as e:
-            error_msg = f"Error merging: {str(e)}\n{traceback.format_exc()}"
-            print(f"Merge Error: {error_msg}")
-            self.logger.error(error_msg)
-            QMessageBox.critical(self, "Error", f"Unexpected error occurred: {str(e)}")
-        finally:
-            self.is_merging = False
-            self.btn_start.setEnabled(True)
-            self.btn_cancel.setEnabled(False)
-            self.save_config()
+                    self._merge_coordinator.video_ready.disconnect()
+                    self._merge_coordinator.finished.disconnect()
+                    self._merge_coordinator.error_occurred.disconnect()
+                except TypeError:
+                    pass
+            layout_mode = self.combo_layout.currentText()
+            opacity = self.slider_opacity.value() if layout_mode == "Overlay" else 100
+            audio_source = self.combo_audio.currentText()
+            audio_mode = self.combo_audio_mode.currentText()
+            output_format = self.combo_format.currentText()
+            slider_ratio = self.slider_ratio.value()
+            is_boost_mode = self.is_boost_mode
+            videos_groups = [list(g) for g in video_groups]
+            audio_files = list(self.audio_files)
+            output_directory = self.output_directory
+            self._merge_coordinator = MergeCoordinator(
+                videos_groups=videos_groups,
+                cancel_event=self.cancel_event,
+                thread_pool=self.thread_pool,
+                layout_mode=layout_mode,
+                opacity=opacity,
+                audio_source=audio_source,
+                audio_mode=audio_mode,
+                output_format=output_format,
+                slider_ratio=slider_ratio,
+                is_boost_mode=is_boost_mode,
+                audio_files=audio_files,
+                output_directory=output_directory,
+                get_video_duration=self.get_video_duration,
+                get_video_resolution=self.get_video_resolution,
+                on_progress=self.update_thread_progress,
+                on_status=self.update_thread_status,
+                on_output=self.update_ffmpeg_output,
+                on_completed=self.on_merge_completed,
+                on_error=self.on_merge_error,
+            )
+            self._merge_thread = QThread(self)
+            self._merge_coordinator.moveToThread(self._merge_thread)
+            self._merge_thread.started.connect(self._merge_coordinator.run)
+            self._merge_coordinator.finished.connect(self._merge_thread.quit)
+            self._merge_coordinator.finished.connect(
+                self._merge_coordinator.deleteLater
+            )
+            self._merge_thread.finished.connect(self._merge_thread.deleteLater)
+            self._merge_coordinator.video_ready.connect(self.on_video_merge_ready)
+            self._merge_coordinator.finished.connect(self.on_merge_finished)
+            self._merge_coordinator.error_occurred.connect(
+                self.on_coordinator_merge_error
+            )
+            self._merge_thread.start()
 
     def cancel_merge(self):
         if self.is_merging:
@@ -1741,6 +1837,36 @@ class VideoMergeTool(QMainWindow):
             if item.text(6) in ["⏳ Waiting...", "🔄 Processing..."]:
                 item.setText(6, "🔴 Error")
                 break
+
+    @pyqtSlot(int, str, str, str, str, str)
+    def on_video_merge_ready(
+        self,
+        i: int,
+        input_names: str,
+        output_filename: str,
+        duration_str: str,
+        resolution_str: str,
+        output_format: str,
+    ):
+        item = QTreeWidgetItem(self.tree_output)
+        item.setText(0, str(i + 1))
+        item.setText(1, input_names)
+        item.setText(2, output_filename)
+        item.setText(3, duration_str)
+        item.setText(4, resolution_str)
+        item.setText(5, output_format)
+        item.setText(6, "⏳ Waiting...")
+
+    @pyqtSlot()
+    def on_merge_finished(self):
+        self.is_merging = False
+        self.btn_start.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+        self.save_config()
+
+    @pyqtSlot(str)
+    def on_coordinator_merge_error(self, msg: str):
+        QMessageBox.critical(self, "Error", msg)
 
     def load_last_paths(self):
         if self.CONFIG_FILE.exists():

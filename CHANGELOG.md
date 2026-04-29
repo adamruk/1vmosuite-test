@@ -149,6 +149,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- merge.py: replaced bare threading.Thread coordinator with QThread+moveToThread pattern (MergeCoordinator QObject). All widget state snapshotted on main thread before thread start (12 constructor params); QTreeWidgetItem creation moved to main-thread slot via video_ready signal (7 columns including ffprobe-estimated duration and resolution from input videos). max_videos==0 early exit moved to start_merge() main thread. MergeWorker, WorkerSignals, _RunnerHandle, and running_workers registry unchanged. Probe 1 disconnect guard prevents stale-signal double-fire on rapid restart. [R4]
+
 - mixer.py: replaced bare threading.Thread coordinator with QThread+moveToThread pattern (MergeCoordinator QObject). All widget state snapshotted on main thread before thread start; QTreeWidgetItem rows created in on_video_merge_started slot (main thread) via per_video_started signal — no pre-creatable rows since output filenames are timestamp-derived per iteration. Probe 1 disconnect guard prevents stale-signal double-fire on rapid restart. Dead merge_videos method deleted. [R4]
 
 - cutter.py: replaced bare threading.Thread coordinator with QThread+moveToThread pattern (CutCoordinator QObject). All widget state snapshotted on main thread before thread start; QTreeWidgetItem placeholder rows pre-created in start_cut(); UI update calls replaced with signals (video_started, finished, error_occurred). CutWorker and WorkerSignals unchanged. [R4]
