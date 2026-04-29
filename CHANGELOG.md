@@ -355,6 +355,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - Path B: out-of-order completion stamping wrong tree row — workers now stamp `tree_item` and `task_index` attributes in `_start_next_task`; completion/error handlers use `getattr` lookups instead of count-based row matching. [auto_render.py][c03433a]
 - Path B: FFmpeg log unbounded growth — `output_text.document().setMaximumBlockCount(2000)` caps log buffer. [auto_render.py][c03433a]
 
+- auto_render.py RenderWorker: GPU semaphore acquire/release wrapped in try/finally to prevent slot leak when run_ffmpeg raises before its internal try block (e.g., subprocess.Popen failure when ffmpeg binary is missing). Pre-fix, two such exceptions would deadlock all subsequent GPU encodes until app restart due to permanent slot leak. [N17]
+
 - merge.py save_config: opacity slider value is now persisted correctly. Previously read from combo_overlay_group (group-name string) instead of slider_opacity.value() (integer 0-100), silently losing the user's opacity setting on every save. [N50-CRIT]
 - merge.py save_config: refactored to merge-then-write pattern (load existing config, update keys, save). Previously overwrote the file wholesale, which would wipe any keys owned by other code paths. Mirrors auto_render.py:945-967 pattern. [N5-merge]
 

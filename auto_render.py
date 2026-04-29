@@ -205,17 +205,21 @@ class RenderWorker(QObject):
                 _gpu_path_taken = self.gpu_enabled and not is_image_encoder
                 if _gpu_path_taken and self.gpu_semaphore is not None:
                     self.gpu_semaphore.acquire()
-                rc = core_ffmpeg_runner.run_ffmpeg(
-                    command,
-                    dialect="legacy_stderr",
-                    on_progress=lambda pct: self.progress_updated.emit(
-                        self.thread_index, pct
-                    ),
-                    on_output_line=lambda line: self.output_updated.emit(line + "\n"),
-                    should_cancel=lambda: self.is_cancelled,
-                )
-                if _gpu_path_taken and self.gpu_semaphore is not None:
-                    self.gpu_semaphore.release()
+                try:
+                    rc = core_ffmpeg_runner.run_ffmpeg(
+                        command,
+                        dialect="legacy_stderr",
+                        on_progress=lambda pct: self.progress_updated.emit(
+                            self.thread_index, pct
+                        ),
+                        on_output_line=lambda line: self.output_updated.emit(
+                            line + "\n"
+                        ),
+                        should_cancel=lambda: self.is_cancelled,
+                    )
+                finally:
+                    if _gpu_path_taken and self.gpu_semaphore is not None:
+                        self.gpu_semaphore.release()
                 # CPU fallback per ADR-0007 D5: GPU encode failed, honor gpu_error_action.
                 # Bug 2 closure: skip_file branch emits error_occurred so existing handler advances batch.
                 if rc != 0 and _gpu_path_taken:
