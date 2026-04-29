@@ -149,6 +149,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- docs/PHASE_2_PORT_NOTES.md: corrected `output_collision` default from `'overwrite'` to `'rename'` (matches runtime and N36 fix); added v2.5.2 addendum noting merge-then-write pattern was extended to merge.py, cutter.py, and mixer.py. docs/PHASE_2C_PLAN.md: corrected QTBUG-140144 rationale (affects QtWebEngine, not QtWidgets — version pin is stability, not bug avoidance); appended four v2.5.2 REVIEWER backlog entries (cutter restart race, cutter stale Pending rows, mixer double save_config, settings_dialog silent fallback).
+
 - merge.py: replaced bare threading.Thread coordinator with QThread+moveToThread pattern (MergeCoordinator QObject). All widget state snapshotted on main thread before thread start (12 constructor params); QTreeWidgetItem creation moved to main-thread slot via video_ready signal (7 columns including ffprobe-estimated duration and resolution from input videos). max_videos==0 early exit moved to start_merge() main thread. MergeWorker, WorkerSignals, _RunnerHandle, and running_workers registry unchanged. Probe 1 disconnect guard prevents stale-signal double-fire on rapid restart. [R4]
 
 - mixer.py: replaced bare threading.Thread coordinator with QThread+moveToThread pattern (MergeCoordinator QObject). All widget state snapshotted on main thread before thread start; QTreeWidgetItem rows created in on_video_merge_started slot (main thread) via per_video_started signal — no pre-creatable rows since output filenames are timestamp-derived per iteration. Probe 1 disconnect guard prevents stale-signal double-fire on rapid restart. Dead merge_videos method deleted. [R4]

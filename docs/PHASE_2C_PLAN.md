@@ -1,5 +1,7 @@
 # Phase 2c Execution Plan
 
+<!-- markdownlint-disable MD013 -->
+
 Detailed execution plan for Phase 2 blockers and backlog. Phase status and team context: `docs/ROADMAP.md`.
 
 ---
@@ -29,12 +31,14 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 ### 2c-c-1 — Pydantic schema + builtin.json, dark-released (6-8 hrs, Windows)
 
 **Scope.**
+
 - `core/encoder_schema.py`: `EncoderPreset`, `EncoderLibrary` (`schema_version: int = 1`, `presets: list[EncoderPreset]`).
 - Regenerate `assets/Encoder.json` via existing `tools/generate_encoder_json.py`.
 - Add `load_builtin_json()` to `core/preset_loader.py`.
 - Gate behind `ENCODER_USE_JSON=1` env var. Legacy `Encoder.txt` loader remains default. No UI or write changes.
 
 **Acceptance.**
+
 - `ENCODER_USE_JSON=1` launches with 111 presets from JSON; unset launches from `Encoder.txt`.
 - Load time within 100ms of legacy.
 - `tools/check_encoder_schema.py` emits PASS to `tests/smoke-2c-c-1-schema-YYYYMMDD.log` (manual-smoke per ADR-0001).
@@ -44,12 +48,14 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 ### 2c-c-2 — Portable UserData + writable-install-dir guard (3-4 hrs, Windows)
 
 **Scope.**
+
 - `core/user_data.py` with `resolve_user_data_dir()`. Returns platform-standard user data dir via platformdirs by default; opt-in portable mode via `portable.txt` sentinel returns `./UserData/` alongside exe.
 - In portable mode, raise `PortableLocationError` if install dir is under a Windows-protected location (Program Files, Windows, ProgramData) where writes would silently redirect via VirtualStore.
 - Cross-platform via platformdirs; no per-platform branching needed in this module. (See ADR-0005.)
 - No writes yet — pure resolution.
 
 **Acceptance.**
+
 - Default returns platformdirs user_data_path; portable.txt sentinel returns `./UserData/`; portable + protected dir raises PortableLocationError with clear message.
 - `tools/check_user_data.py` emits PASS to `tests/smoke-2c-c-2-userdata-YYYYMMDD.log` (manual-smoke per ADR-0001).
 
@@ -58,6 +64,7 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 ### 2c-c-3 — User preset writer: atomic write + .bak + retry (5-7 hrs, Windows)
 
 **Scope.**
+
 - `core/atomic_write.py` with `save_json_atomic(path, data)`: serialize-to-bytes first (catch errors pre-disk), write `path.tmp` in same directory, `f.flush() + os.fsync()`, rotate `path` → `path.bak` (single generation), `os.replace(path.tmp, path)` wrapped in **5-retry exponential backoff** (50/100/200/400/800ms) for `PermissionError`/`OSError`.
 - `save_user_presets_json(presets)` in preset_loader using this primitive.
 - Writes only triggered by new `tools/test_user_save.py` smoke script.
@@ -65,6 +72,7 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 **Note (2026-04-26, D5 expansion):** This commit ALSO rewires the 4 `config_video_*.json` writes (auto_render / cutter / merge / mixer) from install-dir to user_data_dir, alongside the encoder.user.json writer. Strict plan reading would only rewire encoder.user.json, but Observation O ("frozen .exe behavior unvalidated") requires all 5 user-state writes go through the portable resolver. Migration of existing legacy `config_video_*.json` files is automatic on first launch, preserving originals (per `core.user_data.migrate_legacy_configs`).
 
 **Acceptance.**
+
 - `tools/test_user_save.py` round-trip works. Manual smoke captured at `tests/smoke-2c-c-3-usersave-YYYYMMDD.log` (PASS).
 - Corrupted main file auto-falls-back to `.bak` on load with visible warning log.
 - `tests/smoke/test_atomic_write_retry.py` passes (ADR-0003 Exception 1). Pytest output captured at `tests/smoke-2c-c-3-retry-YYYYMMDD.log`.
@@ -77,12 +85,14 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 **Not a sub-phase, a standalone commit.** Fits between 2c-c-3 and 2c-c-6 in the timeline but independent.
 
 **Scope.**
+
 - `RenderWorker.process()` skips `-c:v libx264 -c:a aac` append when preset already specifies a video or audio codec (scan for `-vcodec`, `-c:v`, `-codec:v`, `-acodec`, `-c:a`, `-codec:a`).
 - Image-encoder exception (`-f image2`) unchanged.
 - Reproduction script at `tests/repro/observation-v-codec-append.py` (peer rule 1).
 - Mark Observation V as **Fixed in Phase 2 (<sha>)** in ROADMAP.md.
 
 **Acceptance.**
+
 - Reproduction script shows pre-fix silent override and post-fix correct behavior.
 - Manual smoke: HEVC preset, `-c:a copy` preset, NVENC preset all render to preset intent (not silently overridden).
 
@@ -106,7 +116,7 @@ Separate playbook (TBD when Phase 2d begins). High-level scope:
 
 - **Motivation.** Mac-quality-forced for current team. Licensing headroom preserved for any future commercial decision.
 - **Approach.** 30-line deletable `core/_qt.py` scaffold; libcst mechanical rewriter (`migrate_qt.py`); per-app migration.
-- **Target.** PySide6 6.9.1 on QtWidgets. Pin explicitly NOT 6.9.2 due to QTBUG-140144 and Anki community reports of 6.9.2 blank-main-window issues.
+- **Target.** PySide6 6.9.1 on QtWidgets. Pin 6.9.1 for longest community burn-in window. Note: QTBUG-140144 affects QtWebEngine specifically; 1vmo-suite does not use QtWebEngine so the 6.9.2 blank-window reports from Anki do not apply. Version pin rationale is stability, not bug avoidance.
 - **Packaging.** Nuitka standalone.
 - **Fallback.** $670 Riverbank commercial PyQt5 license pre-approved if migration exceeds 60 hours.
 
@@ -155,6 +165,7 @@ Target: **6 hrs/day × 5 days/week** for sustainable solo pace. Evidence: Cal Ne
 ## Completion criteria
 
 All of:
+
 1. Tags exist: `v2c-c-1`, `v2c-c-2`, `v2c-c-3`, `v2c-c-4`, `v2c-c-6`, `v2c-c-complete`, `v2d-complete`. Observation V fix shipped untagged via Path B (commit `c03433a`); see "Status update (2026-04-23)" in the Observation V fix section. Mac compat verification deferred to post-Phase-2 milestone with Junaid (memory rule #14); v2c-c-complete = Windows-only smoke regression green.
 2. All 111 presets load, validate, render correctly on Windows + Mac.
 3. All 4 apps run on PySide6 with no PyQt5 imports remaining.
@@ -203,6 +214,16 @@ Pydantic schema + known-bad-combination guards + pixel-format assertions. Tiered
 Per Observation T. Required only if commercial trajectory activates.
 
 **Trigger for pickup.** Commercial trajectory ADR written, or team convenience becomes compelling (2 non-Vietnamese team members).
+
+### v2.5.2 REVIEWER observations — pending triage
+
+- **cutter.py restart race (Probe 1):** old coordinator's `finished` signal remains connected when `start_cut()` is called while prior QThread is still live; `on_cut_finished` fires again mid-new-cut, corrupting `is_processing` and button state. Fix: disconnect-before-overwrite (same pattern as auto_render.py c03433a). [v2.5.2 REVIEWER, 88de676]
+
+- **cutter.py stale Pending rows:** placeholder rows created in `start_cut()` that are never dispatched (cancel fires before coordinator reaches them) stay as "Pending" forever. User-visible visual regression. [v2.5.2 REVIEWER, 88de676]
+
+- **mixer.py closeEvent double save_config:** `cancel_merge()` calls `save_config()`, then `closeEvent` calls it again after `cancel_merge()` returns; harmless with merge-then-write but redundant. [v2.5.2 REVIEWER, bfb3afa]
+
+- **settings_dialog.py _set_combo_data silent fallback:** if a saved `output_collision` value is not in `COLLISION_OPTIONS`, the combo silently stays at index 0 (overwrite) with no warning. Pre-existing; not introduced by N36. [v2.5.2 observation]
 
 ---
 

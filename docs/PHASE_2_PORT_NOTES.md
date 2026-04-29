@@ -71,7 +71,7 @@ Both are self-contained — no dependencies beyond stdlib (`os`, `re`,
 
 - **`RenderWorker.__init__`** new params (with defaults that preserve
   current behavior): `use_gpu=False`, `nvenc_quality_offset=3`,
-  `gpu_error_action='retry_cpu'`, `output_collision='overwrite'`,
+  `gpu_error_action='retry_cpu'`, `output_collision='rename'`,
   `show_ffmpeg_command=True`. Stored as `self.<name>`.
 - **New signal** on `RenderWorker`: `batch_stop_requested = pyqtSignal()`.
   Emitted when `gpu_error_action == 'stop_batch'`.
@@ -114,6 +114,7 @@ Both are self-contained — no dependencies beyond stdlib (`os`, `re`,
   Critical: this prevents SettingsDialog-managed keys from being wiped
   when the main window saves its own state. Also persists
   `'sequential_slots'` (see "Default slots" section below).
+  Pattern subsequently extended to merge.py, cutter.py, and mixer.py save_config methods (v2.5.2, commits e237f8c and 2313f3d).
 - ⚙️ **Settings button** added to the `video_controls` toolbar between
   GPU button and Help.
 
@@ -338,6 +339,7 @@ all use `gblur=sigma=20`. At sigma 20 the kernel is ~120×120 pixels —
 Slows the whole 6-slot chain to ~0.16x speed.
 
 **Fix options:**
+
 - Replace `gblur=sigma=20` with `boxblur=20:2` (2 passes ≈ Gaussian via
   central-limit theorem, ~5-10× faster, visually indistinguishable for
   background-blur use case).
@@ -380,7 +382,7 @@ before that one specifically. The rest are additive.
 
 ## Build / zip recipe
 
-```
+```bash
 .venv/Scripts/python.exe -m PyInstaller \
   --name=AutoRender \
   --onedir \
@@ -397,11 +399,13 @@ before that one specifically. The rest are additive.
 ```
 
 Then:
-```
+
+```powershell
 powershell -Command "Compress-Archive -Path dist/AutoRender -DestinationPath '1vmo-AutoRender-vX.Y.zip' -CompressionLevel Optimal -Force"
 ```
 
 Watch for these **harmless** warnings (don't block on them):
+
 - `Hidden import 'PyQt5.uic.port_v2.*' not found` — Python 2 compat shims.
 - `Hidden import "sip" not found!` — old top-level name; we use `PyQt5.sip`.
 - `Library not found: LIBPQ.dll` — PostgreSQL driver, unused.
