@@ -550,27 +550,30 @@ class VideoMergerTool(QMainWindow):
     def save_config(self):
         """Lưu cấu hình vào file."""
         try:
-            config = {
-                "version": 1,
-                "last_output_dir": self.output_directory,
-                "last_videos_dir": os.path.dirname(self.video_list[0])
-                if self.video_list
-                else "",
-                "last_intro_video_dir": os.path.dirname(self.intro_videos[0])
-                if self.intro_videos
-                else "",
-                "last_outro_video_dir": os.path.dirname(self.outro_videos[0])
-                if self.outro_videos
-                else "",
-                "last_videos": self.video_list,
-                "last_intro_videos": self.intro_videos,
-                "last_outro_videos": self.outro_videos,
-                "merge_mode_main": self.combo_merge_mode_main.currentText(),
-                "merge_mode_intro": self.combo_merge_mode_intro.currentText(),
-                "merge_mode_outro": self.combo_merge_mode_outro.currentText(),
-                "output_naming": self.combo_output_naming.currentText(),
-            }
-            core_config.save(Path(self.CONFIG_FILE), config)
+            existing = core_config.load(Path(self.CONFIG_FILE), default={})
+            existing.update(
+                {
+                    "version": 1,
+                    "last_output_dir": self.output_directory,
+                    "last_videos_dir": os.path.dirname(self.video_list[0])
+                    if self.video_list
+                    else "",
+                    "last_intro_video_dir": os.path.dirname(self.intro_videos[0])
+                    if self.intro_videos
+                    else "",
+                    "last_outro_video_dir": os.path.dirname(self.outro_videos[0])
+                    if self.outro_videos
+                    else "",
+                    "last_videos": self.video_list,
+                    "last_intro_videos": self.intro_videos,
+                    "last_outro_videos": self.outro_videos,
+                    "merge_mode_main": self.combo_merge_mode_main.currentText(),
+                    "merge_mode_intro": self.combo_merge_mode_intro.currentText(),
+                    "merge_mode_outro": self.combo_merge_mode_outro.currentText(),
+                    "output_naming": self.combo_output_naming.currentText(),
+                }
+            )
+            core_config.save(Path(self.CONFIG_FILE), existing)
         except (OSError, TypeError) as e:
             QMessageBox.warning(self, "Warning", f"Cannot save configuration: {str(e)}")
 

@@ -146,11 +146,6 @@ class CutWorker(QRunnable):
                 command.extend(self.ffmpeg_params)
                 if mode == "split_by_time":
                     duration = self.cut_params["duration"]
-                    num_segments = max(
-                        1,
-                        int(total_duration // duration)
-                        + (1 if total_duration % duration >= 1 else 0),
-                    )
                     command.extend(
                         [
                             "-f",
@@ -764,16 +759,19 @@ class VideoCutterTool(QMainWindow):
 
     def save_config(self):
         try:
-            config = {
-                "version": 1,
-                "last_output_dir": self.output_directory,
-                "last_videos_dir": os.path.dirname(self.video_list[0])
-                if self.video_list
-                else "",
-                "last_videos": self.video_list,
-                "cut_mode": self.combo_cut_mode.currentText(),
-            }
-            core_config.save(Path(self.CONFIG_FILE), config)
+            existing = core_config.load(Path(self.CONFIG_FILE), default={})
+            existing.update(
+                {
+                    "version": 1,
+                    "last_output_dir": self.output_directory,
+                    "last_videos_dir": os.path.dirname(self.video_list[0])
+                    if self.video_list
+                    else "",
+                    "last_videos": self.video_list,
+                    "cut_mode": self.combo_cut_mode.currentText(),
+                }
+            )
+            core_config.save(Path(self.CONFIG_FILE), existing)
         except (OSError, TypeError) as e:
             self.logger.warning(f"Failed to save config: {str(e)}")
             QMessageBox.warning(self, "Warning", f"Cannot save configuration: {str(e)}")
