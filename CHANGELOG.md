@@ -261,6 +261,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- settings_dialog.py: `DEFAULTS["output_collision"]` changed from `"overwrite"` to `"rename"` to match auto_render.py runtime default (L82, L366, L877). Previously, opening Settings and clicking OK without changing anything silently persisted `"overwrite"` to disk, overriding the user's intended rename behavior. [N36]
+
 - auto_render.py: selection-aware status label between encoder buttons and tree explains why Edit/Delete are disabled when a built-in preset is selected.
   BEFORE: commit 3d82182 (tooltip clarification) was functionally inert because Qt suppresses tooltip rendering on disabled widgets — the exact case where users most needed the explanation. Hovering over grayed Edit/Delete buttons showed nothing. Users still saw "is this broken?" UX confusion.
   AFTER: new self.encoder_status_label QLabel (small gray italic, fixed min-height for layout stability) wired to tree_encoders.itemSelectionChanged. When any built-in preset is selected, label reads: "📌 Built-in preset — read-only. Use ♻️ Add to create a custom preset you can edit/delete." When user preset selected (or empty selection), label clears to empty string. Information visible WITHOUT requiring hover, contextual to selection state, doesn't depend on Qt's disabled-widget tooltip behavior. Tooltip from 3d82182 retained — still informative for the user-preset-selected case where buttons ARE enabled and the tooltip DOES render.

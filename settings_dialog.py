@@ -35,7 +35,7 @@ DEFAULTS = {
     "num_threads": 3,
     "use_gpu": True,
     "gpu_error_action": "retry_cpu",
-    "output_collision": "overwrite",
+    "output_collision": "rename",
     "show_ffmpeg_command": True,
     "open_output_when_done": False,
     "tour_seen": True,

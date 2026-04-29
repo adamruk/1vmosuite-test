@@ -1,0 +1,3 @@
+# CHANGELOG uses long narrative entries (BEFORE/AFTER/WHY format) that intentionally exceed
+# the 200-char line limit. Excluding from markdownlint to avoid false positives.
+CHANGELOG.md
