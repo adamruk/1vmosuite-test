@@ -149,6 +149,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- cutter.py: replaced bare threading.Thread coordinator with QThread+moveToThread pattern (CutCoordinator QObject). All widget state snapshotted on main thread before thread start; QTreeWidgetItem placeholder rows pre-created in start_cut(); UI update calls replaced with signals (video_started, finished, error_occurred). CutWorker and WorkerSignals unchanged. [R4]
+
 - merge.py MergeWorker.get_video_duration_seconds: refactored from inline ffprobe subprocess.run to core_ffmpeg_runner.probe_duration delegation. Mirrors the pattern already used by get_video_resolution in the same class and by cutter.py production code. [N4]
 
 - auto_render mode panel: renamed misleading "Step 3 - Assign to slots" label to "Optional: Assign to slots". Avoids collision with the real Step 3 (output folder) and removes duplicate `step3_label` local variable. [N48/N53]
@@ -354,6 +356,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - Path B: QThread.started double-spawn / RuntimeError — added `try: thread.started.disconnect() except TypeError: pass` before each of 6 quit() call sites. [auto_render.py][c03433a]
 - Path B: out-of-order completion stamping wrong tree row — workers now stamp `tree_item` and `task_index` attributes in `_start_next_task`; completion/error handlers use `getattr` lookups instead of count-based row matching. [auto_render.py][c03433a]
 - Path B: FFmpeg log unbounded growth — `output_text.document().setMaximumBlockCount(2000)` caps log buffer. [auto_render.py][c03433a]
+
+- cutter.py: cancel_cut now sets is_cancelled = True on in-flight CutWorker instances via running_workers registry (same pattern as mixer.py bfb3afa). Previously cancel_event.set() + thread_pool.clear() stopped new dispatch but let running workers complete uninterrupted. [N41]
 
 - mixer.py: cancel_merge now actually cancels in-flight workers. Added running_workers registry on MergeWorker class with append/remove lifecycle (remove in finally for leak-safety); cancel_merge iterates registry and sets worker.is_cancelled = True so the existing should_cancel mechanism inside run_ffmpeg receives the signal. Pre-fix, cancel only set cancel_event which stopped dispatching new QRunnables but let already-submitted ones complete uninterrupted. Also added self.save_config() to cancel_merge for consistency with merge.py reference. [Obs-I][N42]
 

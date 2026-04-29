@@ -37,6 +37,7 @@ from PyQt5.QtCore import (
     QThreadPool,
     QRunnable,
     pyqtSignal,
+    pyqtSlot,
     QObject,
     QThread,
     QTimer,
@@ -91,6 +92,8 @@ def sanitize_filename(filename: str) -> str:
 
 
 class CutWorker(QRunnable):
+    running_workers = []
+
     def __init__(
         self,
         input_file: str,
@@ -116,6 +119,7 @@ class CutWorker(QRunnable):
 
     def run(self):
         try:
+            CutWorker.running_workers.append(self)
             with tempfile.TemporaryDirectory() as temp_dir:
                 self.signals.status_updated.emit(
                     self.thread_index,
@@ -271,6 +275,9 @@ class CutWorker(QRunnable):
             self.signals.output_updated.emit(
                 f"\n[Thread {self.thread_index + 1}] {error_msg}\n"
             )
+        finally:
+            if self in CutWorker.running_workers:
+                CutWorker.running_workers.remove(self)
 
     def get_video_duration(self) -> float:
         try:
@@ -303,6 +310,90 @@ class CutWorker(QRunnable):
 
     def get_segment_duration(self, file_path: str) -> float:
         return core_ffmpeg_runner.probe_duration(FFPROBE_PATH, Path(file_path))
+
+
+class CutCoordinator(QObject):
+    video_started = pyqtSignal(int, str, str)
+    finished = pyqtSignal()
+    error_occurred = pyqtSignal(str)
+
+    def __init__(
+        self,
+        videos,
+        cut_params,
+        output_directory,
+        ffmpeg_params,
+        cancel_event,
+        thread_pool,
+        on_progress,
+        on_status,
+        on_output,
+        on_completed,
+        on_error,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.videos = videos
+        self.cut_params = cut_params
+        self.output_directory = output_directory
+        self.ffmpeg_params = ffmpeg_params
+        self.cancel_event = cancel_event
+        self.thread_pool = thread_pool
+        self._on_progress = on_progress
+        self._on_status = on_status
+        self._on_output = on_output
+        self._on_completed = on_completed
+        self._on_error = on_error
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            for i, video in enumerate(self.videos):
+                if self.cancel_event.is_set():
+                    break
+                else:
+                    while self.thread_pool.activeThreadCount() >= 3:
+                        if self.cancel_event.is_set():
+                            break
+                        QThread.msleep(100)
+                    current_time = datetime.now().strftime("%d%m%y_%H%M%S")
+                    base_name = os.path.splitext(os.path.basename(video))[0]
+                    base_name = re.sub("[^\\w\\s-]", "", base_name)
+                    base_name = re.sub("\\s+", "_", base_name.strip())
+                    display_filename = f"{base_name}_{current_time}.mp4"
+                    if self.cut_params["mode"] in ["split_by_time", "split_by_parts"]:
+                        output_filename = os.path.join(
+                            self.output_directory,
+                            f"{base_name}_{current_time}_%03d.mp4",
+                        )
+                    else:
+                        output_filename = os.path.join(
+                            self.output_directory,
+                            f"{base_name}_{current_time}.mp4",
+                        )
+                    self.video_started.emit(
+                        i, os.path.basename(video), display_filename
+                    )
+                    worker = CutWorker(
+                        video,
+                        output_filename,
+                        i % 3,
+                        FFMPEG_PATH,
+                        self.cut_params,
+                        self.ffmpeg_params,
+                    )
+                    worker.setAutoDelete(True)
+                    worker.signals.progress_updated.connect(self._on_progress)
+                    worker.signals.status_updated.connect(self._on_status)
+                    worker.signals.output_updated.connect(self._on_output)
+                    worker.signals.cut_completed.connect(self._on_completed)
+                    worker.signals.error_occurred.connect(self._on_error)
+                    self.thread_pool.start(worker)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+        finally:
+            self.thread_pool.waitForDone()
+            self.finished.emit()
 
 
 class VideoCutterTool(QMainWindow):
@@ -984,12 +1075,71 @@ class VideoCutterTool(QMainWindow):
             for i in range(self.total_output):
                 box = self.create_progress_box(i)
                 self.progress_boxes.append(box)
-            threading.Thread(target=self.cut_videos, daemon=True).start()
+            videos = list(self.video_list)
+            mode = self.combo_cut_mode.currentText()
+            if mode == "Split by Time":
+                cut_params = {
+                    "mode": "split_by_time",
+                    "duration": float(self.time_input.currentText()),
+                }
+            elif mode == "Split by Parts":
+                cut_params = {
+                    "mode": "split_by_parts",
+                    "parts": int(self.parts_input.currentText()),
+                }
+            elif mode == "Trim Start/End":
+                cut_params = {
+                    "mode": "trim_ends",
+                    "start": float(self.start_trim_input.currentText()),
+                    "end": float(self.end_trim_input.currentText()),
+                }
+            elif mode == "Specific Time Range":
+                cut_params = {
+                    "mode": "specific_range",
+                    "start": float(self.start_range_input.currentText()),
+                    "end": float(self.end_range_input.currentText()),
+                }
+            else:
+                cut_params = {}
+            ffmpeg_params = self.get_ffmpeg_params()
+            for j, vid in enumerate(videos):
+                item = QTreeWidgetItem(self.tree_output)
+                item.setText(0, str(j + 1))
+                item.setText(1, os.path.basename(vid))
+                item.setText(2, "Pending")
+                item.setText(3, "Pending")
+                item.setText(4, "Pending")
+                item.setText(5, "Pending")
+            self._cut_coordinator = CutCoordinator(
+                videos=videos,
+                cut_params=cut_params,
+                output_directory=self.output_directory,
+                ffmpeg_params=ffmpeg_params,
+                cancel_event=self.cancel_event,
+                thread_pool=self.thread_pool,
+                on_progress=self.update_thread_progress,
+                on_status=self.update_thread_status,
+                on_output=self.update_ffmpeg_output,
+                on_completed=self.on_cut_completed,
+                on_error=self.on_cut_error,
+            )
+            self._cut_thread = QThread(self)
+            self._cut_coordinator.moveToThread(self._cut_thread)
+            self._cut_thread.started.connect(self._cut_coordinator.run)
+            self._cut_coordinator.finished.connect(self._cut_thread.quit)
+            self._cut_coordinator.finished.connect(self._cut_coordinator.deleteLater)
+            self._cut_thread.finished.connect(self._cut_thread.deleteLater)
+            self._cut_coordinator.video_started.connect(self.on_video_started)
+            self._cut_coordinator.finished.connect(self.on_cut_finished)
+            self._cut_coordinator.error_occurred.connect(self.on_coordinator_error)
+            self._cut_thread.start()
 
     def cancel_cut(self):
         if self.is_processing:
             self.cancel_event.set()
             self.thread_pool.clear()
+            for worker in list(CutWorker.running_workers):
+                worker.is_cancelled = True
             self.btn_cancel.setEnabled(False)
             for i in range(self.processed_output, len(self.progress_boxes)):
                 self.update_box_color(i, "red")
@@ -1044,92 +1194,6 @@ class VideoCutterTool(QMainWindow):
             QMessageBox.warning(self, "Warning", "Please enter valid numbers.")
             return False
 
-    def cut_videos(self):
-        try:
-            mode = self.combo_cut_mode.currentText()
-            cut_params = {}
-            if mode == "Split by Time":
-                cut_params = {
-                    "mode": "split_by_time",
-                    "duration": float(self.time_input.currentText()),
-                }
-            else:
-                if mode == "Split by Parts":
-                    cut_params = {
-                        "mode": "split_by_parts",
-                        "parts": int(self.parts_input.currentText()),
-                    }
-                else:
-                    if mode == "Trim Start/End":
-                        cut_params = {
-                            "mode": "trim_ends",
-                            "start": float(self.start_trim_input.currentText()),
-                            "end": float(self.end_trim_input.currentText()),
-                        }
-                    else:
-                        if mode == "Specific Time Range":
-                            cut_params = {
-                                "mode": "specific_range",
-                                "start": float(self.start_range_input.currentText()),
-                                "end": float(self.end_range_input.currentText()),
-                            }
-            for i, video in enumerate(self.video_list):
-                if self.cancel_event.is_set():
-                    break
-                else:
-                    while self.thread_pool.activeThreadCount() >= 3:
-                        if self.cancel_event.is_set():
-                            break
-                        QThread.msleep(100)
-                    self.update_box_color(i, "yellow")
-                    self.current_label.setText(f"Cutting: {os.path.basename(video)}")
-                    current_time = datetime.now().strftime("%d%m%y_%H%M%S")
-                    base_name = os.path.splitext(os.path.basename(video))[0]
-                    base_name = re.sub("[^\\w\\s-]", "", base_name)
-                    base_name = re.sub("\\s+", "_", base_name.strip())
-                    display_filename = f"{base_name}_{current_time}.mp4"
-                    if cut_params["mode"] in ["split_by_time", "split_by_parts"]:
-                        output_filename = os.path.join(
-                            self.output_directory,
-                            f"{base_name}_{current_time}_%03d.mp4",
-                        )
-                    else:
-                        output_filename = os.path.join(
-                            self.output_directory, f"{base_name}_{current_time}.mp4"
-                        )
-                    item = QTreeWidgetItem(self.tree_output)
-                    item.setText(0, str(i + 1))
-                    item.setText(1, os.path.basename(video))
-                    item.setText(2, display_filename)
-                    item.setText(3, "Processing")
-                    item.setText(4, "N/A")
-                    item.setText(5, "🔄 Processing...")
-                    worker = CutWorker(
-                        video,
-                        output_filename,
-                        i % 3,
-                        FFMPEG_PATH,
-                        cut_params,
-                        self.get_ffmpeg_params(),
-                    )
-                    worker.setAutoDelete(True)
-                    worker.signals.progress_updated.connect(self.update_thread_progress)
-                    worker.signals.status_updated.connect(self.update_thread_status)
-                    worker.signals.output_updated.connect(self.update_ffmpeg_output)
-                    worker.signals.cut_completed.connect(self.on_cut_completed)
-                    worker.signals.error_occurred.connect(self.on_cut_error)
-                    self.thread_pool.start(worker)
-        except Exception as e:
-            self.logger.error(f"Error cutting: {str(e)}")
-            QMessageBox.critical(self, "Error", f"Unexpected error occurred: {str(e)}")
-        finally:
-            self.thread_pool.waitForDone()
-            self.is_processing = False
-            self.btn_start.setEnabled(True)
-            self.btn_cancel.setEnabled(False)
-            self.current_label.setText("Completed")
-            self.save_config()
-
     def update_thread_progress(self, thread_index: int, progress: int):
         self.progress_update_queue.append((thread_index, progress))
 
@@ -1176,6 +1240,26 @@ class VideoCutterTool(QMainWindow):
                 item.setText(4, "N/A")
                 item.setText(5, "🔴 Error")
                 break
+
+    def on_video_started(self, i: int, input_name: str, output_name: str):
+        item = self.tree_output.topLevelItem(i)
+        if item:
+            item.setText(2, output_name)
+            item.setText(3, "Processing")
+            item.setText(4, "N/A")
+            item.setText(5, "🔄 Processing...")
+        self.update_box_color(i, "yellow")
+        self.current_label.setText(f"Cutting: {input_name}")
+
+    def on_cut_finished(self):
+        self.is_processing = False
+        self.btn_start.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+        self.current_label.setText("Completed")
+        self.save_config()
+
+    def on_coordinator_error(self, msg: str):
+        QMessageBox.critical(self, "Error", f"Unexpected error occurred: {msg}")
 
     def process_ui_updates(self):
         for thread_index, progress in self.progress_update_queue:
