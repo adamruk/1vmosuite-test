@@ -355,6 +355,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - Path B: out-of-order completion stamping wrong tree row — workers now stamp `tree_item` and `task_index` attributes in `_start_next_task`; completion/error handlers use `getattr` lookups instead of count-based row matching. [auto_render.py][c03433a]
 - Path B: FFmpeg log unbounded growth — `output_text.document().setMaximumBlockCount(2000)` caps log buffer. [auto_render.py][c03433a]
 
+- mixer.py: cancel_merge now actually cancels in-flight workers. Added running_workers registry on MergeWorker class with append/remove lifecycle (remove in finally for leak-safety); cancel_merge iterates registry and sets worker.is_cancelled = True so the existing should_cancel mechanism inside run_ffmpeg receives the signal. Pre-fix, cancel only set cancel_event which stopped dispatching new QRunnables but let already-submitted ones complete uninterrupted. Also added self.save_config() to cancel_merge for consistency with merge.py reference. [Obs-I][N42]
+
 - cutter.py save_config: refactored to merge-then-write pattern (load existing config, update keys, save) mirroring merge.py and auto_render.py. Previously overwrote the file wholesale, which would wipe any keys owned by other code paths. [N5-cutter]
 - mixer.py save_config: refactored to merge-then-write pattern. Same rationale as cutter. [N5-mixer]
 

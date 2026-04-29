@@ -65,6 +65,8 @@ class WorkerSignals(QObject):
 
 
 class MergeWorker(QRunnable):
+    running_workers = []
+
     def __init__(
         self,
         input_files: List[str],
@@ -83,6 +85,7 @@ class MergeWorker(QRunnable):
 
     def run(self):
         try:
+            MergeWorker.running_workers.append(self)
             self.signals.status_updated.emit(
                 self.thread_index,
                 f"Bắt đầu xử lý: {os.path.basename(self.output_path)}",
@@ -179,6 +182,9 @@ class MergeWorker(QRunnable):
             self.signals.output_updated.emit(
                 f"\n[Thread {self.thread_index + 1}] {error_msg}\n"
             )
+        finally:
+            if self in MergeWorker.running_workers:
+                MergeWorker.running_workers.remove(self)
 
 
 class VideoMergerTool(QMainWindow):
@@ -831,6 +837,8 @@ class VideoMergerTool(QMainWindow):
         """Hủy quá trình gộp video."""
         if self.is_merging:
             self.cancel_event.set()
+            for worker in list(MergeWorker.running_workers):
+                worker.is_cancelled = True
             self.btn_cancel.setEnabled(False)
             for i in range(self.processed_output, len(self.progress_boxes)):
                 self.update_box_color(i, "red")
@@ -838,6 +846,7 @@ class VideoMergerTool(QMainWindow):
                 label.setText("Cancelled")
                 bar.setValue(0)
             QMessageBox.information(self, "Information", "Merging cancelled.")
+            self.save_config()
 
     def validate_inputs(self) -> bool:
         """Kiểm tra đầu vào hợp lệ."""
