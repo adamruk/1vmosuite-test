@@ -149,6 +149,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- mixer.py: replaced bare threading.Thread coordinator with QThread+moveToThread pattern (MergeCoordinator QObject). All widget state snapshotted on main thread before thread start; QTreeWidgetItem rows created in on_video_merge_started slot (main thread) via per_video_started signal — no pre-creatable rows since output filenames are timestamp-derived per iteration. Probe 1 disconnect guard prevents stale-signal double-fire on rapid restart. Dead merge_videos method deleted. [R4]
+
 - cutter.py: replaced bare threading.Thread coordinator with QThread+moveToThread pattern (CutCoordinator QObject). All widget state snapshotted on main thread before thread start; QTreeWidgetItem placeholder rows pre-created in start_cut(); UI update calls replaced with signals (video_started, finished, error_occurred). CutWorker and WorkerSignals unchanged. [R4]
 
 - merge.py MergeWorker.get_video_duration_seconds: refactored from inline ffprobe subprocess.run to core_ffmpeg_runner.probe_duration delegation. Mirrors the pattern already used by get_video_resolution in the same class and by cutter.py production code. [N4]

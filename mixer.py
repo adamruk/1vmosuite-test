@@ -30,7 +30,15 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QSizePolicy,
 )
-from PyQt5.QtCore import Qt, QThreadPool, QRunnable, pyqtSignal, QObject, QThread
+from PyQt5.QtCore import (
+    Qt,
+    QThreadPool,
+    QRunnable,
+    pyqtSignal,
+    pyqtSlot,
+    QObject,
+    QThread,
+)
 from PyQt5.QtGui import QIcon, QColor
 from updater import DriveUpdater
 from help_dialog import HelpDialog
@@ -62,6 +70,99 @@ class WorkerSignals(QObject):
     output_updated = pyqtSignal(str)
     merge_completed = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
+
+
+class MergeCoordinator(QObject):
+    per_video_started = pyqtSignal(int, str, str)
+    finished = pyqtSignal()
+    error_occurred = pyqtSignal(str)
+
+    def __init__(
+        self,
+        num_output,
+        num_merge,
+        merge_modes,
+        output_naming,
+        video_list,
+        intro_videos,
+        outro_videos,
+        output_directory,
+        cancel_event,
+        thread_pool,
+        select_videos_fn,
+        on_progress,
+        on_status,
+        on_output,
+        on_completed,
+        on_error,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.num_output = num_output
+        self.num_merge = num_merge
+        self.merge_modes = merge_modes
+        self.output_naming = output_naming
+        self.video_list = video_list
+        self.intro_videos = intro_videos
+        self.outro_videos = outro_videos
+        self.output_directory = output_directory
+        self.cancel_event = cancel_event
+        self.thread_pool = thread_pool
+        self._select_videos_fn = select_videos_fn
+        self._on_progress = on_progress
+        self._on_status = on_status
+        self._on_output = on_output
+        self._on_completed = on_completed
+        self._on_error = on_error
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            for i in range(self.num_output):
+                if self.cancel_event.is_set():
+                    break
+                videos_to_merge = self._select_videos_fn(
+                    self.merge_modes["main"], self.num_merge, i + 1, self.video_list
+                )
+                if not videos_to_merge:
+                    continue
+                if self.intro_videos:
+                    intro_videos = self._select_videos_fn(
+                        self.merge_modes["intro"], 1, i + 1, self.intro_videos
+                    )
+                    if intro_videos:
+                        videos_to_merge = intro_videos + videos_to_merge
+                if self.outro_videos:
+                    outro_videos = self._select_videos_fn(
+                        self.merge_modes["outro"], 1, i + 1, self.outro_videos
+                    )
+                    if outro_videos:
+                        videos_to_merge.extend(outro_videos)
+                current_time = datetime.now().strftime("%d%m%y_%H%M%S")
+                if self.output_naming == "First Video Name + Time + Index":
+                    first_video_name = os.path.splitext(
+                        os.path.basename(videos_to_merge[0])
+                    )[0]
+                    prefix = f"{first_video_name}_{current_time}"
+                else:
+                    prefix = current_time
+                output_filename = f"{prefix}_{i + 1:03}.mp4"
+                output_path = os.path.join(self.output_directory, output_filename)
+                input_names = ", ".join(os.path.basename(v) for v in videos_to_merge)
+                self.per_video_started.emit(i, input_names, output_filename)
+                worker = MergeWorker(videos_to_merge, output_path, i % 3, FFMPEG_PATH)
+                worker.setAutoDelete(True)
+                worker.signals.progress_updated.connect(self._on_progress)
+                worker.signals.status_updated.connect(self._on_status)
+                worker.signals.output_updated.connect(self._on_output)
+                worker.signals.merge_completed.connect(self._on_completed)
+                worker.signals.error_occurred.connect(self._on_error)
+                self.thread_pool.start(worker)
+                QThread.msleep(500)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+        finally:
+            self.finished.emit()
 
 
 class MergeWorker(QRunnable):
@@ -831,7 +932,49 @@ class VideoMergerTool(QMainWindow):
             self.progress_boxes.extend(
                 (self.create_progress_box(i) for i in range(self.total_output))
             )
-            threading.Thread(target=self.merge_videos, daemon=True).start()
+            if hasattr(self, "_merge_coordinator") and self._merge_coordinator:
+                try:
+                    self._merge_coordinator.per_video_started.disconnect()
+                    self._merge_coordinator.finished.disconnect()
+                    self._merge_coordinator.error_occurred.disconnect()
+                except TypeError:
+                    pass
+            num_merge = int(self.combo_num_merge.currentText())
+            merge_modes = {
+                "main": self.combo_merge_mode_main.currentText(),
+                "intro": self.combo_merge_mode_intro.currentText(),
+                "outro": self.combo_merge_mode_outro.currentText(),
+            }
+            output_naming = self.combo_output_naming.currentText()
+            self._merge_coordinator = MergeCoordinator(
+                num_output=self.total_output,
+                num_merge=num_merge,
+                merge_modes=merge_modes,
+                output_naming=output_naming,
+                video_list=list(self.video_list),
+                intro_videos=list(self.intro_videos),
+                outro_videos=list(self.outro_videos),
+                output_directory=self.output_directory,
+                cancel_event=self.cancel_event,
+                thread_pool=self.thread_pool,
+                select_videos_fn=self.select_videos_to_merge,
+                on_progress=self.update_thread_progress,
+                on_status=self.update_thread_status,
+                on_output=self.update_ffmpeg_output,
+                on_completed=self.on_merge_completed,
+                on_error=self.on_merge_error,
+            )
+            self._merge_coordinator.per_video_started.connect(
+                self.on_video_merge_started
+            )
+            self._merge_coordinator.finished.connect(self.on_merge_finished)
+            self._merge_coordinator.error_occurred.connect(
+                self.on_coordinator_merge_error
+            )
+            self._merge_thread = QThread()
+            self._merge_coordinator.moveToThread(self._merge_thread)
+            self._merge_thread.started.connect(self._merge_coordinator.run)
+            self._merge_thread.start()
 
     def cancel_merge(self):
         """Hủy quá trình gộp video."""
@@ -885,85 +1028,6 @@ class VideoMergerTool(QMainWindow):
                 self, "Warning", "Please enter valid numbers for mix options."
             )
             return False
-
-    def merge_videos(self):
-        """Thực hiện gộp video."""
-        try:
-            num_merge = int(self.combo_num_merge.currentText())
-            num_output = int(self.combo_num_output.currentText())
-            merge_modes = {
-                "main": self.combo_merge_mode_main.currentText(),
-                "intro": self.combo_merge_mode_intro.currentText(),
-                "outro": self.combo_merge_mode_outro.currentText(),
-            }
-            for i in range(num_output):
-                if self.cancel_event.is_set():
-                    break
-                else:
-                    videos_to_merge = self.select_videos_to_merge(
-                        merge_modes["main"], num_merge, i + 1, self.video_list
-                    )
-                    if not videos_to_merge:
-                        self.logger.warning(
-                            f"No videos to mix for output {i + 1}. Skipping."
-                        )
-                        continue
-                    else:
-                        if self.intro_videos:
-                            intro_videos = self.select_videos_to_merge(
-                                merge_modes["intro"], 1, i + 1, self.intro_videos
-                            )
-                            if intro_videos:
-                                videos_to_merge = intro_videos + videos_to_merge
-                        if self.outro_videos:
-                            outro_videos = self.select_videos_to_merge(
-                                merge_modes["outro"], 1, i + 1, self.outro_videos
-                            )
-                            if outro_videos:
-                                videos_to_merge.extend(outro_videos)
-                        current_time = datetime.now().strftime("%d%m%y_%H%M%S")
-                        output_naming = self.combo_output_naming.currentText()
-                        if output_naming == "First Video Name + Time + Index":
-                            first_video_name = os.path.splitext(
-                                os.path.basename(videos_to_merge[0])
-                            )[0]
-                            prefix = f"{first_video_name}_{current_time}"
-                        else:
-                            prefix = current_time
-                        output_filename = f"{prefix}_{i + 1:03}.mp4"
-                        output_path = os.path.join(
-                            self.output_directory, output_filename
-                        )
-                        item = QTreeWidgetItem(self.tree_output)
-                        item.setText(0, str(i + 1))
-                        item.setText(
-                            1, ", ".join((os.path.basename(v) for v in videos_to_merge))
-                        )
-                        item.setText(2, output_filename)
-                        item.setText(3, "Processing")
-                        item.setText(4, "N/A")
-                        item.setText(5, "🔄 Processing...")
-                        worker = MergeWorker(
-                            videos_to_merge, output_path, i % 3, FFMPEG_PATH
-                        )
-                        worker.setAutoDelete(True)
-                        worker.signals.progress_updated.connect(
-                            self.update_thread_progress
-                        )
-                        worker.signals.status_updated.connect(self.update_thread_status)
-                        worker.signals.output_updated.connect(self.update_ffmpeg_output)
-                        worker.signals.merge_completed.connect(self.on_merge_completed)
-                        worker.signals.error_occurred.connect(self.on_merge_error)
-                        self.thread_pool.start(worker)
-                        QThread.msleep(500)
-        except Exception as e:
-            self.logger.error(f"Error mixing: {str(e)}")
-            QMessageBox.critical(self, "Error", f"Unexpected error occurred: {str(e)}")
-        finally:
-            self.is_merging = False
-            self.btn_start.setEnabled(True)
-            self.btn_cancel.setEnabled(False)
-            self.save_config()
 
     def select_videos_to_merge(
         self, mode: str, num_merge: int, index: int, video_list: List[str]
@@ -1022,6 +1086,35 @@ class VideoMergerTool(QMainWindow):
                 item.setText(4, "N/A")
                 item.setText(5, "🔴 Error")
                 break
+
+    @pyqtSlot(int, str, str)
+    def on_video_merge_started(
+        self, index: int, input_names: str, output_filename: str
+    ):
+        item = QTreeWidgetItem(self.tree_output)
+        item.setText(0, str(index + 1))
+        item.setText(1, input_names)
+        item.setText(2, output_filename)
+        item.setText(3, "Processing")
+        item.setText(4, "N/A")
+        item.setText(5, "🔄 Processing...")
+
+    @pyqtSlot()
+    def on_merge_finished(self):
+        self.is_merging = False
+        self.btn_start.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+        self.save_config()
+        if hasattr(self, "_merge_thread") and self._merge_thread:
+            self._merge_thread.quit()
+            self._merge_thread.wait()
+
+    @pyqtSlot(str)
+    def on_coordinator_merge_error(self, error_message: str):
+        self.logger.error(f"Error mixing: {error_message}")
+        QMessageBox.critical(
+            self, "Error", f"Unexpected error occurred: {error_message}"
+        )
 
     def load_last_paths(self):
         """Tải các đường dẫn trước đó từ config."""
