@@ -1095,25 +1095,28 @@ class VideoMergeTool(QMainWindow):
 
     def save_config(self):
         try:
-            config = {
-                "version": 1,
-                "last_output_dir": self.output_directory,
-                "group1_videos": self.group1_videos,
-                "group2_videos": self.group2_videos,
-                "group3_videos": self.group3_videos,
-                "group4_videos": self.group4_videos,
-                "audio_files": self.audio_files,
-                "num_videos": self.combo_num_videos.currentText(),
-                "layout_mode": self.combo_layout.currentText(),
-                "audio_source": self.combo_audio.currentText(),
-                "opacity": self.combo_overlay_group.currentText()
-                if hasattr(self, "slider_opacity")
-                else 50,
-                "overlay_group": self.combo_overlay_group.currentText()
-                if hasattr(self, "combo_overlay_group")
-                else "Group 1",
-            }
-            core_config.save(Path(self.CONFIG_FILE), config)
+            existing = core_config.load(Path(self.CONFIG_FILE), default={})
+            existing.update(
+                {
+                    "version": 1,
+                    "last_output_dir": self.output_directory,
+                    "group1_videos": self.group1_videos,
+                    "group2_videos": self.group2_videos,
+                    "group3_videos": self.group3_videos,
+                    "group4_videos": self.group4_videos,
+                    "audio_files": self.audio_files,
+                    "num_videos": self.combo_num_videos.currentText(),
+                    "layout_mode": self.combo_layout.currentText(),
+                    "audio_source": self.combo_audio.currentText(),
+                    "opacity": self.slider_opacity.value()
+                    if hasattr(self, "slider_opacity")
+                    else 50,
+                    "overlay_group": self.combo_overlay_group.currentText()
+                    if hasattr(self, "combo_overlay_group")
+                    else "Group 1",
+                }
+            )
+            core_config.save(Path(self.CONFIG_FILE), existing)
         except (OSError, TypeError) as e:
             error_msg = f"Cannot save configuration: {str(e)}\n{traceback.format_exc()}"
             print(f"Config Error: {error_msg}")
@@ -1489,12 +1492,6 @@ class VideoMergeTool(QMainWindow):
             layout_mode = self.combo_layout.currentText()
             audio_source = self.combo_audio.currentText()
             opacity = self.slider_opacity.value() if layout_mode == "Overlay" else 100
-            overlay_group = (
-                self.combo_overlay_group.currentText()
-                if layout_mode == "Overlay"
-                else ""
-            )
-            audio_mode = getattr(self, "audio_mode", "Tuần tự")
             video_groups = [self.group1_videos]
             if num_videos >= 2:
                 video_groups.append(self.group2_videos)
