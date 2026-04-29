@@ -149,6 +149,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- auto_render mode panel: renamed misleading "Step 3 - Assign to slots" label to "Optional: Assign to slots". Avoids collision with the real Step 3 (output folder) and removes duplicate `step3_label` local variable. [N48/N53]
+
 - benchmarks/vmaf_validation_v2.5.md: Step 4e-fix-4 section appended; Status updated from FAIL (under D9) to PASS (under ADR-0008 thresholds); Revision History extended with fix-4 entry.
   BEFORE: Status="FAIL - further calibration needed (Step 4e-fix-4)" under ADR-0007 D9 thresholds (mean>=98, p5>=97). All previous fix iterations preserved verbatim.
   AFTER: Status="PASS - tag v2.5-complete unblocked under ADR-0008 thresholds (mean>=96.0, p5>=93.0)". Re-evaluation of fix-3 results.json verbatim against ADR-0008 thresholds: all 12 pairings PASS. Smallest mean margin +1.49 (clip3_typical hevc); smallest p5 margin +1.21 (clip4_diverse hevc).

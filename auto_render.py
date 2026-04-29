@@ -642,11 +642,13 @@ class VideoRendererTool(QMainWindow):
             combo_layout.addLayout(combo_row)
             sequential_layout.addWidget(combo_container)
         sequential_layout.addStretch()
-        step3_label = QLabel("Step 3 - Assign to slots (for Render All Variants only)")
-        step3_label.setStyleSheet(
+        step_assign_label = QLabel(
+            "Optional: Assign to slots (for Render All Variants only)"
+        )
+        step_assign_label.setStyleSheet(
             "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
         )
-        mode_layout.addWidget(step3_label)
+        mode_layout.addWidget(step_assign_label)
         self.empty_slots_hint = QLabel("Click a preset above, then click a slot")
         self.empty_slots_hint.setAlignment(Qt.AlignCenter)
         self.empty_slots_hint.setStyleSheet(
