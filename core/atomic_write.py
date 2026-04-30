@@ -4,8 +4,9 @@ Generic primitive used by user-state writers. Behavior:
   1. Serialize data to JSON bytes FIRST so encoding errors raise pre-disk.
   2. Write to <path>.tmp; flush; fsync.
   3. If <path> exists: rotate <path> -> <path>.bak (single generation).
-  4. os.replace(<path>.tmp, <path>) wrapped in 5-retry exponential backoff
-     on PermissionError/OSError (50/100/200/400/800ms = 1550ms total max).
+  4. os.replace(<path>.tmp, <path>) wrapped in 5-attempt loop with
+     exponential backoff between attempts (50/100/200/400ms sleeps = 750ms
+     total max wait).
   5. On any failure: clean up .tmp; raise.
 
 No directory fsync (matches core/preset_loader.py:228 design note).
@@ -21,6 +22,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+# 5 attempts with sleeps between them (4 actual sleeps).
+# Final 800ms entry preserved for symmetry; loop raises before
+# using it. Total max wait: 750ms (50+100+200+400).
 RETRY_BACKOFFS_MS = (50, 100, 200, 400, 800)
 
 

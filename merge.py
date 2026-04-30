@@ -1545,10 +1545,13 @@ class VideoMergeTool(QMainWindow):
             encoding="utf-8",
             errors="replace",
         )
-        duration_seconds = float(result.stdout.strip())
-        hours, remainder = divmod(int(duration_seconds), 3600)
-        minutes, seconds = divmod(remainder, 60)
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        try:
+            duration_seconds = float(result.stdout.strip())
+            hours, remainder = divmod(int(duration_seconds), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        except Exception:
+            return "Unknown"
 
     def get_video_resolution(self, video_path: str) -> str:
         cmd = [

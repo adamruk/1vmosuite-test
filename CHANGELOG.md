@@ -271,6 +271,16 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - `docs/PHASE_2C_PLAN.md` 2c-c-6 sub-phase entry. BEFORE: Mac-compat pass scope (platform-aware path handling, bundled macOS ffmpeg, both Mac teammates confirm launch + render). AFTER: SHIPPED 2026-04-27 marker; scope documented as Windows-only smoke regression suite (Mac smoke deferred to post-Phase-2 milestone with Junaid per memory rule #14 / governance commit ffe4e1f). Completion criteria #1 tag list extended to include `v2c-c-4` + `v2c-c-6` and clarifies v2c-c-complete = Windows-only smoke regression green. WHY: Adam decision 2026-04-27 to defer Mac smoke; close Phase 2c stabilization on the Windows side now. [d856bd3] [v2c-c-6]
 - `docs/ROADMAP.md` Done section. BEFORE: 2c-c-6 in Pending blockers; no v2c-c-complete row. AFTER: 2c-c-6 row in Done with feat hash + [v2c-c-6] tag; new "Phase 2c done" row in Done with same feat hash + [v2c-c-complete] tag noting Mac deferral. WHY: Phase 2c stabilization closes here; Phase 2.5 (PORT_NOTES port) and Phase 2d (PySide6 migration) are separate forward work. [d856bd3] [v2c-c-6]
 
+- `docs/PHASE_2C_PLAN.md` + `core/atomic_write.py`: corrected 3 documentation references that overstated the exponential-backoff total wait time as 1550ms / 1.6s.
+  BEFORE: `atomic_write.py` module docstring cited "5-retry exponential backoff on PermissionError/OSError (50/100/200/400/800ms = 1550ms total max)"; `PHASE_2C_PLAN.md` acceptance criterion said "retry resolves within 1.6s". The actual implementation has 4 sleeps between 5 attempts (50+100+200+400ms = 750ms total); the 800ms tuple entry is dead code — the loop raises before it fires.
+  AFTER: module docstring corrected to "5-attempt loop with exponential backoff between attempts (50/100/200/400ms sleeps = 750ms total max wait)"; 3-line inline comment added above `RETRY_BACKOFFS_MS` documenting the 4-sleep / dead-800ms-tail / 750ms-sum invariant; `PHASE_2C_PLAN.md` acceptance criterion corrected to "retry resolves within 750ms (4 sleeps of 50/100/200/400ms between 5 attempts)". No behavior change.
+
+- BACKLOG.md: added B-020 [N51] — EncoderDialog `Group|Name` pipe-split doesn't `.strip()` halves at `auto_render.py:1841` (Add handler) and `:1898` (Edit handler). User input `"Test | name"` stores `group="Test "` with trailing space; group lookups silently miss. No code change in this version.
+
+- `auto_render.py` + `docs/PHASE_2_PORT_NOTES.md`: 3 stale `nvenc_quality_offset` references removed.
+  BEFORE: `auto_render.py` L885 comment block listed `nvenc_quality_offset` among reserved Settings keys ("NVENC quality offset is baked into preset_translator per ADR-0007 D3") — a partial update that still named the deprecated key. `PORT_NOTES.md` L73 listed `nvenc_quality_offset=3` in the Phase 1 RenderWorker defaults inventory; L104 listed `nvenc_quality_offset` in the `__init__` attribute list. All 3 were pre-ADR-0007 D3 Phase 1 spec text that survived the D3 decision (which removed `nvenc_quality_offset` from `settings_dialog.py` DEFAULTS and the UI entirely).
+  AFTER: `auto_render.py` L885 comment rewritten to reference only the live reserved keys (`show_ffmpeg_command`, `open_output_when_done`, `use_gpu`); `PORT_NOTES.md` L73 + L104 entries removed. No behavior change.
+
 ### Fixed
 
 - settings_dialog.py: `DEFAULTS["output_collision"]` changed from `"overwrite"` to `"rename"` to match auto_render.py runtime default (L82, L366, L877). Previously, opening Settings and clicking OK without changing anything silently persisted `"overwrite"` to disk, overriding the user's intended rename behavior. [N36]
@@ -378,6 +388,16 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 - merge.py: per-video coordinator errors now route to on_merge_error (counter + tree update) instead of on_coordinator_merge_error (modal dialog); N failed videos no longer produce N sequential modal dialogs. Outer coordinator-wide errors still show modal dialog. [Probe3-merge]
 
 - merge.py: _merge_coordinator set to None in on_merge_finished() to eliminate dangling C++ reference; disconnect guard broadened to catch RuntimeError in addition to TypeError. [Probe1-merge]
+
+- assets/Encoder.txt + assets/Encoder.json: 3 broken or cruft entries removed; surviving divider entry regrouped.
+  BEFORE: 2 "Add UI Divider Line" presets under `🎬 Auto Render` used `color=lightgray@t=fill` in their drawbox filter. `@t=` is ffmpeg's alpha/opacity modifier for color specs (e.g. `color=red@0.5`), not an option separator; the `:t=fill` fill-style flag was being parsed as opacity `t` (invalid), producing a color-spec parse error on every render attempt. A third entry named "123" (empty description, `curves=preset=vintage` params, `🎬 Auto Render` group) was an orphaned placeholder with no user-visible purpose.
+  AFTER: both broken "Add UI Divider Line" entries removed; "123" entry removed. The surviving valid "Add UI Divider Line" entry (correct `:t=fill` syntax, previously also under `🎬 Auto Render`) moved to `🔖 Metadata & Text` group, its semantic home. Encoder.json regenerated: 111→108 presets. `tools/generate_encoder_json.py` count guards updated (file-preset guard 109→106; total-preset guard 111→108 with Text defaults).
+  WHY: users selecting either broken preset saw immediate ffmpeg failure on every render attempt. "123" was never a valid user-facing entry. Group reassignment makes the divider preset discoverable in context.
+
+- merge.py + mixer.py + cutter.py `get_video_duration` (UI display helper): bare `float(result.stdout.strip())` wrapped in `try/except Exception → return "Unknown"`.
+  BEFORE: empty stdout (corrupt file, non-zero ffprobe returncode, race during output-file creation) raised ValueError propagating out of this display-only method, crashing the caller.
+  AFTER: any parse failure returns the string `"Unknown"` displayed in the duration column — informational, not fatal. `CutWorker.get_video_duration` (cutter.py L282, returns float for progress math) intentionally not wrapped — caller divides by the return value for progress-bar calculation; silent `"Unknown"` there would cause ZeroDivisionError downstream.
+  WHY: duration display is a cosmetic UI field; its absence should not abort metadata collection or crash a batch. Mirrors the `get_video_duration` defensive pattern already applied to `auto_render.py` in commit d9899c3.
 
 ---
 

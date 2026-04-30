@@ -1878,29 +1878,8 @@
       ]
     },
     {
-      "id": "builtin:123",
-      "group": "",
-      "name": "123",
-      "description": "",
-      "details": "",
-      "params": [
-        "-vf",
-        "curves=preset=vintage",
-        "-vcodec",
-        "libx264",
-        "-crf",
-        "18",
-        "-preset",
-        "superfast",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "copy"
-      ]
-    },
-    {
-      "id": "builtin:add-ui-divider-line-1",
-      "group": "",
+      "id": "builtin:metadata-text/add-ui-divider-line",
+      "group": "🔖 Metadata & Text",
       "name": "Add UI Divider Line",
       "description": "Add thin horizontal divider near bottom like TikTok UI",
       "details": "",
@@ -1908,48 +1887,6 @@
         "-y",
         "-vf",
         "drawbox=x=0:y=h-50:w=iw:h=1:color=lightgray:t=fill",
-        "-vcodec",
-        "libx264",
-        "-crf",
-        "18",
-        "-preset",
-        "superfast",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "copy"
-      ]
-    },
-    {
-      "id": "builtin:add-ui-divider-line-2",
-      "group": "",
-      "name": "Add UI Divider Line",
-      "description": "Add thin horizontal divider near bottom like TikTok UI",
-      "details": "",
-      "params": [
-        "-vf",
-        "drawbox=x=0:y=h-50:w=w:h=1:color=lightgray@t=fill",
-        "-vcodec",
-        "libx264",
-        "-crf",
-        "18",
-        "-preset",
-        "superfast",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "copy"
-      ]
-    },
-    {
-      "id": "builtin:add-ui-divider-line-3",
-      "group": "",
-      "name": "Add UI Divider Line",
-      "description": "Add thin horizontal divider near bottom like TikTok UI",
-      "details": "",
-      "params": [
-        "-vf",
-        "drawbox=x=0:y=h-50:w=w:h=1:color=lightgray@t=fill",
         "-vcodec",
         "libx264",
         "-crf",

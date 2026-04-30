@@ -1,5 +1,7 @@
 # Backlog
 
+<!-- markdownlint-disable MD013 -->
+
 Deferred audit-fix items, surfaced during the toolchain install (commits 5e7e8c9 + dc0747c) on 2026-04-26. Strategy: defer-with-tracking. End-of-Phase-2 cleanup phase resolves all items below before Phase 2 ships.
 
 Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG entries.
@@ -33,6 +35,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Implication:** User toggles `gpu_enabled` in Settings → clicks OK → Settings dialog persists to disk → `_reload_config_settings` runs but does NOT update `self.gpu_enabled` → next render uses OLD (app-startup) value. Settings change for GPU/num_threads/output_dir keys requires app restart to take effect. PORT_NOTES line 99-101 says `_reload_config_settings` should "apply output dir, GPU toggle (gated by capability), all five runtime keys" — current impl honors 2 of those.
 - **Resolution:** Extend `_reload_config_settings` to mirror the 5+ GPU keys read in `__init__` (gpu_enabled, gpu_codec, gpu_preset, gpu_max_concurrent, gpu_max_quality_mode). Verify each is consumed by next render dispatch. Likely also recreate `_gpu_semaphore` if `gpu_max_concurrent` changed.
 - **Trigger for pickup:** user reports GPU Settings change "not taking effect" OR Phase 2d touches Settings dialog code path.
+- **Partial cleanup (2026-04-29, v2.5.3):** The stale `nvenc_quality_offset` reference in the `_reload_config_settings` comment block (`auto_render.py` L885) was removed. The functional gap (reload does not refresh GPU keys) remains open per Resolution above.
 
 ## B-015: translate_to_nvenc codec routing contradicts ADR-0007 D4
 
@@ -87,6 +90,30 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Implication:** Mild user confusion in catastrophic-failure case. Progress boxes are red but message wording sounds successful.
 - **Resolution:** Either (a) detect all-fail case in cleanup branch and show error-toned wording, OR (b) reword to neutral "Batch finished — see status column for results." Option (b) is simpler and accurate in all cases.
 - **Trigger for pickup:** post-tag UX polish OR opportunistic during any future _start_next_task edit.
+
+## B-020: EncoderDialog "Group|Name" pipe-split doesn't .strip() halves [N51]
+
+- **Status:** Open, backlog
+- **Priority:** LOW (silent — affects only users who type whitespace adjacent to the pipe character)
+- **Surfaced:** v2.5.3 audit (2026-04-30)
+- **Locations:**
+  - `auto_render.py:1841` (Add encoder handler)
+  - `auto_render.py:1898` (Edit encoder handler)
+- **Context:** Both Add and Edit handlers extract group and name from the EncoderDialog's name field via:
+
+  ```python
+  name_parts = dialog.result["name"].split("|", 1)
+  group = name_parts[0] if len(name_parts) > 1 else ""
+  name  = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
+  ```
+
+  Neither `name_parts[0]` nor `name_parts[1]` is `.strip()`ed. User input `"Test | My Preset"` yields `group="Test "` (trailing space) and `name=" My Preset"` (leading space). Group lookups elsewhere use exact string match and silently miss.
+
+  `EncoderDialog.accept` (`auto_render.py:~2093`) already strips the OUTER whitespace of the full name field via `self.name_edit.text().strip()`, so this bug only affects whitespace immediately adjacent to the `|` character.
+
+  Explicitly NOT affected: `core/preset_loader.py` L138/L144 Encoder.txt file-format parser — different semantics.
+- **Resolution:** Apply `.strip()` to both halves of `name_parts` at both L1841 and L1898. Two-line fix per site.
+- **Trigger for pickup:** Phase 2d UX phase, OR a user reports "my preset doesn't show under the right group", OR EncoderDialog gets touched for any other reason.
 
 ---
 
@@ -149,6 +176,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Trigger for pickup:** v2.5-complete tag landed.
 
 ## Resolved
+
 - **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.
 
 - **B-001** — ADR-0001 missing Decision makers field. Resolved [df1125a] 2026-04-27.

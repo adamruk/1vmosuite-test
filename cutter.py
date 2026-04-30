@@ -966,7 +966,7 @@ class VideoCutterTool(QMainWindow):
                 return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         except Exception as e:
             self.logger.error(f"Error getting duration for {video_path}: {str(e)}")
-            raise MetadataError(f"Failed to get duration: {str(e)}")
+            return "Unknown"
 
     def get_video_resolution(self, video_path: str) -> str:
         try:

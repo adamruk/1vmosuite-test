@@ -33,6 +33,7 @@ config_video_renderer.json
 config_video_cutter.json
 config_video_merge.json
 config_video_merger.json
+config_video_*.json.bak
 
 # Claude Code local prefs (personal, not project)
 .claude/settings.local.json

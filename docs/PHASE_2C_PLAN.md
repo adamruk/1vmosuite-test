@@ -76,7 +76,7 @@ Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. 
 - `tools/test_user_save.py` round-trip works. Manual smoke captured at `tests/smoke-2c-c-3-usersave-YYYYMMDD.log` (PASS).
 - Corrupted main file auto-falls-back to `.bak` on load with visible warning log.
 - `tests/smoke/test_atomic_write_retry.py` passes (ADR-0003 Exception 1). Pytest output captured at `tests/smoke-2c-c-3-retry-YYYYMMDD.log`.
-- Manual smoke: open file in Notepad during save; retry resolves within 1.6s.
+- Manual smoke: open file in Notepad during save; retry resolves within 750ms (4 sleeps of 50/100/200/400ms between 5 attempts).
 
 **Tag:** `v2c-c-3`.
 

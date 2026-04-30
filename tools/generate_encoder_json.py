@@ -89,16 +89,16 @@ def main() -> int:
 
     # 1. Parse Encoder.txt via the existing loader with fail-loud callback
     file_presets = preset_loader.load_presets(ENCODER_TXT, on_error=_fail_on_skip)
-    if len(file_presets) != 109:
+    if len(file_presets) != 106:
         raise SystemExit(
-            f"FATAL: expected 109 presets from Encoder.txt, got {len(file_presets)}. "
+            f"FATAL: expected 106 presets from Encoder.txt, got {len(file_presets)}. "
             "Either Encoder.txt drifted or the parser changed. Investigate before migrating."
         )
 
     # 2. Append Text defaults (order: Bottom, Top — matches auto_render.py lines 512→519)
     all_presets = file_presets + TEXT_DEFAULTS
-    if len(all_presets) != 111:
-        raise SystemExit(f"FATAL: expected 111 total presets, got {len(all_presets)}")
+    if len(all_presets) != 108:
+        raise SystemExit(f"FATAL: expected 108 total presets, got {len(all_presets)}")
 
     # 3. Serialize via core.preset_loader.save_presets_json — single source
     #    of truth for on-disk format. Future serialization-contract changes

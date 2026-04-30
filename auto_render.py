@@ -882,8 +882,10 @@ class VideoRendererTool(QMainWindow):
         # Persist Settings-managed values onto self for next render.
         self.output_collision = cfg.get("output_collision", "rename")
         self.gpu_error_action = cfg.get("gpu_error_action", "retry_cpu")
-        # Other Settings keys (use_gpu, nvenc_quality_offset, show_ffmpeg_command,
-        # open_output_when_done) reserved for Step 4c+ when GPU pipeline lands.
+        # Other Settings keys (show_ffmpeg_command, open_output_when_done)
+        # are read on render-start, not here. use_gpu is read by the worker
+        # at submit time. NVENC quality offset is baked into preset_translator
+        # (-crf N → -cq N+2) per ADR-0007 D3.
 
     def _update_empty_hints(self):
         """Toggle the empty-state placeholders based on current state."""

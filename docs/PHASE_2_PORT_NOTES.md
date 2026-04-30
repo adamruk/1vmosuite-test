@@ -70,7 +70,7 @@ Both are self-contained — no dependencies beyond stdlib (`os`, `re`,
 ### GPU / NVENC pipeline
 
 - **`RenderWorker.__init__`** new params (with defaults that preserve
-  current behavior): `use_gpu=False`, `nvenc_quality_offset=3`,
+  current behavior): `use_gpu=False`,
   `gpu_error_action='retry_cpu'`, `output_collision='rename'`,
   `show_ffmpeg_command=True`. Stored as `self.<name>`.
 - **New signal** on `RenderWorker`: `batch_stop_requested = pyqtSignal()`.
@@ -101,7 +101,7 @@ Both are self-contained — no dependencies beyond stdlib (`os`, `re`,
 ### Settings dialog wiring
 
 - New attributes loaded in `__init__` after the existing config load:
-  `nvenc_quality_offset`, `gpu_error_action`, `output_collision`,
+  `gpu_error_action`, `output_collision`,
   `show_ffmpeg_command`, `open_output_when_done`. All have safe defaults
   matching pre-existing behavior.
 - New methods on the main window:
