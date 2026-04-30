@@ -42,3 +42,12 @@ config_video_*.json.bak
 # VMAF validation working files — large binaries regenerable via the orchestrator script.
 # JSON outputs (results.json + per-pairing vmaf logs) ARE committed for machine inspection.
 benchmarks/_vmaf_work/*.mp4
+
+# Portable mode user data dir (created when portable.txt is present)
+UserData/
+
+# Portable mode sentinel (per-developer, NOT shipped)
+portable.txt
+
+# Synthetic test sources for stress tests (regenerable via ffmpeg -f lavfi)
+test_source_*.mp4
