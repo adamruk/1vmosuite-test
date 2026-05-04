@@ -283,6 +283,11 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- mixer.py: log filename and config filename corrected from copy-paste artifact dating back to early scaffolding from merge.py.
+  BEFORE: mixer.py L55 called `logging.basicConfig(filename="video_merger.log", ...)` and L303 set `self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_merger.json"`. Both used the wrong app prefix (`merger` not `mixer`), causing mixer's runtime log and persisted config to land in misleadingly-named files. Users seeing `config_video_merger.json` in UserData/ would reasonably assume it belonged to the Merge app, not the Mixer app.
+  AFTER: L55 writes to `video_mixer.log`; L303 writes to `config_video_mixer.json`. Verified at runtime in v3.8 frozen build by timestamp comparison: pre-fix `config_video_merger.json` dated 2026-04-30 16:11 (created by buggy mixer earlier in the day); post-fix `config_video_mixer.json` dated 2026-05-04 12:17 (created after the rebuild). Different files, different timestamps, confirming the corrected code path is live.
+  WHY: copy-paste origin from when mixer.py was scaffolded out of merge.py in early development. Three sites had the `merger` prefix; two are fixed here, the third (event handler `on_video_merge_started` at mixer.py L971/L1094) is internal Python naming and tracked separately as B-023. [v3.8]
+
 - settings_dialog.py: `DEFAULTS["output_collision"]` changed from `"overwrite"` to `"rename"` to match auto_render.py runtime default (L82, L366, L877). Previously, opening Settings and clicking OK without changing anything silently persisted `"overwrite"` to disk, overriding the user's intended rename behavior. [N36]
 
 - auto_render.py: selection-aware status label between encoder buttons and tree explains why Edit/Delete are disabled when a built-in preset is selected.

@@ -115,6 +115,79 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution:** Apply `.strip()` to both halves of `name_parts` at both L1841 and L1898. Two-line fix per site.
 - **Trigger for pickup:** Phase 2d UX phase, OR a user reports "my preset doesn't show under the right group", OR EncoderDialog gets touched for any other reason.
 
+## B-021: Logging-to-UserData feature for all 4 apps
+
+- **Status:** Open, scheduled (post-v3.8; v2.5.4 candidate)
+- **Priority:** MEDIUM (logs currently scattered; portability gap; Junaid will likely touch this during Mac migration)
+- **Surfaced:** v3.8 PyInstaller distribution build (2026-04-30)
+- **Locations:**
+  - `cutter.py:57` (`logging.basicConfig(filename="video_cutter.log", ...)`)
+  - `merge.py:54` (`logging.basicConfig(filename="video_merge.log", ...)`)
+  - `mixer.py:54` (`logging.basicConfig(filename="video_mixer.log", ...)`)
+  - `auto_render.py` (no log file at all — see B-024)
+- **Context:** Three of the four apps call `logging.basicConfig` at module-import time with a bare filename, which writes the log to the process CWD (typically the install dir next to the .exes). Users requested logs in `UserData/` for portability and to keep the install dir clean. The architectural challenge: `logging.basicConfig` runs at module import, BEFORE the per-instance `USER_DATA_DIR` is resolved via `resolve_or_die()` inside `__init__` (cutter.py L405, merge.py L716, mixer.py L296). This is an import-time-vs-init-time ordering problem. Three resolution options were considered during v3.8 planning: (a) Move `resolve_or_die()` to module level alongside `SCRIPT_DIR` so `USER_DATA_DIR` is available when `basicConfig` runs (caveat: error handler needs to work pre-QApplication); (b) Defer `basicConfig` until inside `__init__` after USER_DATA_DIR is known (caveat: any logging during module import goes to stdout/default); (c) Keep top-level `basicConfig` with a fallback location, then reconfigure root logger's FileHandler to point at `UserData/` after init (most robust but most complex). Verified during v3.8 smoke test: `video_mixer.log` (1 KB), `video_cutter.log` (0 KB), `video_merge.log` (0 KB) all appeared at install-dir top level alongside the .exes.
+- **Resolution:** Pick one of options (a)/(b)/(c) above and apply consistently to cutter.py + merge.py + mixer.py. Combine with B-024 to add logging to auto_render.py at the same time. Test on clean machine that logs end up in `<install>/UserData/` when portable mode is active and in AppData when not.
+- **Trigger for pickup:** v2.5.4 hygiene cycle, or natural moment when Junaid touches `core/user_data.py` for Mac platform branches (Phase 2.6 Mac migration).
+
+## B-022: portable.txt detection not engaging in PyInstaller frozen builds
+
+- **Status:** Open, scheduled (post-v3.8; v2.5.4 candidate)
+- **Priority:** MEDIUM (portable mode shipped but is a no-op in frozen builds; teammate state lives in AppData by default which is unexpected given the ADR-0005 design)
+- **Surfaced:** v3.8 PyInstaller distribution smoke test (2026-04-30)
+- **Locations:**
+  - `core/user_data.py` (`resolve_or_die`, `resolve_user_data_dir`)
+  - Affected at runtime in all 4 apps that call `resolve_or_die(SCRIPT_DIR, ...)` from `__init__`
+- **Context:** ADR-0005 specifies platformdirs default with `portable.txt` sentinel opt-in for portable mode. The sentinel mechanism works correctly in script (non-frozen) execution. In v3.8's PyInstaller frozen build (onedir mode), `portable.txt` was placed at the install dir top level (next to the .exes) as a true 0-byte file, but apps still wrote configs to `%LOCALAPPDATA%/1vmo-suite/` instead of `<install>/UserData/`. Verified by smoke test: `config_video_mixer.json` written to AppData (May 4 12:17), no `UserData/` folder created in install dir. Root cause: per PyInstaller runtime documentation, in a frozen onedir bundle the `__file__` attribute on imported modules resolves to the bundle's `_internal/` folder (not the install dir where the .exe lives). `SCRIPT_DIR` is computed via `Path(os.path.dirname(os.path.abspath(__file__)))`, so `SCRIPT_DIR/portable.txt` evaluates to a path inside `_internal/`, where the sentinel file does not exist. The actual .exe (and the co-located `portable.txt`) are at `Path(sys.executable).parent` in frozen mode.
+- **Resolution:** In `core/user_data.py`, detect frozen state via `getattr(sys, 'frozen', False)`. When frozen, derive the install dir from `Path(sys.executable).parent` instead of trusting the caller's `SCRIPT_DIR`, and check `portable.txt` there. Either update `resolve_or_die`/`resolve_user_data_dir` to perform this detection internally (preferred — keeps callers ignorant of frozen-vs-script), or add a `_get_install_dir()` helper that callers use to compute the path passed in. Verify behavior in both script and frozen runs.
+- **Trigger for pickup:** v2.5.4 hygiene cycle. Mac migration will also need similar `sys.frozen` handling in path resolution, so this is a natural pre-requisite.
+
+## B-023: Mixer event handler `on_video_merge_started` naming inconsistency
+
+- **Status:** Open, backlog
+- **Priority:** LOW (internal Python naming only; no user-facing impact)
+- **Surfaced:** v3.8 PyInstaller distribution audit (2026-04-30)
+- **Locations:**
+  - `mixer.py:971` (handler definition `def on_video_merge_started(...)`)
+  - `mixer.py:1094` (signal connection `self._merge_coordinator.video_started.connect(self.on_video_merge_started)`)
+- **Context:** Same copy-paste origin as the v3.8-fixed log/config filename typos (mixer.py was scaffolded from merge.py in early development; the `merge_` prefix was missed in three rename passes — log filename, config filename, and this handler name). The handler functions correctly because the signal-to-slot connection still resolves; the name is just misleading inside mixer's own module. Internal-only — no UI string, no external API consumer, no log output user-facing impact.
+- **Resolution:** Rename `on_video_merge_started` to `on_video_mixer_started` at both sites (definition + signal connection). Two-line change. Group with any future mixer.py-touching commit for cleanup.
+- **Trigger for pickup:** Opportunistic — any mixer.py edit that already touches that area, OR a focused `mixer.py` cleanup pass.
+
+## B-024: auto_render.py has no log file (consistency gap)
+
+- **Status:** Open, scheduled (combine with B-021 logging-to-UserData feature)
+- **Priority:** LOW (informational gap; no functional break)
+- **Surfaced:** v3.8 PyInstaller distribution audit (2026-04-30)
+- **Locations:**
+  - `auto_render.py` — no `logging.basicConfig` call anywhere in the module
+- **Context:** cutter.py, merge.py, and mixer.py all call `logging.basicConfig(filename="video_<app>.log", ...)` at module level (around line 54-58). auto_render.py has no equivalent — it relies entirely on the in-UI FFmpeg output panel for runtime feedback and writes nothing to disk for log-style debugging. This is an inconsistency rather than a bug: when teammates report issues, they can attach video_cutter.log / video_merge.log / video_mixer.log but cannot attach a renderer-side log because none exists. Working around this requires asking teammates to copy/paste from the in-UI panel.
+- **Resolution:** Add `logging.basicConfig(filename="video_renderer.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")` to auto_render.py at a parallel location (around line 54-58). The filename `video_renderer.log` matches the existing config filename convention (`config_video_renderer.json`). Combine with B-021 so all 4 apps gain UserData/-based logging in one cycle.
+- **Trigger for pickup:** v2.5.4 hygiene cycle alongside B-021.
+
+## B-025: Vietnamese docstrings in auto_render.py
+
+- **Status:** Open, backlog
+- **Priority:** LOW (docstrings only — not user-visible UI text)
+- **Surfaced:** v3.8 PyInstaller distribution audit (2026-04-30)
+- **Locations:**
+  - `auto_render.py:857` (`"""Tải cấu hình..."""` — translates to "Load configuration...")
+  - `auto_render.py:954` (`"""Lưu cấu hình..."""` — translates to "Save configuration...")
+- **Context:** Leftover from the original Vietnamese-language developer who authored the pre-v2 source. The 43 control-flow reconstruction artifacts from the pylingual decompile (commit a225831) addressed Python correctness; non-English docstrings survived because they were syntactically valid. Two known sites in auto_render.py; cutter/merge/mixer were grep'd at audit time and appear English-only.
+- **Resolution:** Translate both docstrings to English. Two-line change. Verify no other Vietnamese strings exist via inspection or via a Unicode-range grep over the Vietnamese-extended-Latin block.
+- **Trigger for pickup:** Opportunistic, OR before sharing the codebase with non-Vietnamese-reading contributors (which is now imminent with Junaid handoff).
+
+## B-026: PyInstaller spec files untracked in git
+
+- **Status:** Open, backlog
+- **Priority:** LOW (governance: undecided commit-vs-gitignore policy)
+- **Surfaced:** v3.8 PyInstaller distribution build (2026-04-30)
+- **Locations:**
+  - `1vmo-suite.spec` (multipackage spec used for v3.8)
+  - `auto_render.spec`, `cutter.spec`, `merge.spec`, `mixer.spec` (per-app specs, possibly stale)
+- **Context:** Five `.spec` files exist in the project root but are not tracked in git (`git status` shows them as untracked). The `1vmo-suite.spec` is the canonical multipackage spec used to build v3.8 (encodes EXE names with version numbers, MERGE archive tuples, hidden-imports list, ffmpeg binary inclusion). Without it in git, future contributors cannot reproduce the build. Per-app .spec files appear to be older single-app variants from earlier experiments. Two valid policies exist: (a) commit `1vmo-suite.spec` as canonical build artifact, gitignore the per-app variants; (b) gitignore all `.spec` files and document the build via a script (`tools/build_dist.py` or similar) that generates the spec on demand.
+- **Resolution:** Decide between (a) and (b). Option (a) is lower-effort and preserves the v3.8-tested spec verbatim. Option (b) is more flexible if build configurations diverge per platform (likely needed for Mac migration anyway). Update `.gitignore` accordingly and either commit `1vmo-suite.spec` or create the generator script.
+- **Trigger for pickup:** Before Junaid attempts a from-scratch build, OR before Mac migration (Phase 2.6) where build configurations may diverge.
+
 ---
 
 ## Resolution policy

@@ -52,7 +52,7 @@ SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / "assets" / "Mixer.ico"
 logging.basicConfig(
-    filename="video_merger.log",
+    filename="video_mixer.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
@@ -300,7 +300,7 @@ class VideoMergerTool(QMainWindow):
         _migrated = migrate_legacy_configs(SCRIPT_DIR, self.USER_DATA_DIR)
         if _migrated:
             print(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
-        self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_merger.json"
+        self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_mixer.json"
         if not FFMPEG_PATH.exists() or not FFPROBE_PATH.exists():
             QMessageBox.critical(
                 self,
