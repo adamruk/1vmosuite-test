@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
-    QShortcut,
     QSizePolicy,
     QTextEdit,
     QTreeWidget,
@@ -32,8 +31,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt, QThread, pyqtSignal, QObject, QSemaphore
-from PySide6.QtGui import QIcon, QKeySequence
+from PySide6.QtCore import Qt, QThread, QObject, QSemaphore
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
+from core.qt_compat import pyqtSignal, pyqtSlot
 from help_dialog import HelpDialog
 from updater import DriveUpdater
 import gpu_detect
@@ -851,7 +851,7 @@ class VideoRendererTool(QMainWindow):
         dlg.setIcon(QMessageBox.Information)
         dlg.setText(report)
         dlg.setStyleSheet("QLabel { font-family: Consolas, monospace; }")
-        dlg.exec_()
+        dlg.exec()
 
     def load_config(self) -> Dict[str, Any]:
         """Tải cấu hình từ config_video_renderer.json nếu tồn tại."""
@@ -873,7 +873,7 @@ class VideoRendererTool(QMainWindow):
         from PySide6.QtWidgets import QDialog
 
         dlg = SettingsDialog(self, Path(self.CONFIG_FILE))
-        if dlg.exec_() == QDialog.Accepted:
+        if dlg.exec() == QDialog.Accepted:
             self._reload_config_settings()
 
     def _reload_config_settings(self) -> None:
@@ -1835,7 +1835,7 @@ class VideoRendererTool(QMainWindow):
     def add_encoder(self) -> None:
         """Thêm encoder mới"""
         dialog = EncoderDialog(self)
-        if dialog.exec_() == QDialog.Accepted and dialog.result:
+        if dialog.exec() == QDialog.Accepted and dialog.result:
             item = QTreeWidgetItem(self.tree_encoders)
             item.setText(0, str(len(self.encoder_options) + 1))
             name_parts = dialog.result["name"].split("|", 1)
@@ -1894,7 +1894,7 @@ class VideoRendererTool(QMainWindow):
             "params": current_params,
         }
         dialog = EncoderDialog(self, "Edit Encoder", initial_values)
-        if dialog.exec_() == QDialog.Accepted and dialog.result:
+        if dialog.exec() == QDialog.Accepted and dialog.result:
             name_parts = dialog.result["name"].split("|", 1)
             group = name_parts[0] if len(name_parts) > 1 else ""
             name = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
@@ -2052,7 +2052,7 @@ class VideoRendererTool(QMainWindow):
             os.path.dirname(os.path.abspath(__file__)), "assets", "README AutoRender.md"
         )
         dialog = HelpDialog(self, "Help - 1vmo Auto Render", readme_path)
-        dialog.exec_()
+        dialog.exec()
 
 
 class EncoderDialog(QDialog):
@@ -2108,4 +2108,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VideoRendererTool()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

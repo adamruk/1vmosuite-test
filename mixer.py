@@ -34,11 +34,10 @@ from PySide6.QtCore import (
     Qt,
     QThreadPool,
     QRunnable,
-    pyqtSignal,
-    pyqtSlot,
     QObject,
     QThread,
 )
+from core.qt_compat import pyqtSignal, pyqtSlot
 from PySide6.QtGui import QIcon, QColor
 from updater import DriveUpdater
 from help_dialog import HelpDialog
@@ -1191,11 +1190,11 @@ class VideoMergerTool(QMainWindow):
             os.path.dirname(os.path.abspath(__file__)), "assets", "README Mixer.md"
         )
         dialog = HelpDialog(self, "Help - 1vmo Mixer", readme_path)
-        dialog.exec_()
+        dialog.exec()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VideoMergerTool()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

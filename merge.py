@@ -34,11 +34,10 @@ from PySide6.QtCore import (
     Qt,
     QThreadPool,
     QRunnable,
-    pyqtSignal,
-    pyqtSlot,
     QObject,
     QThread,
 )
+from core.qt_compat import pyqtSignal, pyqtSlot
 from PySide6.QtGui import QIcon, QColor, QPainter, QPen
 from updater import DriveUpdater
 from help_dialog import HelpDialog
@@ -1959,7 +1958,7 @@ class VideoMergeTool(QMainWindow):
             os.path.dirname(os.path.abspath(__file__)), "assets", "README Merge.md"
         )
         dialog = HelpDialog(self, "Help - 1vmo Merge", readme_path)
-        dialog.exec_()
+        dialog.exec()
 
     def update_ratio_value(self, value):
         self.ratio_value.setText(f"{value}:{10 - value}")
@@ -2062,4 +2061,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VideoMergeTool()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

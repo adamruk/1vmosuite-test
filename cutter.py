@@ -36,12 +36,11 @@ from PySide6.QtCore import (
     Qt,
     QThreadPool,
     QRunnable,
-    pyqtSignal,
-    pyqtSlot,
     QObject,
     QThread,
     QTimer,
 )
+from core.qt_compat import pyqtSignal, pyqtSlot
 from PySide6.QtGui import QIcon
 from updater import DriveUpdater
 from help_dialog import HelpDialog
@@ -1322,7 +1321,7 @@ class VideoCutterTool(QMainWindow):
             os.path.dirname(os.path.abspath(__file__)), "assets", "README Cutter.md"
         )
         dialog = HelpDialog(self, "Help - 1vmo Cutter", readme_path)
-        dialog.exec_()
+        dialog.exec()
 
     def toggle_boost(self):
         self.is_boost_mode = not self.is_boost_mode
@@ -1389,4 +1388,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VideoCutterTool()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

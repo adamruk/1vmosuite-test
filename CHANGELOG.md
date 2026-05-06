@@ -62,7 +62,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
-- PyQt5 → PySide6 migration foundation (Phase 2d): Replaced all `PyQt5` imports with `PySide6` equivalents across all 4 apps (`auto_render.py`, `cutter.py`, `merge.py`, `mixer.py`), supporting modules (`help_dialog.py`, `updater.py`, `settings_dialog.py`), and shared `core/` modules (`widgets.py`, `file_picker.py`). Updated `requirements.txt` to `PySide6>=6.5,<7`. Signal/slot patterns (`pyqtSignal`, `pyqtSlot`) preserved as-is — PySide6 is API-compatible. No `qtpy` shim used per ADR-0001. [ADR-0001]
+- PyQt5 → PySide6 migration (Phase 2d): Complete import replacement across all 4 apps and supporting modules. Key compatibility fixes: (a) `pyqtSignal`/`pyqtSlot` → `Signal`/`Slot` via `core/qt_compat.py` shim (PySide6-native names with PyQt5-compatible aliases per ADR-0001 constraint), (b) `QShortcut` moved from `QtWidgets` to `QtGui` (PySide6 location), (c) `exec_()` → `exec()` (PySide6 uses undeprecated name). All apps verified import-clean with PySide6 installed. Cross-platform: FFmpeg binary resolution already uses `os.name` checks (`.exe` suffix on Windows only). File dialogs use Qt abstraction (works on all platforms). App startup logging and subprocess calls are platform-aware. PyInstaller spec not yet updated — B-026 decision pending. [ADR-0001]
 
 ### Added
 
