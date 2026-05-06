@@ -60,6 +60,10 @@ What makes it a good entry: one concrete user-visible change, a measurable claim
 
 First release of the revived codebase. Covers the decompile-and-restore effort and Phase 1 modernization work in progress.
 
+### Changed
+
+- PyQt5 → PySide6 migration foundation (Phase 2d): Replaced all `PyQt5` imports with `PySide6` equivalents across all 4 apps (`auto_render.py`, `cutter.py`, `merge.py`, `mixer.py`), supporting modules (`help_dialog.py`, `updater.py`, `settings_dialog.py`), and shared `core/` modules (`widgets.py`, `file_picker.py`). Updated `requirements.txt` to `PySide6>=6.5,<7`. Signal/slot patterns (`pyqtSignal`, `pyqtSlot`) preserved as-is — PySide6 is API-compatible. No `qtpy` shim used per ADR-0001. [ADR-0001]
+
 ### Added
 
 - auto_render.py worker state machine ported from Phase 1 zip. Adds self._worker_state list (per-thread state dict {state, basename, percent, error}) + _render_worker_label method (state-driven emoji formatter) + state-classifying update_thread_status (recognizes "Processing:"/"Completed"/"Error"/"Cancelled" prefixes) + state-aware update_thread_progress + cancel_render routes through state machine. Initial label "Idle" -> "\U0001F7E2 Worker N - Ready"; status QLabel width setFixedWidth(200) -> setMinimumWidth(280) to fit longer state labels. Fixes 3-progress-bar staleness bug surfaced by smoke test post-tag (worker slot showed stale "Processing: X" 100% bar from completed task because update_thread_status did naive setText with no completion-state handling). Phase 1 already validated this design; ~70 LoC port. [e671042]

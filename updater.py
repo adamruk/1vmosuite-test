@@ -11,7 +11,7 @@ import shutil
 import json
 import subprocess
 from typing import Tuple, Optional
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog,
     QMessageBox,
     QVBoxLayout,
@@ -19,8 +19,8 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 
 
 class UpdaterDialog(QDialog):

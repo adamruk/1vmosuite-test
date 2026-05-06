@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 import json
 from typing import List, Dict, Any, Optional
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
@@ -32,8 +32,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QSemaphore
-from PyQt5.QtGui import QIcon, QKeySequence
+from PySide6.QtCore import Qt, QThread, pyqtSignal, QObject, QSemaphore
+from PySide6.QtGui import QIcon, QKeySequence
 from help_dialog import HelpDialog
 from updater import DriveUpdater
 import gpu_detect
@@ -870,7 +870,7 @@ class VideoRendererTool(QMainWindow):
 
     def open_settings(self) -> None:
         """Open the Settings dialog modally and apply changes on OK."""
-        from PyQt5.QtWidgets import QDialog
+        from PySide6.QtWidgets import QDialog
 
         dlg = SettingsDialog(self, Path(self.CONFIG_FILE))
         if dlg.exec_() == QDialog.Accepted:

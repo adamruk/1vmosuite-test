@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Callable, Optional, Sequence
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QProgressBar,

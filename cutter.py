@@ -17,7 +17,7 @@ from typing import Tuple
 import tempfile
 import shutil
 import multiprocessing
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
@@ -32,7 +32,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QSizePolicy,
 )
-from PyQt5.QtCore import (
+from PySide6.QtCore import (
     Qt,
     QThreadPool,
     QRunnable,
@@ -42,7 +42,7 @@ from PyQt5.QtCore import (
     QThread,
     QTimer,
 )
-from PyQt5.QtGui import QIcon
+from PySide6.QtGui import QIcon
 from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config

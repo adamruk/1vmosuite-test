@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PyQt5.QtWidgets import QFileDialog, QWidget
+from PySide6.QtWidgets import QFileDialog, QWidget
 
 # Named filter constants — keep in sync with dialog titles users see.
 VIDEO_FILTER = "Video Files (*.mp4 *.avi *.mkv)"

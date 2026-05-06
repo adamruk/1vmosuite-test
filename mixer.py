@@ -15,7 +15,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Tuple
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QSizePolicy,
 )
-from PyQt5.QtCore import (
+from PySide6.QtCore import (
     Qt,
     QThreadPool,
     QRunnable,
@@ -39,7 +39,7 @@ from PyQt5.QtCore import (
     QObject,
     QThread,
 )
-from PyQt5.QtGui import QIcon, QColor
+from PySide6.QtGui import QIcon, QColor
 from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config
