@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Bundled ffmpeg binaries (huge, reproducible from your bundling setup)
+ffmpeg/ffmpeg.exe
+ffmpeg/ffprobe.exe
+
+# Runtime logs / user data
+*.log
+!tests/smoke-*.log
+
+# Runtime config files (written by apps on every close)
+config_video_renderer.json
+config_video_cutter.json
+config_video_merge.json
+config_video_merger.json
+config_video_*.json.bak
+
+# Claude Code local prefs (personal, not project)
+.claude/settings.local.json
+.claude/cache/
+
+# VMAF validation working files — large binaries regenerable via the orchestrator script.
+# JSON outputs (results.json + per-pairing vmaf logs) ARE committed for machine inspection.
+benchmarks/_vmaf_work/*.mp4
+
+# Portable mode user data dir (created when portable.txt is present)
+UserData/
+
+# Portable mode sentinel (per-developer, NOT shipped)
+portable.txt
+
+# Synthetic test sources for stress tests (regenerable via ffmpeg -f lavfi)
+test_source_*.mp4

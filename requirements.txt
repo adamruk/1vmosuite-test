@@ -1,0 +1,15 @@
+# 1vmo Suite — Python 3.13 on Windows with RTX 4080 NVENC
+# Per PHASE_2C_PLAN.md: target is PySide6 6.9.1 (pinned for stability)
+PySide6>=6.9.1,<6.10
+requests>=2.31
+# nvidia-ml-py 12.x+ for NVENC hardware detection (gpu_detect.py).
+# Safe to remove on non-NVIDIA systems — gpu_detect falls back gracefully.
+# Note: the package is 'nvidia-ml-py' on PyPI but imports as 'pynvml'.
+# v13.x removed nvmlInit_v2; our code uses bare nvmlInit() which is correct
+# for both v12 and v13+. See FFMPEG_CPU_TO_NVENC_REFERENCE.md §9.
+nvidia-ml-py>=12.0
+Pillow>=10.0
+pydantic>=2.0,<3
+platformdirs>=4.0,<5
+pytest>=8.0,<9
+yt-dlp>=2025.06.09

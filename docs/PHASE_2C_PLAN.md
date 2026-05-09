@@ -1,0 +1,249 @@
+# Phase 2c Execution Plan
+
+<!-- markdownlint-disable MD013 -->
+
+Detailed execution plan for Phase 2 blockers and backlog. Phase status and team context: `docs/ROADMAP.md`.
+
+---
+
+## Executive summary
+
+**Phase 2 done = 4 blocker sub-phases + PySide6 migration.**
+
+Total: ~100-155 hours solo. At 6 hrs/day × 5 days: **3-5 calendar weeks.** At 4 hrs/day × 5 days: **5-8 weeks.**
+
+Backlog items (2c-c-4, 2c-c-5, 2c-d, 2c-e Part B, Phase 2e, Phase 2f) are scoped here for pickup later. They don't ship as part of Phase 2.
+
+Pre-requisite for 2c-c-1: a **small audit** of Observation-U-affected presets (~2-3 hrs, not the full preset audit).
+
+---
+
+## Pre-2c-c-1: small audit — WAIVED 2026-04-26
+
+Audit was scoped pre-2c-c-1 to enumerate Observation-U-affected presets. Observation U was fixed in Phase 2c-b (commit `57564fe`) before 2c-c-1 began, so the audit premise no longer applies. 2c-c-1 shipped without the audit. Full preset audit remains backlog (2c-e Part B).
+
+---
+
+## Phase 2 blockers — detailed plans
+
+Each sub-phase ends with green smoke test on main, CHANGELOG entry, and commit. Trunk-based. Rollback = `git revert` of the sub-phase commit.
+
+### 2c-c-1 — Pydantic schema + builtin.json, dark-released (6-8 hrs, Windows)
+
+**Scope.**
+
+- `core/encoder_schema.py`: `EncoderPreset`, `EncoderLibrary` (`schema_version: int = 1`, `presets: list[EncoderPreset]`).
+- Regenerate `assets/Encoder.json` via existing `tools/generate_encoder_json.py`.
+- Add `load_builtin_json()` to `core/preset_loader.py`.
+- Gate behind `ENCODER_USE_JSON=1` env var. Legacy `Encoder.txt` loader remains default. No UI or write changes.
+
+**Acceptance.**
+
+- `ENCODER_USE_JSON=1` launches with 111 presets from JSON; unset launches from `Encoder.txt`.
+- Load time within 100ms of legacy.
+- `tools/check_encoder_schema.py` emits PASS to `tests/smoke-2c-c-1-schema-YYYYMMDD.log` (manual-smoke per ADR-0001).
+
+**Tag:** `v2c-c-1`.
+
+### 2c-c-2 — Portable UserData + writable-install-dir guard (3-4 hrs, Windows)
+
+**Scope.**
+
+- `core/user_data.py` with `resolve_user_data_dir()`. Returns platform-standard user data dir via platformdirs by default; opt-in portable mode via `portable.txt` sentinel returns `./UserData/` alongside exe.
+- In portable mode, raise `PortableLocationError` if install dir is under a Windows-protected location (Program Files, Windows, ProgramData) where writes would silently redirect via VirtualStore.
+- Cross-platform via platformdirs; no per-platform branching needed in this module. (See ADR-0005.)
+- No writes yet — pure resolution.
+
+**Acceptance.**
+
+- Default returns platformdirs user_data_path; portable.txt sentinel returns `./UserData/`; portable + protected dir raises PortableLocationError with clear message.
+- `tools/check_user_data.py` emits PASS to `tests/smoke-2c-c-2-userdata-YYYYMMDD.log` (manual-smoke per ADR-0001).
+
+**Tag:** `v2c-c-2`.
+
+### 2c-c-3 — User preset writer: atomic write + .bak + retry (5-7 hrs, Windows)
+
+**Scope.**
+
+- `core/atomic_write.py` with `save_json_atomic(path, data)`: serialize-to-bytes first (catch errors pre-disk), write `path.tmp` in same directory, `f.flush() + os.fsync()`, rotate `path` → `path.bak` (single generation), `os.replace(path.tmp, path)` wrapped in **5-retry exponential backoff** (50/100/200/400/800ms) for `PermissionError`/`OSError`.
+- `save_user_presets_json(presets)` in preset_loader using this primitive.
+- Writes only triggered by new `tools/test_user_save.py` smoke script.
+
+**Note (2026-04-26, D5 expansion):** This commit ALSO rewires the 4 `config_video_*.json` writes (auto_render / cutter / merge / mixer) from install-dir to user_data_dir, alongside the encoder.user.json writer. Strict plan reading would only rewire encoder.user.json, but Observation O ("frozen .exe behavior unvalidated") requires all 5 user-state writes go through the portable resolver. Migration of existing legacy `config_video_*.json` files is automatic on first launch, preserving originals (per `core.user_data.migrate_legacy_configs`).
+
+**Acceptance.**
+
+- `tools/test_user_save.py` round-trip works. Manual smoke captured at `tests/smoke-2c-c-3-usersave-YYYYMMDD.log` (PASS).
+- Corrupted main file auto-falls-back to `.bak` on load with visible warning log.
+- `tests/smoke/test_atomic_write_retry.py` passes (ADR-0003 Exception 1). Pytest output captured at `tests/smoke-2c-c-3-retry-YYYYMMDD.log`.
+- Manual smoke: open file in Notepad during save; retry resolves within 750ms (4 sleeps of 50/100/200/400ms between 5 attempts).
+
+**Tag:** `v2c-c-3`.
+
+### Observation V fix — standalone commit (3-5 hrs)
+
+**Not a sub-phase, a standalone commit.** Fits between 2c-c-3 and 2c-c-6 in the timeline but independent.
+
+**Scope.**
+
+- `RenderWorker.process()` skips `-c:v libx264 -c:a aac` append when preset already specifies a video or audio codec (scan for `-vcodec`, `-c:v`, `-codec:v`, `-acodec`, `-c:a`, `-codec:a`).
+- Image-encoder exception (`-f image2`) unchanged.
+- Reproduction script at `tests/repro/observation-v-codec-append.py` (peer rule 1).
+- Mark Observation V as **Fixed in Phase 2 (<sha>)** in ROADMAP.md.
+
+**Acceptance.**
+
+- Reproduction script shows pre-fix silent override and post-fix correct behavior.
+- Manual smoke: HEVC preset, `-c:a copy` preset, NVENC preset all render to preset intent (not silently overridden).
+
+**Commit message format:** *"Fix Observation V: RenderWorker codec-append gotcha."*
+
+**Status update (2026-04-23):** Fix shipped in commit `c03433a` as part of Path B, bundled with 5 other isolated bug fixes ported from Phase 1 (Bugs 1, 3, 5, 6, 7 + new `_has_acodec` helper). This deviates from the "standalone commit" rule above. The deviation is acknowledged as a one-off justified by tight relatedness (all 6 fixes from the same Phase 1 source folder, all touching the same `RenderWorker` class). The standalone-commit rule remains in force for future scheduled blocker fixes (2c-c-1, 2c-c-2, 2c-c-3, 2c-c-6, 2d). Acceptance items 1 (reproduction script) and 2 (status amendments) status: (1) skipped — fix already shipped, manual smoke testing covers regression risk; (2) addressed by this commit.
+
+### 2c-c-6 — Windows-only smoke regression suite — SHIPPED 2026-04-27
+
+Adds `tools/test_integration_smoke.py` + `tools/test_encoder_json_determinism.py` + `tools/run_all_smoke.py` + `tests/README.md` "Smoke runner convention" section + combined regression log `tests/smoke-2c-c-6-regression-20260427.log`.
+
+Determinism test uses STRATEGY A (import `TEXT_DEFAULTS` from `tools.generate_encoder_json`) to avoid hardcoded Text-default drift. Aggregate runner exits non-zero if any of the 9 smoke runners fails; manual-run only (NOT a pre-commit hook per ADR-0001).
+
+Mac compat verification deferred to post-Phase-2 milestone with Junaid (memory rule #14 / governance commit ffe4e1f).
+
+**Tag:** `v2c-c-6` + `v2c-c-complete` (Phase 2c done — all 5 sub-phases shipped + post-2c-c-4 regression green).
+
+### Phase 2d — PyQt5 → PySide6 migration (3-4 weeks, ~80-120 hrs)
+
+Separate playbook (TBD when Phase 2d begins). High-level scope:
+
+- **Motivation.** Mac-quality-forced for current team. Licensing headroom preserved for any future commercial decision.
+- **Approach.** 30-line deletable `core/_qt.py` scaffold; libcst mechanical rewriter (`migrate_qt.py`); per-app migration.
+- **Target.** PySide6 6.9.1 on QtWidgets. Pin 6.9.1 for longest community burn-in window. Note: QTBUG-140144 affects QtWebEngine specifically; 1vmo-suite does not use QtWebEngine so the 6.9.2 blank-window reports from Anki do not apply. Version pin rationale is stability, not bug avoidance.
+- **Packaging.** Nuitka standalone.
+- **Fallback.** $670 Riverbank commercial PyQt5 license pre-approved if migration exceeds 60 hours.
+
+**Cross-thread slot handling:** `@Slot` + explicit `Qt.ConnectionType.QueuedConnection` on every cross-thread `connect()`. If wrong-thread execution persists (PySide 6.8.x-6.9.x worker-object pattern caveat per Qt engineer guidance), fall back to QThread-subclass pattern.
+
+**Detailed playbook drafted when Phase 2d begins.** Not in scope for today's commit.
+
+---
+
+## Testing: the one ADR-0001 exception kept for Phase 2
+
+ADR-0001 locks manual-smoke-only. One narrow pytest exception in 2c-c-3.
+
+The second exception (extends: cycle detection) was planned for 2c-c-5 — that sub-phase is now backlog. Exception deferred with it.
+
+| Exception | File | Why pytest not manual | Size |
+|---|---|---|---|
+| Atomic-write retry | `tests/smoke/test_atomic_write_retry.py` | OneDrive sync and AV file-locks aren't reliably reproducible on demand. Manual smoke has ~0 catch-rate for retry-loop regressions. Mock `os.replace` to raise `PermissionError` N times; assert retry count, backoff timing, error propagation. | ~30 min, ~15 lines |
+
+**Not added to pytest:** Pydantic roundtrip (framework-covered), copy-on-write identity (backlog, not in Phase 2 scope), UI behavior (Phase 2d concern), render-output correctness (manual smoke sufficient).
+
+---
+
+## Rollback strategy
+
+| Scenario | Action |
+|---|---|
+| Single sub-phase regression | `git revert <sha>` of offending sub-phase. Prior sub-phases remain shipped. Update ROADMAP. |
+| Schema design flaw found post-ship | Don't revert. Ship schema_version=2 later with lazy migration on load. Reference: Azure Cosmos DB, Zed settings. |
+| Observation V fix regression | Isolated commit — revert independently. |
+| Mac-compat breaks Windows (unlikely — 2c-c-6 is additive) | Revert 2c-c-6. Windows returns to 2c-c-3 + Observation V fix; Mac returns to pre-2c-c. |
+| Phase 2d migration bug shipped | Per-app revert possible (4 separate migration commits). Shim pattern preserves ability to run mixed PyQt5/PySide6 during rollback window. |
+
+---
+
+## Work rhythm
+
+Target: **6 hrs/day × 5 days/week** for sustainable solo pace. Evidence: Cal Newport's 3-4 hour ceiling for deep work + 2 hours of lower-intensity coordination work. Accept 3-5 calendar weeks for Phase 2 blockers.
+
+**Do not.** Attempt 10-12 hrs/day sustained for Phase 2. The 80-120 hour PySide6 migration (2d) is where hour-10-of-day-12 mistakes compound. A migration bug shipped because you were tired at 11pm on day 14 costs a week of debugging later.
+
+**Do.** Accept the 3-5 week timeline. Allow natural sprints (8-10 hrs) when a sub-phase has momentum. Hard-cap 2d days at 6 hrs.
+
+---
+
+## Completion criteria
+
+All of:
+
+1. Tags exist: `v2c-c-1`, `v2c-c-2`, `v2c-c-3`, `v2c-c-4`, `v2c-c-6`, `v2c-c-complete`, `v2d-complete`. Observation V fix shipped untagged via Path B (commit `c03433a`); see "Status update (2026-04-23)" in the Observation V fix section. Mac compat verification deferred to post-Phase-2 milestone with Junaid (memory rule #14); v2c-c-complete = Windows-only smoke regression green.
+2. All 111 presets load, validate, render correctly on Windows + Mac.
+3. All 4 apps run on PySide6 with no PyQt5 imports remaining.
+4. Observation V marked Fixed in ROADMAP.md with sha.
+
+**At that point: Phase 2 done.** Backlog items revisited case-by-case as they become worth the time.
+
+---
+
+## Backlog — scoped for pickup later
+
+Items deferred from Phase 2 scope. Captured here so they're not lost when they become worth picking up.
+
+### 2c-c-4 — Prefix-namespaced IDs + copy-on-write — SHIPPED 2026-04-27
+
+Identity model bumped from position-based to prefix-namespaced IDs (`builtin:<group-slug>/<name-slug>` and `user:<name-slug>`). Schema version bumped 1→2. EncoderDialog disables Edit/Delete on built-in rows (italic name as visual signal). Silent-data-loss bug from 2c-c-3 D3=a fixed. Slug derivation rule + lazy v1→v2 migration semantics documented in ADR-0006.
+
+**Tag:** `v2c-c-4`.
+
+### 2c-c-5 — extends: schema field (6-9 hrs)
+
+Experimental `extends: str | None` field. Resolver with single-parent chain, max depth 8, cycle detection. Second ADR-0001 pytest exception (`test_extends_cycle_detection.py`) activates with this sub-phase.
+
+**Trigger for pickup.** Audit reveals deep preset redundancy that factors cleanly, or inheritance UI becomes needed.
+
+### 2c-d — Zoom-cycle generator (6-8 hrs + 1-2 hr Mac smoke)
+
+Parametric generator for `Cycle 10s 4-3-3` family. Produces Windows NVENC + cross-platform libx264 variants.
+
+**Trigger for pickup.** Zoom-cycle preset maintenance becomes tedious, or a new cycle family needs to be added.
+
+### 2c-e Part B — Inheritance UI + preset audit (8-10 hrs + 1-2 hr Mac smoke)
+
+Full audit of Ultimate group + kitchen-sink criteria application + read-only inheritance UI in EncoderDialog.
+
+**Trigger for pickup.** 2c-c-5 picked up (inheritance UI needs extends: field present), or preset quality becomes a team complaint.
+
+### Phase 2e — Parameter validation layer (20-30 hrs)
+
+Pydantic schema + known-bad-combination guards + pixel-format assertions. Tiered validation. Hand-curated encoder capability catalog.
+
+**Trigger for pickup.** User-authored preset corruption becomes a recurring issue, or commercial trajectory activates.
+
+### Phase 2f — Vietnamese → English translation
+
+Per Observation T. Required only if commercial trajectory activates.
+
+**Trigger for pickup.** Commercial trajectory ADR written, or team convenience becomes compelling (2 non-Vietnamese team members).
+
+### v2.5.2 REVIEWER observations — pending triage
+
+- **cutter.py restart race (Probe 1):** old coordinator's `finished` signal remains connected when `start_cut()` is called while prior QThread is still live; `on_cut_finished` fires again mid-new-cut, corrupting `is_processing` and button state. Fix: disconnect-before-overwrite (same pattern as auto_render.py c03433a). [v2.5.2 REVIEWER, 88de676]
+
+- **cutter.py stale Pending rows:** placeholder rows created in `start_cut()` that are never dispatched (cancel fires before coordinator reaches them) stay as "Pending" forever. User-visible visual regression. [v2.5.2 REVIEWER, 88de676]
+
+- **mixer.py closeEvent double save_config:** `cancel_merge()` calls `save_config()`, then `closeEvent` calls it again after `cancel_merge()` returns; harmless with merge-then-write but redundant. [v2.5.2 REVIEWER, bfb3afa]
+
+- **settings_dialog.py _set_combo_data silent fallback:** if a saved `output_collision` value is not in `COLLISION_OPTIONS`, the combo silently stays at index 0 (overwrite) with no warning. Pre-existing; not introduced by N36. [v2.5.2 observation]
+
+---
+
+## Maintenance
+
+- Each sub-phase has fixed scope. Expand only via explicit CLAUDE.md §0 override in a prompt.
+- If estimate exceeded by >50%, pause and re-scope.
+- Commit message format: *"Per docs/PHASE_2C_PLAN.md sub-phase 2c-c-N, [action]."*
+- CHANGELOG entry per sub-phase is mandatory (hook-enforced).
+- When a backlog item's trigger fires, move it from Backlog section to Phase 2-style detailed plan. Document the pickup decision in a new commit.
+
+---
+
+## Evidence references
+
+Strategic claims draw from research in session transcripts 2026-04-19 through 2026-04-21. Key multi-source patterns:
+
+- Schema versioning (lazy migration, integer versions): Azure Cosmos DB, Zed editor, SQLite `user_version`.
+- Atomic write + retry: Python bug 46003, VTK CMake `cmSystemTools::RenameFile`.
+- Sub-phasing benefits (trend direction, not specific percentages): GitClear 12,638-PR study, Graphite 50-line analysis.
+- Work rhythm: Cal Newport, Anders Ericsson.
+
+Two-sources rule (ROADMAP peer rule 2) met for operative claims.

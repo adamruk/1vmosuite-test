@@ -1,0 +1,414 @@
+"""URL downloader module — wraps yt-dlp for batch video downloads.
+
+Implementation choice: yt-dlp as a Python library with progress_hooks,
+plus concurrent.futures.ThreadPoolExecutor for the batch. This is the
+cleanest fit for batch + cancellation + per-thread progress as
+recommended in URL_DOWNLOADER_SPEC.md.
+
+Public surface:
+- download_videos(...) -> list[DownloadResult]
+- DownloadResult dataclass
+
+Argument validation may raise (ValueError, FileNotFoundError,
+PermissionError). All other failures — invalid URL, unsupported site,
+auth wall, network error, postprocess failure — are reported on the
+DownloadResult, never raised. Callers inspect .success / .error_type.
+
+The yt-dlp import is lazy inside _download_one so that argument-
+validation smoke tests do not require yt-dlp to be installed.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Literal, Optional
+
+logger = logging.getLogger('core.url_downloader')
+
+
+# ========== Quality format mapping ==========
+
+QUALITY_FORMATS: dict[str, str] = {
+    'best':     'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    '1080p':    'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]',
+    '720p':     'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]',
+    '480p':     'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]',
+    '360p':     'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]',
+    'smallest': 'worst[ext=mp4]/worst',
+}
+
+VALID_BROWSERS = {'chrome', 'firefox', 'edge', 'brave', 'safari'}
+
+
+# ========== Internal exception hierarchy ==========
+
+class URLDownloadError(Exception):
+    """Base for internal categorized errors."""
+
+
+class InvalidURLError(URLDownloadError):
+    """URL is malformed, empty, a playlist, or a live stream."""
+
+
+class UnsupportedSiteError(URLDownloadError):
+    """yt-dlp does not support this site."""
+
+
+class AuthRequiredError(URLDownloadError):
+    """Auth required (private video, login wall)."""
+
+
+class RegionLockedError(URLDownloadError):
+    """Geo-blocked content."""
+
+
+class RateLimitedError(URLDownloadError):
+    """HTTP 429 / Cloudflare rate limit."""
+
+
+class NetworkError(URLDownloadError):
+    """Transient network/DNS/timeout error."""
+
+
+class PostprocessError(URLDownloadError):
+    """ffmpeg merge / remux failed."""
+
+
+class _CancelledMarker(URLDownloadError):
+    """Raised inside progress_hooks to abort yt-dlp on cancel_event."""
+
+
+# ========== Public dataclass ==========
+
+@dataclass
+class DownloadResult:
+    """Result of attempting to download a single URL within a batch.
+
+    Always returned — never raises. Inspect .success to determine outcome.
+    """
+    url: str
+    success: bool
+    path: Optional[Path] = None
+    subtitle_path: Optional[Path] = None
+    error: Optional[Exception] = None
+    error_type: Optional[str] = None
+    title: Optional[str] = None
+    duration_seconds: Optional[int] = None
+
+
+# ========== Helpers ==========
+
+_URL_RE = re.compile(r'^https?://[^\s/$.?#].[^\s]*$', re.IGNORECASE)
+
+
+def _validate_url(url: str) -> None:
+    """Raise InvalidURLError on malformed / playlist / live stream URLs.
+
+    Mixed watch+playlist URLs (e.g. youtube.com/watch?v=...&list=...) are
+    accepted; yt-dlp's noplaylist=True will treat them as single videos.
+    """
+    if not isinstance(url, str) or not url.strip():
+        raise InvalidURLError('Empty URL')
+    stripped = url.strip()
+    if not _URL_RE.match(stripped):
+        raise InvalidURLError(f'Not a valid URL: {url!r}')
+    lowered = stripped.lower()
+    if '/playlist?' in lowered or '/playlist/' in lowered:
+        raise InvalidURLError('Playlist URLs not supported, pass individual video URLs')
+    if '/live/' in lowered:
+        raise InvalidURLError('Live streams not supported')
+
+
+def _categorize_error(exc: BaseException) -> str:
+    """Translate an exception to one of the documented error_type strings."""
+    if isinstance(exc, _CancelledMarker):
+        return 'cancelled'
+    if isinstance(exc, InvalidURLError):
+        return 'invalid_url'
+    if isinstance(exc, UnsupportedSiteError):
+        return 'unsupported_site'
+    if isinstance(exc, AuthRequiredError):
+        return 'auth_required'
+    if isinstance(exc, RegionLockedError):
+        return 'region_locked'
+    if isinstance(exc, RateLimitedError):
+        return 'rate_limited'
+    if isinstance(exc, NetworkError):
+        return 'network_error'
+    if isinstance(exc, PostprocessError):
+        return 'postprocess_error'
+
+    msg = str(exc).lower()
+
+    if 'unsupported url' in msg or 'no suitable extractor' in msg:
+        return 'unsupported_site'
+    if (
+        'login required' in msg
+        or 'sign in' in msg
+        or 'private video' in msg
+        or 'this video is private' in msg
+        or ('cookies' in msg and 'auth' in msg)
+    ):
+        return 'auth_required'
+    if (
+        'not available in your country' in msg
+        or 'geo restrict' in msg
+        or ('geo' in msg and 'block' in msg)
+        or ('region' in msg and 'restrict' in msg)
+    ):
+        return 'region_locked'
+    if (
+        'http error 429' in msg
+        or 'rate limit' in msg
+        or 'too many requests' in msg
+        or 'cloudflare' in msg
+    ):
+        return 'rate_limited'
+    if any(s in msg for s in (
+        'timeout',
+        'timed out',
+        'getaddrinfo',
+        'name or service not known',
+        'connection reset',
+        'connection refused',
+        'network is unreachable',
+        'temporary failure in name resolution',
+        'unable to download webpage',
+    )):
+        return 'network_error'
+    if 'ffmpeg' in msg and ('merge' in msg or 'postprocess' in msg or 'remux' in msg):
+        return 'postprocess_error'
+    if 'is not a valid url' in msg:
+        return 'invalid_url'
+
+    return 'unknown'
+
+
+def _build_ydl_opts(
+    quality: str,
+    work_dir: Path,
+    download_subtitles: bool,
+    cookies_browser: Optional[str],
+    progress_hook: Callable[[dict], None],
+) -> dict:
+    """Build the yt-dlp options dict for a single download."""
+    opts: dict = {
+        'format': QUALITY_FORMATS[quality],
+        'outtmpl': str(work_dir / '%(title).100B-%(id)s.%(ext)s'),
+        'restrict_filenames': True,
+        'merge_output_format': 'mp4',
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+        'retries': 3,
+        'fragment_retries': 3,
+        'retry_sleep_functions': {
+            'http': lambda n: 2 ** n,
+            'fragment': lambda n: 2 ** n,
+        },
+        'progress_hooks': [progress_hook],
+    }
+    if download_subtitles:
+        opts.update({
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['en', 'orig'],
+            'subtitlesformat': 'srt/vtt/best',
+            'postprocessors': [{
+                'key': 'FFmpegSubtitlesConvertor',
+                'format': 'srt',
+            }],
+        })
+    if cookies_browser:
+        opts['cookiesfrombrowser'] = (cookies_browser,)
+    return opts
+
+
+def _download_one(
+    url: str,
+    url_index: int,
+    work_dir: Path,
+    quality: str,
+    download_subtitles: bool,
+    cookies_browser: Optional[str],
+    progress_callback: Optional[Callable[[int, str, float, str], None]],
+    cancel_event: Optional[threading.Event],
+) -> DownloadResult:
+    """Download a single URL. Never raises — always returns a Result."""
+    if cancel_event is not None and cancel_event.is_set():
+        return DownloadResult(
+            url=url, success=False, error_type='cancelled',
+            error=_CancelledMarker('Cancelled before start'),
+        )
+
+    try:
+        _validate_url(url)
+    except InvalidURLError as exc:
+        logger.error('Invalid URL %r: %s', url, exc)
+        return DownloadResult(url=url, success=False, error=exc, error_type='invalid_url')
+
+    try:
+        import yt_dlp
+    except ImportError as exc:
+        logger.error('yt-dlp not installed: %s', exc)
+        return DownloadResult(url=url, success=False, error=exc, error_type='unknown')
+
+    def _hook(d: dict) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise _CancelledMarker('cancelled')
+        if progress_callback is None:
+            return
+        status = d.get('status', '')
+        try:
+            if status == 'downloading':
+                total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+                downloaded = d.get('downloaded_bytes') or 0
+                pct = (downloaded / total * 100.0) if total else 0.0
+                progress_callback(url_index, url, pct, 'downloading')
+            elif status == 'finished':
+                progress_callback(url_index, url, 100.0, 'finished')
+        except _CancelledMarker:
+            raise
+        except Exception:
+            logger.exception('progress_callback raised; continuing')
+
+    opts = _build_ydl_opts(quality, work_dir, download_subtitles, cookies_browser, _hook)
+    logger.info('Starting download: %s', url)
+
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = Path(ydl.prepare_filename(info))
+    except _CancelledMarker as exc:
+        return DownloadResult(url=url, success=False, error=exc, error_type='cancelled')
+    except Exception as exc:
+        # Unwrap yt-dlp DownloadError if its cause is a _CancelledMarker
+        if isinstance(getattr(exc, '__cause__', None), _CancelledMarker) \
+                or isinstance(getattr(exc, '__context__', None), _CancelledMarker):
+            return DownloadResult(url=url, success=False, error=exc, error_type='cancelled')
+        error_type = _categorize_error(exc)
+        logger.error('Download failed (%s): %s — %s', error_type, url, exc)
+        return DownloadResult(url=url, success=False, error=exc, error_type=error_type)
+
+    actual_path = filename
+    if not actual_path.exists():
+        candidates = list(work_dir.glob(f'{filename.stem}.*'))
+        if candidates:
+            mp4s = [p for p in candidates if p.suffix.lower() == '.mp4']
+            actual_path = mp4s[0] if mp4s else candidates[0]
+        else:
+            err = PostprocessError(f'Output file missing after download: {filename}')
+            logger.error('%s', err)
+            return DownloadResult(url=url, success=False, error=err,
+                                  error_type='postprocess_error')
+
+    sub_path: Optional[Path] = None
+    if download_subtitles:
+        for cand in sorted(work_dir.glob(f'{actual_path.stem}*.srt')):
+            sub_path = cand
+            break
+
+    title: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    if isinstance(info, dict):
+        t = info.get('title')
+        title = t if isinstance(t, str) else None
+        dur = info.get('duration')
+        duration_seconds = int(dur) if isinstance(dur, (int, float)) else None
+
+    logger.info('Download complete: %s -> %s', url, actual_path)
+    return DownloadResult(
+        url=url,
+        success=True,
+        path=actual_path,
+        subtitle_path=sub_path,
+        title=title,
+        duration_seconds=duration_seconds,
+    )
+
+
+# ========== Public function ==========
+
+def download_videos(
+    urls: list[str],
+    work_dir: Path,
+    quality: Literal['best', '1080p', '720p', '480p', '360p', 'smallest'] = 'best',
+    download_subtitles: bool = False,
+    max_concurrent: int = 3,
+    progress_callback: Optional[Callable[[int, str, float, str], None]] = None,
+    cookies_browser: Optional[str] = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> list[DownloadResult]:
+    """Download a batch of video URLs concurrently.
+
+    Returns one DownloadResult per input URL, in the same order as `urls`.
+    Per-URL failures are reported on the Result; only argument validation
+    raises (ValueError, FileNotFoundError, PermissionError). See
+    URL_DOWNLOADER_SPEC.md for full semantics and the error_type taxonomy.
+    """
+    if not isinstance(urls, list) or len(urls) == 0:
+        raise ValueError('urls must be a non-empty list')
+    for i, u in enumerate(urls):
+        if not isinstance(u, str):
+            raise ValueError(
+                f'urls[{i}] is not a string: got {type(u).__name__}'
+            )
+    if quality not in QUALITY_FORMATS:
+        raise ValueError(
+            f'invalid quality {quality!r}; must be one of {sorted(QUALITY_FORMATS)}'
+        )
+    if not isinstance(max_concurrent, int) or isinstance(max_concurrent, bool) or max_concurrent < 1:
+        raise ValueError(f'max_concurrent must be an int >= 1, got {max_concurrent!r}')
+    if cookies_browser is not None and cookies_browser not in VALID_BROWSERS:
+        raise ValueError(
+            f'unknown cookies_browser {cookies_browser!r}; '
+            f'must be one of {sorted(VALID_BROWSERS)}'
+        )
+
+    if not isinstance(work_dir, Path):
+        work_dir = Path(work_dir)
+    if not work_dir.exists():
+        raise FileNotFoundError(f'work_dir does not exist: {work_dir}')
+    if not work_dir.is_dir():
+        raise FileNotFoundError(f'work_dir is not a directory: {work_dir}')
+    if not os.access(work_dir, os.W_OK):
+        raise PermissionError(f'work_dir is not writable: {work_dir}')
+
+    n = len(urls)
+    results: list[Optional[DownloadResult]] = [None] * n
+    workers = min(max_concurrent, n)
+
+    logger.info(
+        'Starting batch of %d URL(s) (max_concurrent=%d, quality=%s, subs=%s)',
+        n, max_concurrent, quality, download_subtitles,
+    )
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {
+            ex.submit(
+                _download_one,
+                url, idx, work_dir, quality, download_subtitles,
+                cookies_browser, progress_callback, cancel_event,
+            ): idx
+            for idx, url in enumerate(urls)
+        }
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            try:
+                results[idx] = fut.result()
+            except Exception as exc:
+                logger.exception('Worker raised unexpectedly for %r', urls[idx])
+                results[idx] = DownloadResult(
+                    url=urls[idx], success=False, error=exc,
+                    error_type=_categorize_error(exc),
+                )
+
+    succeeded = sum(1 for r in results if r and r.success)
+    logger.info('Batch complete: %d/%d succeeded', succeeded, n)
+
+    return [r for r in results if r is not None]

@@ -1,0 +1,14 @@
+=== User-preset save/load smoke (sub-phase 2c-c-3) ===
+Platform: win32
+
+[Missing file returns []]
+  PASS: missing file returns []
+
+[Round-trip with Vietnamese chars]
+  PASS: round-trip preserved 2 presets (incl. Vietnamese)
+
+[.bak rotation preserves first generation]
+  PASS: .bak rotation preserves first generation
+
+=== 3/3 tests passed ===
+PASS: user-preset save/load round-trip works

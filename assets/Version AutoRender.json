@@ -1,0 +1,19 @@
+{
+    "software": {
+        "1vmo Auto Render": {
+            "version": "3.8"
+        },
+        "1vmo Auto Render Assets": {
+            "version": "1.4"
+        },
+        "1vmo Merge": {
+            "version": "3.8"
+        },
+        "1vmo Mixer": {
+            "version": "3.8"
+        },
+        "1vmo Cutter": {
+            "version": "3.8"
+        }
+    }
+}

@@ -1,0 +1,17 @@
+=== core.user_data smoke validation (sub-phase 2c-c-2) ===
+Platform: win32
+
+[Default (no sentinel) returns platformdirs path]
+  PASS: default -> C:\Users\adamm\AppData\Local\1vmo-suite
+
+[Portable mode + safe install dir returns UserData]
+  PASS: portable safe -> C:\Users\adamm\AppData\Local\Temp\tmpbc3h8qtc\UserData
+
+[Portable mode + protected dir raises]
+  PASS: portable + protected -> raised PortableLocationError
+
+[Protected-dir detection (Program Files)]
+  PASS: 'C:\Program Files\1vmo-test' detected as protected
+
+=== 4/4 tests passed ===
+PASS: core.user_data resolves correctly across all branches

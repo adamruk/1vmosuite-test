@@ -1,0 +1,3 @@
+PASS: Encoder.json validates against EncoderLibrary schema
+  schema_version: 1
+  preset count: 111
