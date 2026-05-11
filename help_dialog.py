@@ -3,8 +3,8 @@
 # Bytecode version: 3.11a7e (3495)
 # Source timestamp: 1970-01-01 00:00:00 UTC (0)
 
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
-from PyQt5.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
+from PySide6.QtCore import Qt
 
 
 class HelpDialog(QDialog):

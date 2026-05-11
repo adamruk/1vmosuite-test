@@ -15,7 +15,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Tuple
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
@@ -30,16 +30,16 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QSizePolicy,
 )
-from PyQt5.QtCore import (
+from PySide6.QtCore import (
     Qt,
     QThreadPool,
     QRunnable,
-    pyqtSignal,
-    pyqtSlot,
+    Signal,
+    Slot,
     QObject,
     QThread,
 )
-from PyQt5.QtGui import QIcon, QColor
+from PySide6.QtGui import QIcon, QColor
 from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config
@@ -65,17 +65,17 @@ def escape_video_path(video: str) -> str:
 
 
 class WorkerSignals(QObject):
-    progress_updated = pyqtSignal(int, int)
-    status_updated = pyqtSignal(int, str)
-    output_updated = pyqtSignal(str)
-    merge_completed = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
+    progress_updated = Signal(int, int)
+    status_updated = Signal(int, str)
+    output_updated = Signal(str)
+    merge_completed = Signal(str)
+    error_occurred = Signal(str)
 
 
 class MergeCoordinator(QObject):
-    per_video_started = pyqtSignal(int, str, str)
-    finished = pyqtSignal()
-    error_occurred = pyqtSignal(str)
+    per_video_started = Signal(int, str, str)
+    finished = Signal()
+    error_occurred = Signal(str)
 
     def __init__(
         self,
@@ -115,7 +115,7 @@ class MergeCoordinator(QObject):
         self._on_completed = on_completed
         self._on_error = on_error
 
-    @pyqtSlot()
+    @Slot()
     def run(self):
         try:
             for i in range(self.num_output):
@@ -1090,7 +1090,7 @@ class VideoMergerTool(QMainWindow):
                 item.setText(5, "🔴 Error")
                 break
 
-    @pyqtSlot(int, str, str)
+    @Slot(int, str, str)
     def on_video_merge_started(
         self, index: int, input_names: str, output_filename: str
     ):
@@ -1102,7 +1102,7 @@ class VideoMergerTool(QMainWindow):
         item.setText(4, "N/A")
         item.setText(5, "🔄 Processing...")
 
-    @pyqtSlot()
+    @Slot()
     def on_merge_finished(self):
         self.is_merging = False
         self.btn_start.setEnabled(True)
@@ -1112,7 +1112,7 @@ class VideoMergerTool(QMainWindow):
             self._merge_thread.quit()
             self._merge_thread.wait()
 
-    @pyqtSlot(str)
+    @Slot(str)
     def on_coordinator_merge_error(self, error_message: str):
         self.logger.error(f"Error mixing: {error_message}")
         QMessageBox.critical(
@@ -1191,11 +1191,11 @@ class VideoMergerTool(QMainWindow):
             os.path.dirname(os.path.abspath(__file__)), "assets", "README Mixer.md"
         )
         dialog = HelpDialog(self, "Help - 1vmo Mixer", readme_path)
-        dialog.exec_()
+        dialog.exec()
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VideoMergerTool()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

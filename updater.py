@@ -11,7 +11,7 @@ import shutil
 import json
 import subprocess
 from typing import Tuple, Optional
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog,
     QMessageBox,
     QVBoxLayout,
@@ -19,8 +19,8 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QIcon
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 
 
 class UpdaterDialog(QDialog):
@@ -132,7 +132,7 @@ class DriveUpdater:
                     dialog = UpdaterDialog(saved_version, version)
                     if self.icon:
                         dialog.setWindowIcon(self.icon)
-                    if dialog.exec_() == QDialog.Rejected:
+                    if dialog.exec() == QDialog.Rejected:
                         print("Update postponed")
                         return
                     is_asset = "assets" in exe_name.lower()
@@ -164,8 +164,8 @@ class DriveUpdater:
                         )
                         msg_box.setStandardButtons(QMessageBox.Ok)
                         msg_box.setIcon(QMessageBox.Information)
-                        msg_box.exec_()
-                        if delete_msg.exec_() == QMessageBox.Yes:
+                        msg_box.exec()
+                        if delete_msg.exec() == QMessageBox.Yes:
                             try:
                                 import ctypes
 
@@ -198,7 +198,7 @@ class DriveUpdater:
                         msg_box.setText(f"❌ Update failed!\n\n{status_message}")
                         msg_box.setStandardButtons(QMessageBox.Ok)
                         msg_box.setIcon(QMessageBox.Critical)
-                        msg_box.exec_()
+                        msg_box.exec()
                         return
             print(f"No version information found for {app_name}")
         except Exception as e:
