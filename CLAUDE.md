@@ -226,3 +226,9 @@ and break builds when violated:
 These are codified rules, not optional advice. Violating any of them produces
 a broken build that may pass smoke tests on the developer's machine but fail
 on teammate machines or after a clean rebuild.
+
+---
+
+## 13. Post-completion review
+
+This implementation will be reviewed and further improved by Codex after completion.
