@@ -62,6 +62,14 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Added
 
+- **Phase 2 governance/tooling setup.** Adds engineering workflow rules + validation infrastructure. No runtime/architecture changes; all additions are tooling and docs.
+  - `AGENTS.md` (new) — engineering workflow rules: AI verification discipline, scope control, commit discipline, verification gate, two-terminal workflow. Subordinate to CLAUDE.md per `AGENTS.md` precedence statement.
+  - `pyproject.toml` (new) — centralized `[tool.ruff]` (E/F/I/W select set; `B`/`UP` deferred to a separate refactor phase) + `[tool.mypy]` (strict surface scoped to `scripts/` + `tools/check_encoder_schema.py`; `core/` deferred to a future typing pass). Build/packaging stays on PyInstaller via `1vmo-suite.spec`; no `[project]`/`[build-system]` keys.
+  - `scripts/check_default_drift.py` (new) — verifies the 6 AppDefaults fields are the only source of literal defaults across `auto_render.py`, `cutter.py`, `merge.py`, `mixer.py`, `settings_dialog.py`, `help_dialog.py`, `updater.py`, `core/preset_translator.py`, `core/ffmpeg_runner.py`, `core/widgets.py`, `core/file_picker.py`.
+  - `scripts/check_adr_references.py` (new) — every `ADR-NNNN` mention in source, governance docs, CHANGELOG, BACKLOG resolves to an existing file in `docs/decisions/`. ADR files themselves are excluded (they legitimately reference future ADRs in supersession plans).
+  - `scripts/check_repo_consistency.py` (new) — single entry point for the manifest-style checks Adam runs by hand: 45 required files present, 9 required directories present, zero PyQt5/`.exec_()`/QRegExp residue in `*.py`, no `qt_compat*` / `qtpy*` / `qt_shim*` files, PySide6 import surface present in app entry points.
+  - `.pre-commit-config.yaml` extended — new hooks: `mypy` (strict surface), `check-adr-references`, `check-default-drift`, `check-repo-consistency`. Existing hooks (ruff, ruff-format, commitizen, markdownlint, adr-lint, check-changelog) unchanged.
+
 - **`core/url_downloader.py` — URL download module (Junaid's onboarding deliverable).** Pure-Python module (no Qt / UI imports) implementing the URL-download feature per `URL_DOWNLOADER_SPEC.md`. Wraps `yt-dlp` for video URL ingestion. Not yet wired into any app's UI by this commit — module-only landing. Paired test in `tests/smoke/test_url_downloader.py` (see backlog: ADR-0003 amendment needed to formally cover this as Exception 3 alongside `test_atomic_write_retry.py`). Adds `yt-dlp>=2025.06.09` to `requirements.txt`.
 
 - `docs/external/the-humanizer/` — external AI writing/review workflow reference (Avem1984 v2.4 SKILL package, preserved as-is). Reference-only; no runtime impact, no project-behavior change, not loaded by any app, not enforced by any rule. See `docs/external/README.md`.
