@@ -1,5 +1,4 @@
 """Shared JSON config load/save for 1vmo Suite apps."""
-
 from __future__ import annotations
 
 import json
@@ -23,7 +22,7 @@ def load(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
     if not path.exists():
         return dict(default)
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return dict(default)
@@ -43,5 +42,5 @@ def save(path: Path, data: dict[str, Any], indent: int = 4) -> None:
 
     Callers should wrap in try/except and show UI error if appropriate.
     """
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=indent, ensure_ascii=False)

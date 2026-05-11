@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 import json
 from typing import List, Dict, Any, Optional
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
@@ -24,7 +24,6 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
-    QShortcut,
     QSizePolicy,
     QTextEdit,
     QTreeWidget,
@@ -32,8 +31,8 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QSemaphore
-from PyQt5.QtGui import QIcon, QKeySequence
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QObject, QSemaphore
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from help_dialog import HelpDialog
 from updater import DriveUpdater
 import gpu_detect
@@ -65,11 +64,11 @@ def resource_path(relative_path):
 
 
 class RenderWorker(QObject):
-    progress_updated = pyqtSignal(int, int)
-    status_updated = pyqtSignal(int, str)
-    output_updated = pyqtSignal(str)
-    render_completed = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
+    progress_updated = Signal(int, int)
+    status_updated = Signal(int, str)
+    output_updated = Signal(str)
+    render_completed = Signal(str)
+    error_occurred = Signal(str)
 
     def __init__(
         self,
@@ -108,6 +107,10 @@ class RenderWorker(QObject):
 
     def _has_acodec(self, params):
         return any(p in ("-c:a", "-acodec") for p in params)
+
+    def _has_threads(self, params):
+        # Phase A P6: only inject -threads 0 if the preset itself didn't pin it.
+        return "-threads" in params
 
     def process(self):
         current_input = self.video_path
@@ -192,6 +195,15 @@ class RenderWorker(QObject):
                             command.extend(["-c:v", self.gpu_codec])
                         else:
                             command.extend(["-c:v", "libx264"])
+                    # Phase A P6: hint x264 to use all logical cores when on
+                    # the CPU path and the preset hasn't pinned -threads. NVENC
+                    # path is left alone (NVENC parallelism is governed by
+                    # async_depth + the gpu_semaphore, not -threads).
+                    if (
+                        not self.gpu_enabled
+                        and not self._has_threads(encoder_params)
+                    ):
+                        command.extend(["-threads", "0"])
                     if not self._has_acodec(encoder_params):
                         command.extend(["-c:a", "aac"])
                 command.extend(["-y", str(Path(output_file))])
@@ -240,6 +252,10 @@ class RenderWorker(QObject):
                     ] + encoder_params_original
                     if not self._has_vcodec(encoder_params_original):
                         cpu_command.extend(["-c:v", "libx264"])
+                    # Phase A P6: same -threads 0 hint for the CPU fallback
+                    # path after a GPU encode failure.
+                    if not self._has_threads(encoder_params_original):
+                        cpu_command.extend(["-threads", "0"])
                     if not self._has_acodec(encoder_params_original):
                         cpu_command.extend(["-c:a", "aac"])
                     cpu_command.extend(["-y", str(Path(output_file))])
@@ -369,11 +385,19 @@ class VideoRendererTool(QMainWindow):
         self.num_threads = self.config.get("num_threads", 3)
         self.output_collision = self.config.get("output_collision", "rename")
         self.gpu_error_action = self.config.get("gpu_error_action", "retry_cpu")
-        self.gpu_enabled = self.config.get("gpu_enabled", False)
+        # Phase A defaults (post-2d performance tuning):
+        #   gpu_enabled  -> default True when NVENC is detected, else False.
+        #     User-saved gpu_enabled (True or False) still wins via config.get.
+        #   gpu_preset   -> p4 -> p5 (best NVENC speed/quality knee per ADR-0008 fix-2).
+        #   gpu_max_concurrent -> 2 -> 3 (consumer NVIDIA cap; falls back to CPU
+        #     gracefully on locked drivers via existing gpu_error_action="retry_cpu").
+        self.gpu_enabled = self.config.get(
+            "gpu_enabled", bool(getattr(self.gpu_caps, "nvenc_available", False))
+        )
         self.gpu_codec = self.config.get("gpu_codec", "h264_nvenc")
-        self.gpu_preset = self.config.get("gpu_preset", "p4")
+        self.gpu_preset = self.config.get("gpu_preset", "p5")
         self.gpu_max_quality_mode = self.config.get("gpu_max_quality_mode", False)
-        self.gpu_max_concurrent = self.config.get("gpu_max_concurrent", 2)
+        self.gpu_max_concurrent = self.config.get("gpu_max_concurrent", 3)
         self._gpu_semaphore = QSemaphore(self.gpu_max_concurrent)
         self.encoder_options = self.load_encoder_options()
         self.setup_ui()
@@ -851,7 +875,7 @@ class VideoRendererTool(QMainWindow):
         dlg.setIcon(QMessageBox.Information)
         dlg.setText(report)
         dlg.setStyleSheet("QLabel { font-family: Consolas, monospace; }")
-        dlg.exec_()
+        dlg.exec()
 
     def load_config(self) -> Dict[str, Any]:
         """Tải cấu hình từ config_video_renderer.json nếu tồn tại."""
@@ -870,10 +894,10 @@ class VideoRendererTool(QMainWindow):
 
     def open_settings(self) -> None:
         """Open the Settings dialog modally and apply changes on OK."""
-        from PyQt5.QtWidgets import QDialog
+        from PySide6.QtWidgets import QDialog
 
         dlg = SettingsDialog(self, Path(self.CONFIG_FILE))
-        if dlg.exec_() == QDialog.Accepted:
+        if dlg.exec() == QDialog.Accepted:
             self._reload_config_settings()
 
     def _reload_config_settings(self) -> None:
@@ -1835,7 +1859,7 @@ class VideoRendererTool(QMainWindow):
     def add_encoder(self) -> None:
         """Thêm encoder mới"""
         dialog = EncoderDialog(self)
-        if dialog.exec_() == QDialog.Accepted and dialog.result:
+        if dialog.exec() == QDialog.Accepted and dialog.result:
             item = QTreeWidgetItem(self.tree_encoders)
             item.setText(0, str(len(self.encoder_options) + 1))
             name_parts = dialog.result["name"].split("|", 1)
@@ -1894,7 +1918,7 @@ class VideoRendererTool(QMainWindow):
             "params": current_params,
         }
         dialog = EncoderDialog(self, "Edit Encoder", initial_values)
-        if dialog.exec_() == QDialog.Accepted and dialog.result:
+        if dialog.exec() == QDialog.Accepted and dialog.result:
             name_parts = dialog.result["name"].split("|", 1)
             group = name_parts[0] if len(name_parts) > 1 else ""
             name = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
@@ -2052,7 +2076,7 @@ class VideoRendererTool(QMainWindow):
             os.path.dirname(os.path.abspath(__file__)), "assets", "README AutoRender.md"
         )
         dialog = HelpDialog(self, "Help - 1vmo Auto Render", readme_path)
-        dialog.exec_()
+        dialog.exec()
 
 
 class EncoderDialog(QDialog):
@@ -2108,4 +2132,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VideoRendererTool()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

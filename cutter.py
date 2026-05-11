@@ -17,7 +17,7 @@ from typing import Tuple
 import tempfile
 import shutil
 import multiprocessing
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
@@ -32,17 +32,17 @@ from PyQt5.QtWidgets import (
     QMessageBox,
     QSizePolicy,
 )
-from PyQt5.QtCore import (
+from PySide6.QtCore import (
     Qt,
     QThreadPool,
     QRunnable,
-    pyqtSignal,
-    pyqtSlot,
+    Signal,
+    Slot,
     QObject,
     QThread,
     QTimer,
 )
-from PyQt5.QtGui import QIcon
+from PySide6.QtGui import QIcon
 from updater import DriveUpdater
 from help_dialog import HelpDialog
 from core import config as core_config
@@ -75,11 +75,11 @@ COMMON_STYLE = '\n    QMainWindow { background-color: #f8f9fa; }\n    QFrame#top
 
 
 class WorkerSignals(QObject):
-    progress_updated = pyqtSignal(int, int)
-    status_updated = pyqtSignal(int, str)
-    output_updated = pyqtSignal(str)
-    cut_completed = pyqtSignal(str)
-    error_occurred = pyqtSignal(str)
+    progress_updated = Signal(int, int)
+    status_updated = Signal(int, str)
+    output_updated = Signal(str)
+    cut_completed = Signal(str)
+    error_occurred = Signal(str)
 
 
 def sanitize_filename(filename: str) -> str:
@@ -313,9 +313,9 @@ class CutWorker(QRunnable):
 
 
 class CutCoordinator(QObject):
-    video_started = pyqtSignal(int, str, str)
-    finished = pyqtSignal()
-    error_occurred = pyqtSignal(str)
+    video_started = Signal(int, str, str)
+    finished = Signal()
+    error_occurred = Signal(str)
 
     def __init__(
         self,
@@ -345,7 +345,7 @@ class CutCoordinator(QObject):
         self._on_completed = on_completed
         self._on_error = on_error
 
-    @pyqtSlot()
+    @Slot()
     def run(self):
         try:
             for i, video in enumerate(self.videos):
@@ -1322,7 +1322,7 @@ class VideoCutterTool(QMainWindow):
             os.path.dirname(os.path.abspath(__file__)), "assets", "README Cutter.md"
         )
         dialog = HelpDialog(self, "Help - 1vmo Cutter", readme_path)
-        dialog.exec_()
+        dialog.exec()
 
     def toggle_boost(self):
         self.is_boost_mode = not self.is_boost_mode
@@ -1389,4 +1389,4 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = VideoCutterTool()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

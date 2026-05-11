@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog,
     QTabWidget,
     QWidget,
