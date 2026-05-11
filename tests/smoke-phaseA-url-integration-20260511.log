@@ -1,0 +1,140 @@
+=== Phase A URL integration — manual smoke test log ===
+Date:        2026-05-11
+Branch:      phase2d-pyside6-migration
+Commits:     (5 small commits: dialog UI, worker + queue wiring, progress
+              dialog + cancel, this smoke log template, CHANGELOG entry)
+Tester:      Junaid
+Platform:    macOS, Python 3.14 venv (.venv/), PySide6==6.9.3
+Surface:     auto_render.py only — cutter / merge / mixer untouched.
+
+PURPOSE
+   Confirm that Phase A integration:
+     1. preserves the existing local-file render flow byte-for-byte,
+     2. adds a working URL input path that ends up in the same render
+        pipeline as a locally-picked file,
+     3. handles cancel cleanly,
+     4. shows a truthful summary of successes/failures.
+
+INSTRUCTIONS
+   Fill in the OUTCOME column with PASS / FAIL / NOT_TESTED. If any
+   step FAILs, paste the error or describe what went wrong inline.
+   Save the completed file. (ADR-0001 keeps smoke logs immutable
+   once committed.)
+
+----------------------------------------------------------------------
+T1. App launches cleanly
+----------------------------------------------------------------------
+    source .venv/bin/activate
+    python auto_render.py
+    Verify: window opens, no traceback in terminal, no error popup.
+    OUTCOME:   [   ]   notes:
+
+----------------------------------------------------------------------
+T2. EXISTING local-file flow still works (regression gate)
+----------------------------------------------------------------------
+    Click "📥 Select" -> pick a local .mp4
+    Verify: file appears in tree with duration/resolution columns.
+    Click "🗑️ Delete" on one row -> verify it's removed.
+    Re-add the same file.
+    Pick an encoder preset (any libx264 entry).
+    Pick an output directory.
+    Click "▶️ Start" -> wait for render.
+    Verify: output .mp4 is in the chosen folder and PLAYS in a media player.
+    OUTCOME:   [   ]   notes:
+
+----------------------------------------------------------------------
+T3. URL dialog opens, validates input gating
+----------------------------------------------------------------------
+    Click "🌐 Add URL".
+    Verify: dialog opens with empty text area + quality combo (default
+            "best") + subtitles checkbox (default off) + concurrent
+            spin (default 3).
+    Verify: OK button is DISABLED until at least one non-empty line
+            is typed.
+    Type a single URL. Verify: OK becomes enabled.
+    Click Cancel. Verify: dialog closes, no other UI side-effects.
+    OUTCOME:   [   ]   notes:
+
+----------------------------------------------------------------------
+T4. URL download (single short URL, "best" quality, no subtitles)
+----------------------------------------------------------------------
+    Click "🌐 Add URL".
+    Paste one short, public, non-age-gated video URL (a Creative-
+    Commons clip you control, or a known short public YouTube video).
+    Quality = best, subtitles = off, max_concurrent = 3.
+    Click OK.
+    Verify: progress dialog appears with "Downloading 1/1: ... NN%".
+    Verify: output panel logs "[URL 1] NN.N%  https://..." lines.
+    Wait for completion.
+    Verify: summary modal says "Downloaded 1/1 URL(s) successfully."
+    Verify: downloaded file is in ~/.../url_downloads/ (platformdirs
+            default; on Mac that's ~/Library/Application Support/1vmo/
+            or similar — see core/user_data.py).
+    Verify: file now appears in the tree_videos list with duration +
+            resolution columns populated.
+    OUTCOME:   [   ]   notes:
+
+----------------------------------------------------------------------
+T5. Downloaded file renders successfully through existing pipeline
+----------------------------------------------------------------------
+    With the downloaded file selected, pick an encoder preset.
+    Click "▶️ Start".
+    Verify: render runs identically to a local-file render.
+    Verify: output .mp4 PLAYS in a media player.
+    OUTCOME:   [   ]   notes:
+
+----------------------------------------------------------------------
+T6. URL download — cancel mid-batch
+----------------------------------------------------------------------
+    Click "🌐 Add URL".
+    Paste 3 URLs (any mix).
+    Click OK to start the batch.
+    Within a few seconds, click "Cancel" on the progress dialog.
+    Verify: progress dialog closes within ~10 seconds.
+    Verify: summary modal lists which URL(s) succeeded vs which were
+            cancelled (error_type = "cancelled").
+    Verify: any partial in-flight files are left in url_downloads/
+            (yt-dlp .part files are acceptable; not promoted into the
+             render queue because .success=False for cancelled URLs).
+    OUTCOME:   [   ]   notes:
+
+----------------------------------------------------------------------
+T7. URL download — invalid URL handling
+----------------------------------------------------------------------
+    Click "🌐 Add URL".
+    Paste an obviously-invalid URL like "not a url" or
+    "https://www.youtube.com/playlist?list=...".
+    Click OK.
+    Verify: batch ends, summary lists the URL with error_type
+            "invalid_url" (or similar).
+    Verify: no crash; the rest of the UI still works.
+    OUTCOME:   [   ]   notes:
+
+----------------------------------------------------------------------
+T8. cutter / merge / mixer apps unchanged (smoke launch only)
+----------------------------------------------------------------------
+    For each of:
+        python cutter.py
+        python merge.py
+        python mixer.py
+    Verify: window opens cleanly. Close.
+    These apps are not touched by Phase A; this is a regression gate
+    in case the import graph picked up anything unexpected.
+    OUTCOME:   [   ]   notes:
+
+----------------------------------------------------------------------
+SUMMARY
+----------------------------------------------------------------------
+   T1 app launches:            [   ]
+   T2 local-file regression:   [   ]
+   T3 dialog opens + gates:    [   ]
+   T4 URL download succeeds:   [   ]
+   T5 downloaded file renders: [   ]
+   T6 cancel mid-batch:        [   ]
+   T7 invalid URL handled:     [   ]
+   T8 cutter/merge/mixer:      [   ]
+
+   Phase A acceptance:  ALL PASS = ship.  Any FAIL = file a B-NNN ticket
+   in BACKLOG.md with reproduction, do NOT silently work around.
+
+=== END SMOKE LOG TEMPLATE ===

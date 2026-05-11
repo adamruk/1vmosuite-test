@@ -12,19 +12,24 @@ import json
 from typing import List, Dict, Any, Optional
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QRadioButton,
     QSizePolicy,
+    QSpinBox,
     QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
@@ -49,7 +54,9 @@ from core import ffmpeg_runner as core_ffmpeg_runner
 from core import naming_utils
 from settings_dialog import SettingsDialog
 from core import preset_translator
+from core import url_downloader as core_url_downloader
 from core.user_data import resolve_or_die, migrate_legacy_configs
+import threading
 
 SEQUENTIAL_SLOT_COUNT = 8
 
@@ -289,6 +296,162 @@ class RenderWorker(QObject):
             self.progress_updated.emit(self.thread_index, 0)
 
 
+class URLInputDialog(QDialog):
+    """Modal dialog for batch URL input.
+
+    Collects one or more video URLs plus the download options that map
+    directly onto `core.url_downloader.download_videos`. Returns the user
+    selection via the `values()` accessor when the dialog is accepted.
+    Per the Phase A design note, all option defaults match the underlying
+    `download_videos` parameter defaults so behavior is identical to a
+    bare call.
+    """
+
+    _QUALITY_CHOICES = ("best", "1080p", "720p", "480p", "360p", "smallest")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Video URLs")
+        self.setModal(True)
+        self.setMinimumWidth(520)
+
+        outer = QVBoxLayout(self)
+
+        hint = QLabel(
+            "Paste one URL per line. YouTube, Vimeo, and most yt-dlp-supported sites work."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #555; font-weight: normal;")
+        outer.addWidget(hint)
+
+        self._urls_edit = QPlainTextEdit()
+        self._urls_edit.setPlaceholderText(
+            "https://www.youtube.com/watch?v=...\nhttps://..."
+        )
+        self._urls_edit.setMinimumHeight(120)
+        outer.addWidget(self._urls_edit)
+
+        form = QFormLayout()
+        self._quality_combo = QComboBox()
+        for q in self._QUALITY_CHOICES:
+            self._quality_combo.addItem(q, q)
+        self._quality_combo.setCurrentText("best")
+        form.addRow("Quality:", self._quality_combo)
+
+        self._subs_check = QCheckBox("Also download subtitles (.srt)")
+        self._subs_check.setChecked(False)
+        form.addRow("", self._subs_check)
+
+        self._concurrent_spin = QSpinBox()
+        self._concurrent_spin.setRange(1, 6)
+        self._concurrent_spin.setValue(3)
+        form.addRow("Max concurrent downloads:", self._concurrent_spin)
+
+        outer.addLayout(form)
+
+        self._buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self._buttons.accepted.connect(self.accept)
+        self._buttons.rejected.connect(self.reject)
+        # Gate OK on having at least one non-empty line.
+        self._buttons.button(QDialogButtonBox.Ok).setEnabled(False)
+        self._urls_edit.textChanged.connect(self._update_ok_state)
+        outer.addWidget(self._buttons)
+
+    def _update_ok_state(self) -> None:
+        has_any = any(
+            line.strip() for line in self._urls_edit.toPlainText().splitlines()
+        )
+        self._buttons.button(QDialogButtonBox.Ok).setEnabled(has_any)
+
+    def values(self) -> dict:
+        """Return the dialog selections as a plain dict.
+
+        Caller is responsible for passing these to download_videos. Per-URL
+        syntactic validation happens inside core.url_downloader, not here.
+        """
+        urls = [
+            line.strip()
+            for line in self._urls_edit.toPlainText().splitlines()
+            if line.strip()
+        ]
+        return {
+            "urls": urls,
+            "quality": self._quality_combo.currentData() or "best",
+            "download_subtitles": self._subs_check.isChecked(),
+            "max_concurrent": int(self._concurrent_spin.value()),
+        }
+
+
+class URLDownloadWorker(QObject):
+    """QThread-friendly worker around `core.url_downloader.download_videos`.
+
+    Mirrors the moveToThread pattern used by cutter/merge/mixer coordinators
+    elsewhere in the suite. Designed so all widget state updates happen on
+    the main thread via signals.
+
+    Signals:
+        progress(idx: int, url: str, pct: float, status: str)
+            Per-URL progress callback forwarded from download_videos.
+            `status` is "downloading" or "finished".
+        finished(results: list)
+            Emitted exactly once when the batch ends. Payload is the list
+            of `DownloadResult` from download_videos, preserving input order.
+        error_message(text: str)
+            Emitted on hard failures (e.g. ValueError from argument
+            validation) that never produce a results list. Mutually
+            exclusive with finished.
+
+    Cancel:
+        cancel() sets the threading.Event handed to download_videos. The
+        batch ends with `cancelled` error_type for in-flight URLs.
+    """
+
+    progress = Signal(int, str, float, str)
+    finished = Signal(list)
+    error_message = Signal(str)
+
+    def __init__(
+        self,
+        urls: list,
+        work_dir: Path,
+        quality: str,
+        download_subtitles: bool,
+        max_concurrent: int,
+    ):
+        super().__init__()
+        self._urls = list(urls)
+        self._work_dir = Path(work_dir)
+        self._quality = quality
+        self._download_subtitles = bool(download_subtitles)
+        self._max_concurrent = int(max_concurrent)
+        self._cancel_event = threading.Event()
+
+    @Slot()
+    def run(self) -> None:
+        """Execute the batch download. Always emits finished or error_message."""
+        try:
+            results = core_url_downloader.download_videos(
+                self._urls,
+                self._work_dir,
+                quality=self._quality,
+                download_subtitles=self._download_subtitles,
+                max_concurrent=self._max_concurrent,
+                progress_callback=lambda i, u, p, s: self.progress.emit(i, u, p, s),
+                cancel_event=self._cancel_event,
+            )
+            self.finished.emit(results)
+        except (ValueError, FileNotFoundError, PermissionError) as exc:
+            # download_videos raises only on argument-validation failure.
+            self.error_message.emit(f"URL download failed: {exc}")
+        except Exception as exc:
+            # Defensive: anything else is unexpected; report and continue.
+            self.error_message.emit(f"URL download crashed: {exc}")
+
+    def cancel(self) -> None:
+        """Set the cancel event so the batch winds down."""
+        self._cancel_event.set()
+
+
 class VideoRendererTool(QMainWindow):
     def __init__(self, app_name: str = "1vmo Auto Render"):
         super().__init__()
@@ -373,7 +536,9 @@ class VideoRendererTool(QMainWindow):
         self.gpu_codec = self.config.get("gpu_codec", _d.gpu_codec)
         self.gpu_preset = self.config.get("gpu_preset", _d.gpu_preset)
         self.gpu_max_quality_mode = self.config.get("gpu_max_quality_mode", False)
-        self.gpu_max_concurrent = self.config.get("gpu_max_concurrent", _d.gpu_max_concurrent)
+        self.gpu_max_concurrent = self.config.get(
+            "gpu_max_concurrent", _d.gpu_max_concurrent
+        )
         self._gpu_semaphore = QSemaphore(self.gpu_max_concurrent)
         self.encoder_options = self.load_encoder_options()
         self.setup_ui()
@@ -464,6 +629,13 @@ class VideoRendererTool(QMainWindow):
         )
         select_btn.setToolTip("Add video files (Ctrl+O)")
         select_btn.setObjectName("select_btn")
+        add_url_btn = self.create_video_button(
+            "🌐 Add URL", self.add_url, "#e8f5e9", "#2e7d32", "#a5d6a7"
+        )
+        add_url_btn.setToolTip(
+            "Download videos from URLs (YouTube, Vimeo, etc.) and add them to the queue"
+        )
+        add_url_btn.setObjectName("add_url_btn")
         delete_btn = self.create_video_button(
             "🗑️ Delete", self.delete_videos, "#ffcdd2", "#c62828", "#ef9a9a", delete=True
         )
@@ -471,6 +643,7 @@ class VideoRendererTool(QMainWindow):
         delete_btn.setEnabled(False)
         self.btn_delete = delete_btn
         video_controls.addWidget(select_btn)
+        video_controls.addWidget(add_url_btn)
         video_controls.addWidget(delete_btn)
         video_controls.addStretch()
         settings_btn = self.create_video_button(
@@ -1061,6 +1234,149 @@ class VideoRendererTool(QMainWindow):
         """Esc shortcut handler - only fires if cancel button is enabled (per Phase 1 contract)."""
         if self.btn_cancel.isEnabled():
             self.cancel_render()
+
+    def add_url(self):
+        """Open the URL input dialog and download the selected URLs.
+
+        On success, downloaded file paths are appended to `self.videos` and
+        `update_video_list()` is called — making them indistinguishable from
+        locally-picked files. Failures are summarized in a follow-up modal.
+
+        Storage location: `USER_DATA_DIR / "url_downloads/"` (auto-created).
+        Threading: download runs on a QThread; UI is unblocked.
+        """
+        try:
+            dlg = URLInputDialog(self)
+            if dlg.exec() != QDialog.Accepted:
+                return
+            values = dlg.values()
+            if not values["urls"]:
+                return
+
+            work_dir = Path(self.USER_DATA_DIR) / "url_downloads"
+            try:
+                work_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                QMessageBox.critical(
+                    self,
+                    "URL download",
+                    f"Cannot create download folder {work_dir}: {exc}",
+                )
+                return
+
+            # Spawn worker on a QThread (matches RenderWorker pattern used
+            # elsewhere in this app).
+            self._url_thread = QThread()
+            self._url_worker = URLDownloadWorker(
+                urls=values["urls"],
+                work_dir=work_dir,
+                quality=values["quality"],
+                download_subtitles=values["download_subtitles"],
+                max_concurrent=values["max_concurrent"],
+            )
+            self._url_worker.moveToThread(self._url_thread)
+            self._url_thread.started.connect(self._url_worker.run)
+            self._url_worker.progress.connect(self._on_url_progress)
+            self._url_worker.finished.connect(self._on_url_finished)
+            self._url_worker.error_message.connect(self._on_url_error)
+            self._url_worker.finished.connect(self._url_thread.quit)
+            self._url_worker.error_message.connect(self._url_thread.quit)
+            self._url_thread.finished.connect(self._url_worker.deleteLater)
+            self._url_thread.finished.connect(self._url_thread.deleteLater)
+
+            # Non-modal progress dialog with Cancel. The internal worker
+            # state advances independently; we surface a coarse bar showing
+            # "completed-URL count / total" and the last per-URL line in
+            # the label. Cancel sets the worker's cancel_event.
+            n_urls = len(values["urls"])
+            self._url_progress = QProgressDialog(
+                "Starting downloads...", "Cancel", 0, n_urls, self
+            )
+            self._url_progress.setWindowTitle("Downloading URLs")
+            self._url_progress.setWindowModality(Qt.NonModal)
+            self._url_progress.setMinimumDuration(0)
+            self._url_progress.setValue(0)
+            self._url_progress.canceled.connect(self._url_worker.cancel)
+            # Internal completion tally (since the worker's `progress`
+            # signal reports per-URL percentages, not batch position).
+            self._url_finished_count = 0
+            self._url_total_count = n_urls
+
+            self.update_ffmpeg_output(
+                f"\n[URL] Starting batch of {n_urls} URL(s) "
+                f"(quality={values['quality']}, "
+                f"subs={'yes' if values['download_subtitles'] else 'no'}, "
+                f"max_concurrent={values['max_concurrent']}) -> {work_dir}\n"
+            )
+            self._url_thread.start()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Cannot open URL dialog: {str(e)}")
+
+    @Slot(int, str, float, str)
+    def _on_url_progress(self, idx: int, url: str, pct: float, status: str) -> None:
+        """Per-URL progress callback from URLDownloadWorker (main thread)."""
+        if status == "downloading":
+            self.update_ffmpeg_output(f"[URL {idx + 1}] {pct:5.1f}%  {url}\n")
+            # Update the dialog label with the in-flight URL + percent.
+            if hasattr(self, "_url_progress") and self._url_progress is not None:
+                shortened = (url[:60] + "…") if len(url) > 60 else url
+                self._url_progress.setLabelText(
+                    f"Downloading {idx + 1}/{self._url_total_count}: "
+                    f"{shortened}  ({pct:.0f}%)"
+                )
+        elif status == "finished":
+            self.update_ffmpeg_output(f"[URL {idx + 1}] done    {url}\n")
+            if hasattr(self, "_url_progress") and self._url_progress is not None:
+                self._url_finished_count += 1
+                self._url_progress.setValue(self._url_finished_count)
+
+    @Slot(list)
+    def _on_url_finished(self, results: list) -> None:
+        """Batch complete: append successful paths to self.videos."""
+        # Close the progress dialog before showing the summary modal.
+        if hasattr(self, "_url_progress") and self._url_progress is not None:
+            self._url_progress.setValue(self._url_total_count)
+            self._url_progress.close()
+            self._url_progress = None
+
+        succeeded = [r for r in results if r.success]
+        failed = [r for r in results if not r.success]
+
+        new_paths = []
+        for r in succeeded:
+            if r.path is None:
+                continue
+            p = str(r.path)
+            if p not in self.videos:
+                new_paths.append(p)
+
+        if new_paths:
+            self.videos.extend(new_paths)
+            self.update_video_list()
+            self.btn_delete.setEnabled(True)
+            self.update_ffmpeg_output(
+                f"\n[URL] Added {len(new_paths)} downloaded video(s) to the queue.\n"
+            )
+
+        # Build a short summary modal.
+        summary_lines = [
+            f"Downloaded {len(succeeded)}/{len(results)} URL(s) successfully.",
+        ]
+        if failed:
+            summary_lines.append("")
+            summary_lines.append("Failed URLs:")
+            for r in failed:
+                summary_lines.append(f"  - {r.url}  ({r.error_type or 'unknown'})")
+        QMessageBox.information(self, "URL download", "\n".join(summary_lines))
+
+    @Slot(str)
+    def _on_url_error(self, message: str) -> None:
+        """Hard failure during batch (argument validation, etc.)."""
+        # Close the progress dialog so the user can see the modal cleanly.
+        if hasattr(self, "_url_progress") and self._url_progress is not None:
+            self._url_progress.close()
+            self._url_progress = None
+        QMessageBox.critical(self, "URL download", message)
 
     def select_videos(self):
         """Chọn nhiều video từ thư mục đầu vào."""

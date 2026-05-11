@@ -62,6 +62,16 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Added
 
+- **Phase A — URL download integration into `auto_render.py`.** Wires the existing `core/url_downloader.py` module into the AutoRender app per the approved Phase A design note. Surface additions to `auto_render.py` only (cutter/merge/mixer untouched):
+  - New `URLInputDialog` modal: paste-multiple-URLs text area + quality combo (best/1080p/720p/480p/360p/smallest, default "best") + subtitles checkbox (default off) + max-concurrent spinbox (1-6, default 3). OK button gated on at least one non-empty line.
+  - New `URLDownloadWorker` QObject (moveToThread pattern matching the existing RenderWorker / coordinator workers). Wraps `core_url_downloader.download_videos` and forwards per-URL progress, batch completion, and hard-failure as Qt signals. `cancel()` sets a `threading.Event` consumed by the underlying batch.
+  - New "🌐 Add URL" button between "📥 Select" and "🗑️ Delete" in the video controls row. Opens the dialog; on accept, spawns the worker on a QThread.
+  - Downloaded files land in `USER_DATA_DIR/url_downloads/` (auto-created on first use). Successful download paths are appended to `self.videos` — the existing local-file render pipeline consumes them identically. No queue redesign, no `RenderWorker` signature change.
+  - Non-modal `QProgressDialog` while batching, with a Cancel button wired to `URLDownloadWorker.cancel()`. Per-URL progress + completion lines stream into the existing ffmpeg output panel.
+  - Summary modal on batch completion: "Downloaded N/M URL(s) successfully" plus list of failed URLs with `error_type` (invalid_url / unsupported_site / auth_required / region_locked / rate_limited / network_error / postprocess_error / cancelled).
+  - Manual-test smoke log template at `tests/smoke-phaseA-url-integration-20260511.log` (8 test cases per ADR-0001 convention).
+  - No new runtime dependencies (yt-dlp already pinned with the url_downloader module landing). No defaults changed. No CLAUDE.md / ADR edits. `auto_render.py` ruff-format clean; project-wide ruff-check count unchanged vs HEAD.
+
 - **Phase 2 governance/tooling setup.** Adds engineering workflow rules + validation infrastructure. No runtime/architecture changes; all additions are tooling and docs.
   - `AGENTS.md` (new) — engineering workflow rules: AI verification discipline, scope control, commit discipline, verification gate, two-terminal workflow. Subordinate to CLAUDE.md per `AGENTS.md` precedence statement.
   - `pyproject.toml` (new) — centralized `[tool.ruff]` (E/F/I/W select set; `B`/`UP` deferred to a separate refactor phase) + `[tool.mypy]` (strict surface scoped to `scripts/` + `tools/check_encoder_schema.py`; `core/` deferred to a future typing pass). Build/packaging stays on PyInstaller via `1vmo-suite.spec`; no `[project]`/`[build-system]` keys.
