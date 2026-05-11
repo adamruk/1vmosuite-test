@@ -32,6 +32,18 @@ repos:
       - id: markdownlint
         args: ["--config", ".markdownlint.yaml"]
 
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.20.2
+    hooks:
+      - id: mypy
+        # mypy reads its config from pyproject.toml [tool.mypy]
+        # (strict surface: scripts/ + tools/check_encoder_schema.py).
+        # Cache dir override avoids sandbox virtiofs I/O errors during
+        # local pre-commit runs; harmless on developer machines.
+        args: ["--cache-dir=/tmp/mypy_cache"]
+        files: ^(scripts/|tools/check_encoder_schema\.py$)
+        additional_dependencies: ["pydantic>=2.0,<3"]
+
   - repo: local
     hooks:
       - id: adr-lint
@@ -44,5 +56,23 @@ repos:
         entry: python scripts/check_changelog.py
         language: system
         stages: [commit-msg]
+        pass_filenames: false
+        always_run: true
+      - id: check-adr-references
+        name: ADR references resolve to existing files
+        entry: python scripts/check_adr_references.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: check-default-drift
+        name: AppDefaults is the single source of truth for the 6 defaults
+        entry: python scripts/check_default_drift.py
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: check-repo-consistency
+        name: Required files / dirs / PyQt5 + qt_compat absence
+        entry: python scripts/check_repo_consistency.py
+        language: system
         pass_filenames: false
         always_run: true

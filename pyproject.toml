@@ -1,0 +1,116 @@
+# pyproject.toml — tooling configuration only.
+#
+# Phase 2 (tooling & governance setup) introduces this file as the single
+# source for ruff + mypy configuration. The project does NOT build via
+# pip / poetry / hatch from this file; build/packaging stays on
+# PyInstaller via `1vmo-suite.spec` (see CLAUDE.md §12). Therefore
+# `[project]` / `[build-system]` are intentionally omitted.
+
+# ----------------------------------------------------------------------
+# Ruff — formatter + linter (already wired into .pre-commit-config.yaml).
+# Centralizing config here so editors and CI pick up identical rules.
+# ----------------------------------------------------------------------
+
+[tool.ruff]
+# Target the oldest interpreter in production use (per CLAUDE.md §0 / Mac handoff).
+target-version = "py311"
+# line-length defaults to ruff's 88. Phase 1 already ran `ruff format` on
+# core/ at this default — overriding it would cause format drift. Keep
+# default until a separate ADR justifies a wider line.
+extend-exclude = [
+  ".venv",
+  "venv",
+  "build",
+  "dist",
+  "__pycache__",
+  ".pytest_cache",
+  "docs/external",      # third-party reference content, do not lint
+  "assets",             # JSON / images, not Python
+]
+
+[tool.ruff.lint]
+# Phase 2 conservative rule set. Goal: surface real bugs without inducing
+# a sweeping refactor. `UP` (pyupgrade) and `B` (bugbear) are deliberately
+# OFF for now — they each fire 50-100+ times against legacy decompiled
+# code (Tuple -> tuple migrations, zip strict=, etc.) which is out of
+# scope for the governance-only Phase 2. Add them in a follow-up phase
+# with an explicit codemod.
+select = [
+  "E",       # pycodestyle errors
+  "F",       # pyflakes (real bugs: unused imports, undefined names)
+  "I",       # import sorting
+  "W",       # pycodestyle warnings
+]
+ignore = [
+  # E501 line-length is enforced by `ruff format`'s wrapping, not by lint.
+  "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and tools may legitimately use longer / less strict patterns.
+"tools/*.py" = ["E402"]  # path manipulation before imports is intentional
+"tests/**/*.py" = ["E402"]
+# Generated / migrated files keep relaxed rules during Phase 2.
+"auto_render.py" = ["B007"]  # unused loop variable in legacy decompiled code
+
+[tool.ruff.format]
+# Match the style ruff already applied to core/ in Phase 1.
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ----------------------------------------------------------------------
+# Mypy — strict-but-realistic typing.
+#
+# Phase 2 strict-checked surface (must exit 0):
+#   scripts/*              (small, well-typed)
+#   tools/check_encoder_schema.py  (Phase 2c smoke entrypoint)
+#
+# Deferred to a separate typing-cleanup phase:
+#   core/*                 — has ~10 untyped surface points + a handful
+#                            of Windows-only subprocess attributes that
+#                            mypy on Linux can't resolve. Fixing them
+#                            touches runtime code, which Phase 2 forbids.
+#   four app entry points  — large untyped surface inherited from the
+#                            pylingual decompile.
+#
+# This keeps the rule strict ("no untyped defs") where the surface is
+# ready, and excludes (not relaxed) the surface that isn't ready, so
+# the rule stays honest. Adding new modules into the strict set should
+# be the default for any new code Junaid / contributors write.
+# ----------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.11"
+files = [
+  "scripts",
+  "tools/check_encoder_schema.py",
+]
+exclude = [
+  "\\.venv/",
+  "venv/",
+  "build/",
+  "dist/",
+  "docs/external/",
+]
+# When running mypy with `--cache-dir=/tmp/mypy_cache`, the sandbox does
+# not error on cache writes. Local Mac runs use the default cache dir.
+
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+strict_equality = true
+
+# Third-party libs without stubs (pynvml, yt_dlp, Qt) silenced.
+ignore_missing_imports = true
+
+# PySide6 stubs are partial — skip transitive follow.
+[[tool.mypy.overrides]]
+module = ["PySide6.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
