@@ -12,6 +12,8 @@ ffmpeg invocation. encoder_params_original is preserved by the caller for CPU
 fallback per ADR-0007 D5.
 """
 
+from core.config import APP_DEFAULTS
+
 # Legacy preset name -> p-family mapping per ADR-0007 D2.
 # Phase 1 used this same mapping for translator output; preserved verbatim.
 _PRESET_MAP = {
@@ -59,8 +61,8 @@ NVENC_MULTIPASS_DEFAULT = "2"
 
 def translate_to_nvenc(
     params: list[str],
-    codec: str = "h264_nvenc",
-    preset: str = "p4",
+    codec: str = APP_DEFAULTS.gpu_codec,
+    preset: str = APP_DEFAULTS.gpu_preset,
     max_quality_mode: bool = False,
 ) -> list[str]:
     """Translate CPU encoder params to NVENC equivalents.

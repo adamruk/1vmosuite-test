@@ -78,11 +78,11 @@ class RenderWorker(QObject):
         ffmpeg_path: str,
         output_dir: str,
         encoder_params_list: List[List[str]],
-        output_collision: str = "rename",
-        gpu_error_action: str = "retry_cpu",
-        gpu_enabled: bool = False,
-        gpu_codec: str = "h264_nvenc",
-        gpu_preset: str = "p4",
+        output_collision: str = core_config.APP_DEFAULTS.output_collision,
+        gpu_error_action: str = core_config.APP_DEFAULTS.gpu_error_action,
+        gpu_enabled: bool = core_config.APP_DEFAULTS.gpu_enabled,
+        gpu_codec: str = core_config.APP_DEFAULTS.gpu_codec,
+        gpu_preset: str = core_config.APP_DEFAULTS.gpu_preset,
         gpu_max_quality_mode: bool = False,
         gpu_semaphore=None,
     ):
@@ -107,10 +107,6 @@ class RenderWorker(QObject):
 
     def _has_acodec(self, params):
         return any(p in ("-c:a", "-acodec") for p in params)
-
-    def _has_threads(self, params):
-        # Phase A P6: only inject -threads 0 if the preset itself didn't pin it.
-        return "-threads" in params
 
     def process(self):
         current_input = self.video_path
@@ -195,15 +191,6 @@ class RenderWorker(QObject):
                             command.extend(["-c:v", self.gpu_codec])
                         else:
                             command.extend(["-c:v", "libx264"])
-                    # Phase A P6: hint x264 to use all logical cores when on
-                    # the CPU path and the preset hasn't pinned -threads. NVENC
-                    # path is left alone (NVENC parallelism is governed by
-                    # async_depth + the gpu_semaphore, not -threads).
-                    if (
-                        not self.gpu_enabled
-                        and not self._has_threads(encoder_params)
-                    ):
-                        command.extend(["-threads", "0"])
                     if not self._has_acodec(encoder_params):
                         command.extend(["-c:a", "aac"])
                 command.extend(["-y", str(Path(output_file))])
@@ -252,10 +239,6 @@ class RenderWorker(QObject):
                     ] + encoder_params_original
                     if not self._has_vcodec(encoder_params_original):
                         cpu_command.extend(["-c:v", "libx264"])
-                    # Phase A P6: same -threads 0 hint for the CPU fallback
-                    # path after a GPU encode failure.
-                    if not self._has_threads(encoder_params_original):
-                        cpu_command.extend(["-threads", "0"])
                     if not self._has_acodec(encoder_params_original):
                         cpu_command.extend(["-c:a", "aac"])
                     cpu_command.extend(["-y", str(Path(output_file))])
@@ -382,22 +365,15 @@ class VideoRendererTool(QMainWindow):
         self.gpu_caps = gpu_detect.detect(self.FFMPEG_PATH)
 
         self.config = self.load_config()
+        _d = core_config.APP_DEFAULTS
         self.num_threads = self.config.get("num_threads", 3)
-        self.output_collision = self.config.get("output_collision", "rename")
-        self.gpu_error_action = self.config.get("gpu_error_action", "retry_cpu")
-        # Phase A defaults (post-2d performance tuning):
-        #   gpu_enabled  -> default True when NVENC is detected, else False.
-        #     User-saved gpu_enabled (True or False) still wins via config.get.
-        #   gpu_preset   -> p4 -> p5 (best NVENC speed/quality knee per ADR-0008 fix-2).
-        #   gpu_max_concurrent -> 2 -> 3 (consumer NVIDIA cap; falls back to CPU
-        #     gracefully on locked drivers via existing gpu_error_action="retry_cpu").
-        self.gpu_enabled = self.config.get(
-            "gpu_enabled", bool(getattr(self.gpu_caps, "nvenc_available", False))
-        )
-        self.gpu_codec = self.config.get("gpu_codec", "h264_nvenc")
-        self.gpu_preset = self.config.get("gpu_preset", "p5")
+        self.output_collision = self.config.get("output_collision", _d.output_collision)
+        self.gpu_error_action = self.config.get("gpu_error_action", _d.gpu_error_action)
+        self.gpu_enabled = self.config.get("gpu_enabled", _d.gpu_enabled)
+        self.gpu_codec = self.config.get("gpu_codec", _d.gpu_codec)
+        self.gpu_preset = self.config.get("gpu_preset", _d.gpu_preset)
         self.gpu_max_quality_mode = self.config.get("gpu_max_quality_mode", False)
-        self.gpu_max_concurrent = self.config.get("gpu_max_concurrent", 3)
+        self.gpu_max_concurrent = self.config.get("gpu_max_concurrent", _d.gpu_max_concurrent)
         self._gpu_semaphore = QSemaphore(self.gpu_max_concurrent)
         self.encoder_options = self.load_encoder_options()
         self.setup_ui()
@@ -901,15 +877,45 @@ class VideoRendererTool(QMainWindow):
             self._reload_config_settings()
 
     def _reload_config_settings(self) -> None:
-        """Reload config_video_renderer.json and apply runtime-changeable bits."""
+        """Reload config_video_renderer.json and apply runtime-changeable bits.
+
+        B-014 partial fix: the original implementation rewired only
+        output_collision + gpu_error_action. This now also rewires the 5 GPU
+        Pipeline keys (gpu_enabled, gpu_codec, gpu_preset, gpu_max_quality_mode,
+        gpu_max_concurrent) so Settings dialog OK takes effect on next render
+        without an app restart. num_threads, show_ffmpeg_command, and
+        open_output_when_done are still NOT rewired here — they are read
+        elsewhere (render-start or app-init); see BACKLOG B-014 for the
+        remaining surface.
+
+        Semaphore rebuild: QSemaphore(N) is constructed once in __init__ at
+        the initial gpu_max_concurrent and is passed by reference to every
+        RenderWorker at submit time. If concurrency changes, we replace
+        self._gpu_semaphore so new renders get the new gate size. Workers
+        already mid-flight retain their reference to the old semaphore and
+        continue using its original cap (we do not re-gate in-flight encodes).
+        """
         cfg = core_config.load(Path(self.CONFIG_FILE), default={})
-        # Persist Settings-managed values onto self for next render.
-        self.output_collision = cfg.get("output_collision", "rename")
-        self.gpu_error_action = cfg.get("gpu_error_action", "retry_cpu")
-        # Other Settings keys (show_ffmpeg_command, open_output_when_done)
-        # are read on render-start, not here. use_gpu is read by the worker
-        # at submit time. NVENC quality offset is baked into preset_translator
-        # (-crf N → -cq N+2) per ADR-0007 D3.
+        _d = core_config.APP_DEFAULTS
+        # Output / error-handling keys (pre-existing wiring).
+        self.output_collision = cfg.get("output_collision", _d.output_collision)
+        self.gpu_error_action = cfg.get("gpu_error_action", _d.gpu_error_action)
+
+        # GPU Pipeline tab — 5 keys newly added in this commit. Defaults
+        # below come from AppDefaults (same singleton consulted in __init__),
+        # so a missing key reverts to the same value the app started with.
+        self.gpu_enabled = cfg.get("gpu_enabled", _d.gpu_enabled)
+        self.gpu_codec = cfg.get("gpu_codec", _d.gpu_codec)
+        self.gpu_preset = cfg.get("gpu_preset", _d.gpu_preset)
+        self.gpu_max_quality_mode = cfg.get("gpu_max_quality_mode", False)
+        new_concurrent = cfg.get("gpu_max_concurrent", _d.gpu_max_concurrent)
+        if new_concurrent != self.gpu_max_concurrent:
+            self.gpu_max_concurrent = new_concurrent
+            self._gpu_semaphore = QSemaphore(self.gpu_max_concurrent)
+
+        # num_threads, show_ffmpeg_command, open_output_when_done: not
+        # rewired here. NVENC quality offset is baked into preset_translator
+        # (-crf N -> -cq N+offset) per ADR-0007 D3 / ADR-0008.
 
     def _update_empty_hints(self):
         """Toggle the empty-state placeholders based on current state."""

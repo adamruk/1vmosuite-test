@@ -40,19 +40,25 @@ from core.preset_loader import (  # noqa: E402
 ENCODER_JSON = REPO_ROOT / "assets" / "Encoder.json"
 
 
+# Canonical builtin preset count is 108 (= 106 from Encoder.txt + 2 hoisted
+# Text defaults). See tools/generate_encoder_json.py. Was 111 before the
+# B-017 + 2c-c-* preset cleanup. Historical smoke logs are immutable.
+BUILTIN_PRESET_COUNT = 108
+
+
 def test_builtin_loads_with_ids() -> bool:
     presets = load_builtin_json(ENCODER_JSON)
-    if len(presets) != 111:
-        print(f"  FAIL: expected 111 builtin presets, got {len(presets)}")
+    if len(presets) != BUILTIN_PRESET_COUNT:
+        print(f"  FAIL: expected {BUILTIN_PRESET_COUNT} builtin presets, got {len(presets)}")
         return False
     ids = [p.id for p in presets]
     if not all(i.startswith("builtin:") for i in ids):
         print("  FAIL: not all built-in ids start with 'builtin:'")
         return False
-    if len(set(ids)) != 111:
+    if len(set(ids)) != BUILTIN_PRESET_COUNT:
         print(f"  FAIL: built-in ids not unique ({len(set(ids))}/{len(ids)})")
         return False
-    print("  PASS: 111 built-in ids loaded; all builtin: prefix; all unique")
+    print(f"  PASS: {BUILTIN_PRESET_COUNT} built-in ids loaded; all builtin: prefix; all unique")
     return True
 
 
@@ -85,8 +91,8 @@ def test_user_round_trip_then_merge() -> bool:
 
         builtin = load_builtin_json(ENCODER_JSON)
         merged = list(builtin) + list(loaded_user)
-        if len(merged) != 113:
-            print(f"  FAIL: merged length {len(merged)} != 111+2")
+        if len(merged) != BUILTIN_PRESET_COUNT + 2:
+            print(f"  FAIL: merged length {len(merged)} != {BUILTIN_PRESET_COUNT}+2")
             return False
 
         merged_ids = [p.id for p in merged]
@@ -96,13 +102,13 @@ def test_user_round_trip_then_merge() -> bool:
 
         builtin_count = sum(1 for p in merged if p.id.startswith("builtin:"))
         user_count = sum(1 for p in merged if p.id.startswith("user:"))
-        if builtin_count != 111 or user_count != 2:
+        if builtin_count != BUILTIN_PRESET_COUNT or user_count != 2:
             print(
                 f"  FAIL: id-prefix split wrong: builtin={builtin_count}, user={user_count}"
             )
             return False
         print(
-            "  PASS: merged 111 builtin + 2 user; no collisions; prefix split correct"
+            f"  PASS: merged {BUILTIN_PRESET_COUNT} builtin + 2 user; no collisions; prefix split correct"
         )
         return True
 

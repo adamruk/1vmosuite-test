@@ -1,6 +1,6 @@
 # 1vmo Video Suite
 
-Four PyQt5 desktop apps for batch video processing — backed by FFmpeg.
+Four PySide6 desktop apps for batch video processing — backed by FFmpeg. (Migrated from PyQt5 in Phase 2d; see CHANGELOG and ADR-0001.)
 
 | App | Purpose |
 |---|---|
@@ -49,7 +49,7 @@ python mixer.py
   config_video_cutter.json                        # Cutter config
   config_video_merge.json                         # Merge config
   config_video_merger.json                        # Mixer config (note: historical name is "merger")
-  requirements.txt                                # PyQt5 + requests
+  requirements.txt                                # PySide6 + requests + (see file for full list)
 ```
 
 ## Encoder presets
@@ -61,6 +61,16 @@ python mixer.py
 ```
 
 Groups: `🕹️ 1vmo Ultimate`, `🎮 1vmo Gaming`, `🎬 1vmo Movie`, `🎵 1vmo Music`, `🎥 1vmo Social`.
+
+## CPU vs GPU rendering — production guidance
+
+AutoRender supports two render paths. Pick based on the work, not by reflex.
+
+- **CPU path (libx264).** Quality-stable. This is the reference. Output is reproducible run-to-run on identical inputs/params. Slower, especially on long videos or `-preset slow` presets. Use this for client-final masters, archival renders, A/B reference encodes, and anything where the output must match the original as closely as possible.
+- **GPU path (NVENC: h264_nvenc / hevc_nvenc / av1_nvenc).** Faster (often 10×+ on RTX-class cards) but quality is hardware/driver-dependent and sits at a measurable but small ceiling below libx264 — empirically VMAF ~1–3 points lower on the 1vmo content profile (see ADR-0008). Use this for iterating, previews, internal review, social-format batches, and anything where speed matters more than the last 1–2 VMAF points.
+- **Quality-sensitive renders.** When using the GPU path on sensitive material, enable the **Max Quality Mode** toggle in Settings (preset `p7` + `-multipass 2`, per ADR-0007 D7). It is slightly slower than the default NVENC settings but recovers most of the gap to libx264. For client-final masters, prefer CPU regardless of speed.
+
+Defaults: `gpu_enabled=False`, `gpu_codec=h264_nvenc`, `gpu_preset=p4`, `gpu_max_concurrent=2` (matches `settings_dialog.py::DEFAULTS`, `RenderWorker.__init__`, and `core/preset_translator.translate_to_nvenc`). Settings dialog OK applies these keys on next render without restart (B-014 partial fix).
 
 ## Updater
 

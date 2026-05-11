@@ -431,7 +431,7 @@ The module should pass tests on both platforms with no per-platform branching.
 
 ## What's explicitly OUT OF SCOPE
 
-- **No PyQt5 / UI code** — module is pure Python
+- **No Qt / UI code** — module is pure Python (post-Phase-2d the suite is on PySide6; the rule here is "no UI bindings at all in this module")
 - **No `auto_render.py` modifications** — Adam handles integration
 - **No changes to existing 1vmo files** — only new files + `requirements.txt`
 - **No "while I'm in there" cleanup** — flag issues to Adam, don't fix

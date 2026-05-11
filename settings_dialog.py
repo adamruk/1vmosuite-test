@@ -28,22 +28,29 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
 )
 
+from core.config import APP_DEFAULTS
+
 
 # Defaults — must not change current behavior when applied to a fresh config.
+# Six fields below source from `core.config.AppDefaults` (single source of
+# truth). The remaining fields are dialog-specific and stay as literals.
+# `use_gpu` is the legacy alias of `gpu_enabled` (kept in sync at save time
+# by SettingsDialog._on_ok); the literal `True` here is the pre-existing
+# value and is left untouched in this scope.
 DEFAULTS = {
     "output_dir": "",
     "num_threads": 3,
     "use_gpu": True,
-    "gpu_error_action": "retry_cpu",
-    "output_collision": "rename",
+    "gpu_error_action": APP_DEFAULTS.gpu_error_action,
+    "output_collision": APP_DEFAULTS.output_collision,
     "show_ffmpeg_command": True,
     "open_output_when_done": False,
     "tour_seen": True,
     # Phase 2.5b GPU pipeline keys per ADR-0007 D8.
-    "gpu_enabled": False,
-    "gpu_codec": "h264_nvenc",
-    "gpu_preset": "p4",
-    "gpu_max_concurrent": 2,
+    "gpu_enabled": APP_DEFAULTS.gpu_enabled,
+    "gpu_codec": APP_DEFAULTS.gpu_codec,
+    "gpu_preset": APP_DEFAULTS.gpu_preset,
+    "gpu_max_concurrent": APP_DEFAULTS.gpu_max_concurrent,
     "gpu_container_override": None,
     "gpu_max_quality_mode": False,
 }

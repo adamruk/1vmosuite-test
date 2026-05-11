@@ -28,6 +28,7 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 - **Phase 2c-c-6** — Windows-only smoke regression suite (integration + determinism + aggregator + tests/README convention) (`[d856bd3]`, tag `v2c-c-6`).
 - **Phase 2c done** — all 5 sub-phases shipped + post-2c-c-4 regression green; Mac smoke deferred to post-Phase-2 with Junaid (`[d856bd3]`, tag `v2c-c-complete`).
 - **Governance backfill** — CLAUDE.md + CHANGELOG backfill (`f08b08e`), self-referential hash-fill (`fa0763b`), CHANGELOG hook installation (`250668b`), hook hash-fill (`9537660`).
+- **Phase 2d** — Direct PyQt5 → PySide6 migration (no qtpy, no qt_compat shim). 12 source files migrated, 36/36 py_compile clean, all four apps launch and render under PySide6 6.9.x on Mac (Python 3.14) and Windows (Python 3.13 expected). Phase A perf-tuning defaults applied in the same branch (gpu_enabled auto-on when NVENC detected; p4 → p5; concurrency 2 → 3; -threads 0 on CPU). Codex post-completion review applied: preset-count constants aligned, GPU settings reload gap closed.
 
 ### Pending — blocking Phase 2 done
 
@@ -35,7 +36,6 @@ Source of truth for phase status, observations canon, and strategic context. CLA
 |---|---|---|---|
 | **2.5** | PORT_NOTES port from Phase 1: Settings dialog (F1), naming_utils + 59-char filename (F2), GPU/NVENC pipeline (F3, see ADR-0007), onboarding & polish (F4), default render slots (F5). Plus Bugs 2 + 4 (gated on F1) + Bug 9 TOCTOU (bundled with F2). | [TBD] | Spec: docs/PHASE_2_PORT_NOTES.md; F3 design: docs/decisions/ADR-0007-gpu-pipeline.md |
 | **2.5.1** | Per-task + batch ETA in auto_render.py. Builds on F3 GPU pipeline (Step 5.5, post-v2.5-complete tag, pre-Phase-2d migration start). | [TBD] | BACKLOG: B-010 |
-| **2d** | PyQt5 → PySide6 migration. Mac-quality-forced for current team. PySide6 6.9.1 target (not 6.9.2). 30-line `core/_qt.py` scaffold, libcst rewriter, Nuitka packaging. | 3-4 weeks | Playbook TBD |
 
 **Phase 2 done = all rows above shipped.** Estimate: ~100-155 hours solo. At 6 hrs/day × 5 days = 3-5 calendar weeks. At 4 hrs/day × 5 days = 5-8 weeks.
 
@@ -73,7 +73,7 @@ Items surfaced during scoped work but NOT fixed in scope (per CLAUDE.md §6). St
 | K | Cancel caller-side cleanup incomplete (runner-side fixed, callers remain) | 2026-04 | Open, backlog |
 | L | `EncoderDialog` returns `dict`, not `Preset` | 2026-04 | Open, backlog |
 | M | Progress dialect harmonization (`legacy_stderr` vs `progress_pipe`) across apps | 2026-04 | Open, backlog |
-| N | Python 3.13 + PyQt5 time bomb | 2026-04 | Open, scheduled Phase 2d |
+| N | Python 3.13 + PyQt5 time bomb | 2026-04 | **Fixed in Phase 2d** — codebase migrated to PySide6 6.9.x; PyQt5 binding fully removed (no imports, no qt_compat shim). All four apps verified launching on PySide6 6.9.1 (Mac Python 3.14 venv; Windows Python 3.13 target). See CHANGELOG [Unreleased]. |
 | O | Frozen `.exe` behavior unvalidated | 2026-04 | **Fixed in 2c-c-3** (`86edaa4`) — all 5 user-state writes routed through `core/atomic_write.py` + `core/user_data.py` (platformdirs default, portable.txt opt-in); silent PermissionError under Program Files installs no longer possible |
 | P | `merge.py` `_RunnerHandle` sentinel cleanup (compatibility shim added during Phase 2a) | 2026-04 | Open, backlog |
 | Q | `auto_render.py` cancel unvalidated | 2026-04 | Open, backlog |

@@ -168,13 +168,52 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 - **Status:** Open, backlog
 - **Priority:** LOW (docstrings only — not user-visible UI text)
-- **Surfaced:** v3.8 PyInstaller distribution audit (2026-04-30)
-- **Locations:**
-  - `auto_render.py:857` (`"""Tải cấu hình..."""` — translates to "Load configuration...")
-  - `auto_render.py:954` (`"""Lưu cấu hình..."""` — translates to "Save configuration...")
-- **Context:** Leftover from the original Vietnamese-language developer who authored the pre-v2 source. The 43 control-flow reconstruction artifacts from the pylingual decompile (commit a225831) addressed Python correctness; non-English docstrings survived because they were syntactically valid. Two known sites in auto_render.py; cutter/merge/mixer were grep'd at audit time and appear English-only.
-- **Resolution:** Translate both docstrings to English. Two-line change. Verify no other Vietnamese strings exist via inspection or via a Unicode-range grep over the Vietnamese-extended-Latin block.
+- **Surfaced:** v3.8 PyInstaller distribution audit (2026-04-30); scope corrected during Codex post-completion review (2026-05-11) — the original entry undercounted.
+- **Locations (full enumeration; line numbers reflect the current `phase2d-pyside6-migration` working tree):**
+  - `auto_render.py:58`   `"""Lấy đường dẫn tuyệt đối cho tài nguyên, hoạt động cả khi chạy từ source và từ file exe"""`
+  - `auto_render.py:806`  `"""Căn chỉnh kích thước các cột khi cửa sổ thay đổi kích thước"""`
+  - `auto_render.py:835`  `"""Kiểm tra sự tồn tại của FFmpeg và FFprobe"""`
+  - `auto_render.py:881`  `"""Tải cấu hình từ config_video_renderer.json nếu tồn tại."""`
+  - `auto_render.py:1010` `"""Lưu cấu hình vào config_video_renderer.json."""`
+  - `auto_render.py:1034` `"""Đọc các tùy chọn render từ file Encoder.txt và bỏ qua các dòng lỗi."""`
+  - The `auto_render.py:831` QSS block also contains two inline Vietnamese stylesheet comments (`/* Thêm viền xanh */`, `/* Thêm padding */`) — stylesheet comments rather than docstrings, but readable as non-English if the goal is full English-ification.
+  - The earlier "L857 / L954" pair was a partial snapshot from older line numbering and missed four other docstrings. Treat the list above as canonical.
+- **Context:** Leftover from the original Vietnamese-language developer who authored the pre-v2 source. The 43 control-flow reconstruction artifacts from the pylingual decompile (commit a225831) addressed Python correctness; non-English docstrings survived because they were syntactically valid. cutter/merge/mixer were grep'd at audit time and appear English-only.
+- **Resolution:** Translate the 6 docstrings above (and optionally the 2 QSS comments) to English. NOT a two-line change as originally described. Verify no other Vietnamese strings exist via a Unicode-range grep over the Vietnamese-extended-Latin block.
 - **Trigger for pickup:** Opportunistic, OR before sharing the codebase with non-Vietnamese-reading contributors (which is now imminent with Junaid handoff).
+
+## B-028: 4 onboarding/handoff .md files at repo root — Adam decision pending
+
+- **Status:** Open, Adam decision pending. **Do NOT delete without Adam's explicit instruction.**
+- **Priority:** LOW (docs only)
+- **Surfaced:** Codex post-completion review (2026-05-11). 4 root-level Markdown files were added during Junaid's onboarding handoff but are NOT in the original Adam-spec 45-file manifest. They shipped in the `phase2d-pyside6-migration` branch's first commit and remain on main as of `58dec26`.
+- **Files in scope (preserved as-is for now):**
+  - `ONBOARDING.md`           — Junaid's onboarding orientation
+  - `URL_DOWNLOADER_SPEC.md`  — spec doc paired with `core/url_downloader.py`
+  - `WORKING_AGREEMENT.md`    — Junaid <-> Adam working agreement
+  - `IDEAS_BACKLOG.md`        — open-form ideas list (mostly empty template)
+- **Decision needed:**
+  - (a) Keep all 4 on main (current state).
+  - (b) Move all 4 to `docs/onboarding/` so they don't clutter the root.
+  - (c) Move some, keep others. URL_DOWNLOADER_SPEC.md in particular makes a credible case to stay near root as the active spec until the feature lands in the UI.
+  - (d) Delete some/all if Adam has alternative copies elsewhere and doesn't want them in the repo.
+- **Resolution policy:** This is governance, not bug. No code or runtime impact. Picking (a) is currently in effect by default. Awaiting Adam's call.
+- **Trigger for pickup:** Adam's review of the Phase 2d PR.
+
+## B-027: `THAY_THẾ_NỘI_DUNG` literal placeholder in 2 built-in drawtext presets
+
+- **Status:** Open, backlog
+- **Priority:** LOW–MEDIUM (user-visible: the literal string renders into the output video if the user runs the preset as-is without editing the param)
+- **Surfaced:** Codex post-completion review (2026-05-11) — searched `assets/Encoder.json` for non-ASCII content during the Vietnamese-strings sweep.
+- **Locations:**
+  - `assets/Encoder.json:1933` — drawtext filter param: `drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10`
+  - `assets/Encoder.json:1944` — same shape, second placement (top vs bottom positioning).
+- **Context:** `THAY_THẾ_NỘI_DUNG` translates roughly to "REPLACE_CONTENT" in Vietnamese. It is a literal placeholder baked into 2 built-in presets that draw a text overlay on the video. If a user picks one of these presets without manually editing the `text=...` argument first, the rendered video will literally show the Vietnamese phrase `THAY_THẾ_NỘI_DUNG` on screen — which is almost certainly never the intent.
+- **Resolution options (no preset semantics change required):**
+  - (a) Replace the placeholder with an English-language placeholder (e.g. `text='YOUR_TEXT_HERE'`) so the failure mode is at least readable.
+  - (b) Add a UI hint / pre-flight check that warns when a selected preset still contains a known placeholder token (`THAY_THẾ_NỘI_DUNG`, `YOUR_TEXT_HERE`, etc.) and prompts the user to edit before render.
+  - (c) Move the text content out of the preset and require the user to enter it explicitly per render.
+- **Trigger for pickup:** When a user reports a rendered video containing the placeholder string, OR alongside B-025 Vietnamese cleanup, OR before Junaid's URL_DOWNLOADER feature lands its UI (since touching preset metadata is a related surface).
 
 ## B-026: PyInstaller spec files untracked in git
 

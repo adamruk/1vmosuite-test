@@ -1,9 +1,45 @@
 """Shared JSON config load/save for 1vmo Suite apps."""
+
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+
+@dataclass(frozen=True)
+class AppDefaults:
+    """Single source of truth for runtime-tunable defaults.
+
+    Mirrors the keys persisted by Settings dialog (`settings_dialog.py`)
+    and consumed by `auto_render.py` (`VideoRendererTool.__init__`,
+    `VideoRendererTool._reload_config_settings`, `RenderWorker.__init__`)
+    and `core/preset_translator.py` (`translate_to_nvenc`).
+
+    Values match the pre-Phase-A baseline:
+      - GPU off by default; user opts in via Settings.
+      - NVENC preset p4 per ADR-0007 D2 and ADR-0008's production guidance
+        ("Production gpu_preset config default remains 'p4'.").
+      - 2 concurrent NVENC sessions max (matches the previous hard-coded
+        value; any future bump must be separately justified).
+      - libx264-mapped NVENC codec choice is h264_nvenc per ADR-0007 D4.
+      - retry_cpu on GPU encode failure; rename on output-path collision.
+
+    Add fields here only when they need a centralized default; per-call
+    overrides remain the responsibility of callers via `config.get(...)`
+    or explicit kwarg.
+    """
+
+    gpu_enabled: bool = False
+    gpu_preset: str = "p4"
+    gpu_max_concurrent: int = 2
+    gpu_codec: str = "h264_nvenc"
+    gpu_error_action: str = "retry_cpu"
+    output_collision: str = "rename"
+
+
+APP_DEFAULTS = AppDefaults()
 
 
 def load(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -22,7 +58,7 @@ def load(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
     if not path.exists():
         return dict(default)
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
         return dict(default)
@@ -42,5 +78,5 @@ def save(path: Path, data: dict[str, Any], indent: int = 4) -> None:
 
     Callers should wrap in try/except and show UI error if appropriate.
     """
-    with open(path, 'w', encoding='utf-8') as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=indent, ensure_ascii=False)

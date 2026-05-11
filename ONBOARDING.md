@@ -8,7 +8,7 @@ Welcome, Junaid. This document gives you the context to start work on the URL do
 
 ## What is 1vmo Suite?
 
-1vmo is a desktop video editing tool — four PyQt5 apps wrapping a bundled FFmpeg binary to apply preset-based transformations. Internal tool for Adam and his small team.
+1vmo is a desktop video editing tool — four PySide6 apps wrapping a bundled FFmpeg binary to apply preset-based transformations. (Migrated from PyQt5 in Phase 2d; older docs and ADRs still reference PyQt5 for historical context.) Internal tool for Adam and his small team.
 
 The four apps are `auto_render.py`, `cutter.py`, `merge.py`, `mixer.py`. **You won't see them in your zip** — they're not needed for URL tool work. You'll get full repo access via GitHub once Phase A ships.
 

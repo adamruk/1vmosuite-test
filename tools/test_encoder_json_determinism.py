@@ -63,13 +63,16 @@ def test_regen_byte_identical() -> bool:
     text_defaults = gen_mod.TEXT_DEFAULTS
     fail_on_skip = gen_mod._fail_on_skip
 
+    # Canonical counts: 106 in Encoder.txt + 2 hoisted Text defaults = 108 total.
+    # Matches tools/generate_encoder_json.py and the live assets/Encoder.json.
+    # Was 109/111 before the B-017 + 2c-c-* preset cleanup pass.
     file_presets = load_presets(ENCODER_TXT, on_error=fail_on_skip)
-    if len(file_presets) != 109:
-        print(f"  FAIL: expected 109 from Encoder.txt, got {len(file_presets)}")
+    if len(file_presets) != 106:
+        print(f"  FAIL: expected 106 from Encoder.txt, got {len(file_presets)}")
         return False
     all_presets = file_presets + list(text_defaults)
-    if len(all_presets) != 111:
-        print(f"  FAIL: expected 111 total, got {len(all_presets)}")
+    if len(all_presets) != 108:
+        print(f"  FAIL: expected 108 total, got {len(all_presets)}")
         return False
 
     with tempfile.TemporaryDirectory() as td:

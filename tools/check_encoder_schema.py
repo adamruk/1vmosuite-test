@@ -19,7 +19,12 @@ sys.path.insert(0, str(REPO_ROOT))
 from core.encoder_schema import EncoderLibrary  # noqa: E402
 
 
-EXPECTED_PRESET_COUNT = 111
+# Canonical count: 108 = 106 from Encoder.txt + 2 hoisted Text defaults
+# (matches tools/generate_encoder_json.py lines 92/100). Was 111 before
+# the post-B-017 preset audit and the 2c-c-* cleanup pass. Historical
+# smoke logs in tests/smoke-2c-c-*-20260426/27.log are immutable and
+# still show the older 111 figure — that is intentional and expected.
+EXPECTED_PRESET_COUNT = 108
 
 
 def main() -> int:

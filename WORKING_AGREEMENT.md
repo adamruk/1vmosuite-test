@@ -177,7 +177,7 @@ Implements [URL_DOWNLOADER_SPEC.md sections X, Y, Z]
 - [ ] Module signature matches spec
 - [ ] Did NOT modify any existing 1vmo files (only new files + requirements.txt)
 - [ ] No `auto_render.py` touches
-- [ ] No PyQt5 / UI imports
+- [ ] No Qt / UI imports (post-Phase-2d the binding is PySide6; the rule is "no UI bindings at all in this module")
 - [ ] All new code in `core/url_downloader.py` and `tests/smoke/test_url_downloader.py`
 - [ ] Module docstring documents implementation choice
 - [ ] Type hints on public functions
@@ -226,7 +226,7 @@ Subtitles, Cancellation, Edge Cases, Module Structure.
 - [x] Module signature matches spec
 - [x] Did NOT modify any existing 1vmo files (only new files + requirements.txt)
 - [x] No auto_render.py touches
-- [x] No PyQt5 / UI imports
+- [x] No Qt / UI imports (post-2d the binding is PySide6; the rule is "no UI bindings at all in this module")
 - [x] All new code in core/url_downloader.py and tests/smoke/test_url_downloader.py
 - [x] Module docstring documents implementation choice
 - [x] Type hints on public functions
