@@ -47,14 +47,60 @@ def safe_part(name: str, max_len: int) -> str:
 
 
 def clip_to_limit(filename: str, max_total: int = MAX_FILENAME) -> str:
-    """Last-resort guard. Truncates the base, preserves the extension."""
-    if len(filename) <= max_total:
+    """Last-resort guard. Truncates the filename portion only, preserves the
+    extension and any directory prefix.
+
+    Phase 4A fix: previously this function clipped the input as a single
+    string, so when the caller passed a full joined path
+    ``output_dir + "/" + filename`` and the output directory was already
+    close to ``max_total`` chars, the filename portion collapsed to an
+    empty string and the caller wrote to ``<output_dir>/.mp4`` — a hidden
+    dotfile that QuickTime and most players refuse to open.
+
+    ``max_total`` now applies to the basename alone. The directory prefix
+    is preserved verbatim. If the clipped basename would be empty (the
+    extension alone equals or exceeds ``max_total``, or the input was
+    already just an extension), a timestamp-derived fallback stem is
+    substituted so the returned path is never an empty-name dotfile.
+    """
+    folder = os.path.dirname(filename)
+    name = os.path.basename(filename)
+    if not name:
+        # No filename component at all (caller passed a bare directory).
+        # Fall back to a non-empty stem rather than returning the input
+        # unchanged, which would have produced the same dotfile bug.
+        fallback = f"out_{timestamp()}.mp4"
+        return os.path.join(folder, fallback) if folder else fallback
+    # Dotfile-with-no-stem (e.g. ``.mp4``): name starts with "." and has no
+    # subsequent "." that would separate stem from extension. Always trip
+    # the fallback so the caller never writes to a hidden dotfile that
+    # players like QuickTime refuse to open.
+    if name.startswith(".") and "." not in name[1:]:
+        fallback_ext = name  # the whole input was the "extension"
+        fallback_name = f"out_{timestamp()}{fallback_ext}"
+        if len(fallback_name) > max_total:
+            keep = max_total - len(fallback_ext)
+            if keep < 1:
+                fallback_name = fallback_name[:max_total]
+            else:
+                fallback_name = f"out_{timestamp()}"[:keep] + fallback_ext
+        return os.path.join(folder, fallback_name) if folder else fallback_name
+    base, ext = os.path.splitext(name)
+    if len(name) <= max_total:
         return filename
-    base, ext = os.path.splitext(filename)
     keep = max_total - len(ext)
     if keep < 1:
-        return filename[:max_total]
-    return base[:keep] + ext
+        # Extension alone is longer than max_total — preserve the start of
+        # the filename rather than dropping the basename entirely.
+        clipped = name[:max_total]
+    else:
+        clipped_base = base[:keep]
+        if not clipped_base:
+            # Defensive: an empty base post-clip means the input was just
+            # an extension after splitext quirks. Substitute a timestamp stem.
+            clipped_base = f"out_{timestamp()}"[:keep]
+        clipped = clipped_base + ext
+    return os.path.join(folder, clipped) if folder else clipped
 
 
 def avoid_collision(path: str) -> str:
