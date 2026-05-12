@@ -49,7 +49,9 @@ BUILTIN_PRESET_COUNT = 108
 def test_builtin_loads_with_ids() -> bool:
     presets = load_builtin_json(ENCODER_JSON)
     if len(presets) != BUILTIN_PRESET_COUNT:
-        print(f"  FAIL: expected {BUILTIN_PRESET_COUNT} builtin presets, got {len(presets)}")
+        print(
+            f"  FAIL: expected {BUILTIN_PRESET_COUNT} builtin presets, got {len(presets)}"
+        )
         return False
     ids = [p.id for p in presets]
     if not all(i.startswith("builtin:") for i in ids):
@@ -58,7 +60,9 @@ def test_builtin_loads_with_ids() -> bool:
     if len(set(ids)) != BUILTIN_PRESET_COUNT:
         print(f"  FAIL: built-in ids not unique ({len(set(ids))}/{len(ids)})")
         return False
-    print(f"  PASS: {BUILTIN_PRESET_COUNT} built-in ids loaded; all builtin: prefix; all unique")
+    print(
+        f"  PASS: {BUILTIN_PRESET_COUNT} built-in ids loaded; all builtin: prefix; all unique"
+    )
     return True
 
 

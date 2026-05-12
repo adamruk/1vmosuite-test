@@ -3,53 +3,55 @@
 # Bytecode version: 3.11a7e (3495)
 # Source timestamp: 1970-01-01 00:00:00 UTC (0)
 
-import os
-import sys
-import json
-import subprocess
-import threading
-import logging
-import re
 import glob
+import json
+import logging
+import multiprocessing
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple
-import tempfile
-import shutil
-import multiprocessing
-from PySide6.QtWidgets import (
-    QApplication,
-    QMainWindow,
-    QWidget,
-    QPushButton,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QComboBox,
-    QFrame,
-    QMessageBox,
-    QSizePolicy,
-)
+
 from PySide6.QtCore import (
-    Qt,
-    QThreadPool,
+    QObject,
     QRunnable,
+    Qt,
+    QThread,
+    QThreadPool,
+    QTimer,
     Signal,
     Slot,
-    QObject,
-    QThread,
-    QTimer,
 )
 from PySide6.QtGui import QIcon
-from updater import DriveUpdater
-from help_dialog import HelpDialog
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
 from core import config as core_config
+from core import ffmpeg_runner as core_ffmpeg_runner
 from core import file_picker as core_file_picker
 from core import widgets as core_widgets
-from core import ffmpeg_runner as core_ffmpeg_runner
-from core.user_data import resolve_or_die, migrate_legacy_configs
+from core.user_data import migrate_legacy_configs, resolve_or_die
+from help_dialog import HelpDialog
+from updater import DriveUpdater
 
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)

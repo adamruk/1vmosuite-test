@@ -1,3 +1,8 @@
 # CHANGELOG uses long narrative entries (BEFORE/AFTER/WHY format) that intentionally exceed
 # the 200-char line limit. Excluding from markdownlint to avoid false positives.
 CHANGELOG.md
+
+# AGENTS.md is a project policy document with long-form rule prose (review gates,
+# rationale, citations); it is exempt from line-length / heading-style lints for
+# the same readability reasons as CHANGELOG.md.
+AGENTS.md

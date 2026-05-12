@@ -43,7 +43,6 @@ from typing import List, Optional, Tuple
 
 from core import ffmpeg_runner as core_ffmpeg_runner
 
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 

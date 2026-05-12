@@ -12,24 +12,23 @@ import os
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QDialog,
-    QTabWidget,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFormLayout,
-    QLineEdit,
-    QPushButton,
-    QSpinBox,
     QCheckBox,
     QComboBox,
-    QFileDialog,
-    QMessageBox,
+    QDialog,
     QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from core.config import APP_DEFAULTS
-
 
 # Defaults — must not change current behavior when applied to a fresh config.
 # Six fields below source from `core.config.AppDefaults` (single source of

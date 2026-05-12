@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-
 # ========== Output tree (all 4 apps) ==========
 
 

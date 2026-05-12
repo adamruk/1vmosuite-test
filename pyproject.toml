@@ -114,3 +114,20 @@ ignore_missing_imports = true
 module = ["PySide6.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
+
+# ----------------------------------------------------------------------
+# Pytest — markers registry.
+#
+# ADR-0001 keeps the test suite manual-smoke-only for UI + render
+# output, but ADR-0003 permits narrow pytest exceptions. The `online`
+# marker is used by tests that hit live network services (e.g. yt-dlp
+# probing real URLs) and must be skipped in offline CI runs:
+#   pytest -m "not online"
+# Registering the marker here silences `PytestUnknownMarkWarning` and
+# makes the marker discoverable via `pytest --markers`.
+# ----------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+markers = [
+  "online: test requires live network access (yt-dlp, HTTP probes). Skip in offline CI with `-m 'not online'`.",
+]

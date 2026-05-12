@@ -18,12 +18,13 @@ from unittest.mock import patch
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from platformdirs import user_data_path  # noqa: E402
+
 from core.user_data import (  # noqa: E402
     PortableLocationError,
     _is_protected_dir,
     resolve_user_data_dir,
 )
-from platformdirs import user_data_path  # noqa: E402
 
 
 def test_default_returns_platformdirs() -> bool:

@@ -40,7 +40,6 @@ if str(_REPO_ROOT) not in sys.path:
 
 from core import preset_loader  # noqa: E402
 
-
 ENCODER_TXT = _REPO_ROOT / "assets" / "Encoder.txt"
 ENCODER_JSON = _REPO_ROOT / "assets" / "Encoder.json"
 

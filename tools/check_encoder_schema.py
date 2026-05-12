@@ -18,7 +18,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from core.encoder_schema import EncoderLibrary  # noqa: E402
 
-
 # Canonical count: 108 = 106 from Encoder.txt + 2 hoisted Text defaults
 # (matches tools/generate_encoder_json.py lines 92/100). Was 111 before
 # the post-B-017 preset audit and the 2c-c-* cleanup pass. Historical

@@ -123,6 +123,45 @@ T8. cutter / merge / mixer apps unchanged (smoke launch only)
     OUTCOME:   [   ]   notes:
 
 ----------------------------------------------------------------------
+T9. URL download — rapid double-click guard (Bug 1, post-Phase-A)
+----------------------------------------------------------------------
+    Added 2026-05-12 alongside the add_url concurrency guard.
+    Click "🌐 Add URL", paste any URL, click OK to start a batch.
+    While the progress dialog is visible, click the (now-disabled)
+    "🌐 Add URL" button several times.
+    Verify: button is visibly disabled and does not open the dialog
+            again.
+    Bypass attempt (optional): if you can fire the slot via a custom
+    keyboard shortcut or accessibility tool, do so. The defensive
+    QMessageBox "A URL download is already in progress" should appear
+    instead of a second dialog.
+    Wait for the batch to finish (or cancel it).
+    Verify: button becomes enabled again.
+    OUTCOME:   [N]   notes: not run — added with the Bug 1 fix on
+            2026-05-12; will be executed on the Windows box during the
+            next manual smoke pass. Marked [N] rather than [PASS] per
+            "no faked outcomes" rule (CLAUDE.md §2 / AGENTS.md §2.1).
+
+----------------------------------------------------------------------
+T10. URL download — close window during in-flight batch (Bug 2)
+----------------------------------------------------------------------
+    Added 2026-05-12 alongside the closeEvent URL-aware guard.
+    Click "🌐 Add URL", paste 2-3 URLs, click OK.
+    While the progress dialog is visible, click the main window's
+    close (X) button.
+    Verify: a confirmation modal appears: "A URL download is in
+            progress. Cancel it and exit?"
+    Click "No". Verify: the app stays open; the download keeps going.
+    Click the close button again, this time "Yes".
+    Verify: the worker is cancelled, the thread joins within ~5 s,
+            and the app closes (does not hang or zombie). Any
+            in-flight partial files in url_downloads/ are acceptable.
+    OUTCOME:   [N]   notes: not run — added with the Bug 2 fix on
+            2026-05-12; will be executed alongside T9 on the next
+            Windows manual smoke pass. Marked [N] rather than [PASS]
+            per the same rule cited under T9.
+
+----------------------------------------------------------------------
 SUMMARY
 ----------------------------------------------------------------------
    T1 app launches:            [   ]
@@ -133,6 +172,14 @@ SUMMARY
    T6 cancel mid-batch:        [   ]
    T7 invalid URL handled:     [   ]
    T8 cutter/merge/mixer:      [   ]
+   T9 add_url guard (Bug 1):   [N]   not run yet — added 2026-05-12
+   T10 close during DL (Bug 2):[N]   not run yet — added 2026-05-12
+
+   Legend: [PASS] / [FAIL] / [NOT_TESTED] = manual smoke outcomes from
+           the historical T1–T8 template. [N] = added later in this log
+           and intentionally NOT executed at the time of edit; will be
+           filled in during a subsequent run. Never overwrite [N] with
+           [PASS] without actually running the step.
 
    Phase A acceptance:  ALL PASS = ship.  Any FAIL = file a B-NNN ticket
    in BACKLOG.md with reproduction, do NOT silently work around.

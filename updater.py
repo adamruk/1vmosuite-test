@@ -3,24 +3,25 @@
 # Bytecode version: 3.11a7e (3495)
 # Source timestamp: 1970-01-01 00:00:00 UTC (0)
 
+import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
+from typing import Optional, Tuple
+
 import requests
-import shutil
-import json
-import subprocess
-from typing import Tuple, Optional
-from PySide6.QtWidgets import (
-    QDialog,
-    QMessageBox,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
 
 
 class UpdaterDialog(QDialog):

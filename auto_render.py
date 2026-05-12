@@ -3,13 +3,17 @@
 # Bytecode version: 3.11a7e (3495)
 # Source timestamp: 1970-01-01 00:00:00 UTC (0)
 
+import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
-import json
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+from PySide6.QtCore import QObject, QSemaphore, Qt, QThread, Signal, Slot
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -36,27 +40,24 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt, QThread, Signal, Slot, QObject, QSemaphore
-from PySide6.QtGui import QIcon, QKeySequence, QShortcut
-from help_dialog import HelpDialog
-from updater import DriveUpdater
+
 import gpu_detect
 from core import config as core_config
+from core import ffmpeg_runner as core_ffmpeg_runner
 from core import file_picker as core_file_picker
-from core import widgets as core_widgets
+from core import naming_utils, preset_translator
 from core import preset_loader as core_preset_loader
+from core import url_downloader as core_url_downloader
+from core import widgets as core_widgets
 from core.preset_loader import (
+    derive_slug,
     load_user_presets_json,
     save_user_presets_json,
-    derive_slug,
 )
-from core import ffmpeg_runner as core_ffmpeg_runner
-from core import naming_utils
+from core.user_data import migrate_legacy_configs, resolve_or_die
+from help_dialog import HelpDialog
 from settings_dialog import SettingsDialog
-from core import preset_translator
-from core import url_downloader as core_url_downloader
-from core.user_data import resolve_or_die, migrate_legacy_configs
-import threading
+from updater import DriveUpdater
 
 SEQUENTIAL_SLOT_COUNT = 8
 
@@ -629,13 +630,13 @@ class VideoRendererTool(QMainWindow):
         )
         select_btn.setToolTip("Add video files (Ctrl+O)")
         select_btn.setObjectName("select_btn")
-        add_url_btn = self.create_video_button(
+        self.add_url_btn = self.create_video_button(
             "🌐 Add URL", self.add_url, "#e8f5e9", "#2e7d32", "#a5d6a7"
         )
-        add_url_btn.setToolTip(
+        self.add_url_btn.setToolTip(
             "Download videos from URLs (YouTube, Vimeo, etc.) and add them to the queue"
         )
-        add_url_btn.setObjectName("add_url_btn")
+        self.add_url_btn.setObjectName("add_url_btn")
         delete_btn = self.create_video_button(
             "🗑️ Delete", self.delete_videos, "#ffcdd2", "#c62828", "#ef9a9a", delete=True
         )
@@ -643,7 +644,7 @@ class VideoRendererTool(QMainWindow):
         delete_btn.setEnabled(False)
         self.btn_delete = delete_btn
         video_controls.addWidget(select_btn)
-        video_controls.addWidget(add_url_btn)
+        video_controls.addWidget(self.add_url_btn)
         video_controls.addWidget(delete_btn)
         video_controls.addStretch()
         settings_btn = self.create_video_button(
@@ -1244,7 +1245,24 @@ class VideoRendererTool(QMainWindow):
 
         Storage location: `USER_DATA_DIR / "url_downloads/"` (auto-created).
         Threading: download runs on a QThread; UI is unblocked.
+
+        Concurrency guard: only one URL download batch can run at a time.
+        The Add URL button is disabled while a batch is in flight and
+        re-enabled in `_on_url_finished` / `_on_url_error`. A defensive
+        QMessageBox covers the case where the guard is bypassed (e.g. a
+        keyboard shortcut wired straight to this slot).
         """
+        if (
+            getattr(self, "_url_thread", None) is not None
+            and self._url_thread.isRunning()
+        ):
+            QMessageBox.information(
+                self,
+                "URL download",
+                "A URL download is already in progress. "
+                "Please wait for it to finish or press Cancel on the progress dialog.",
+            )
+            return
         try:
             dlg = URLInputDialog(self)
             if dlg.exec() != QDialog.Accepted:
@@ -1308,6 +1326,11 @@ class VideoRendererTool(QMainWindow):
                 f"subs={'yes' if values['download_subtitles'] else 'no'}, "
                 f"max_concurrent={values['max_concurrent']}) -> {work_dir}\n"
             )
+            # Disable the Add URL button before starting; re-enabled in
+            # _on_url_finished / _on_url_error. The reciprocal guard at the
+            # top of this method covers shortcut-driven re-entry.
+            if hasattr(self, "add_url_btn") and self.add_url_btn is not None:
+                self.add_url_btn.setEnabled(False)
             self._url_thread.start()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot open URL dialog: {str(e)}")
@@ -1338,6 +1361,11 @@ class VideoRendererTool(QMainWindow):
             self._url_progress.setValue(self._url_total_count)
             self._url_progress.close()
             self._url_progress = None
+
+        # Re-enable Add URL once the batch is fully done (paired with the
+        # disable inside add_url; covers cancel + success + per-URL failures).
+        if hasattr(self, "add_url_btn") and self.add_url_btn is not None:
+            self.add_url_btn.setEnabled(True)
 
         succeeded = [r for r in results if r.success]
         failed = [r for r in results if not r.success]
@@ -1376,6 +1404,10 @@ class VideoRendererTool(QMainWindow):
         if hasattr(self, "_url_progress") and self._url_progress is not None:
             self._url_progress.close()
             self._url_progress = None
+        # Re-enable Add URL on hard failure (paired with the disable inside
+        # add_url; otherwise the button would be stuck off after a fatal error).
+        if hasattr(self, "add_url_btn") and self.add_url_btn is not None:
+            self.add_url_btn.setEnabled(True)
         QMessageBox.critical(self, "URL download", message)
 
     def select_videos(self):
@@ -2061,6 +2093,36 @@ class VideoRendererTool(QMainWindow):
 
     def closeEvent(self, event):
         """Xử lý khi đóng ứng dụng."""
+        # URL download guard runs first. If a batch is in flight, ask the
+        # user; if they decline, abort the close. If they confirm, cancel
+        # the worker, quit the thread, and bound the wait to 5 seconds so
+        # a stuck yt-dlp child cannot block app shutdown forever. After
+        # this branch, control falls through to the existing render-close
+        # path so a simultaneous render+URL session is still handled.
+        if (
+            getattr(self, "_url_thread", None) is not None
+            and self._url_thread.isRunning()
+        ):
+            reply = QMessageBox.question(
+                self,
+                "Exit",
+                "A URL download is in progress. Cancel it and exit?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            if getattr(self, "_url_worker", None) is not None:
+                try:
+                    self._url_worker.cancel()
+                except Exception:
+                    pass
+            try:
+                self._url_thread.quit()
+                self._url_thread.wait(5000)
+            except Exception:
+                pass
+
         if self.is_rendering:
             reply = QMessageBox.question(
                 self,

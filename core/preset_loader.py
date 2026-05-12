@@ -6,15 +6,14 @@ ffmpeg parameters and do not parse Encoder.txt.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, Optional
 import json
 import logging
 import os
 import re
 import unicodedata as _unicodedata
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Callable, Optional
 
 SCHEMA_VERSION = 2
 
