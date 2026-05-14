@@ -5,6 +5,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -71,6 +72,138 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
+# Phase 2d follow-up fix (Item 4): printf-style %0Nd token detector used
+# to decide whether a path is an ffmpeg image-sequence template. Matches
+# %d, %03d, %04d, etc. — the only widths ffmpeg supports. Anchored to a
+# single token; the loop below splits the basename around all occurrences.
+_SEQ_TOKEN_RE = re.compile(r"%0?\d*d")
+
+
+def _cleanup_image_sequence(path: str) -> int:
+    """Remove every concrete file matching an ffmpeg %0Nd sequence pattern.
+
+    Phase 2d follow-up fix (Item 4) for the image-sequence intermediate
+    leakage that was silently swallowed by `except OSError: pass` in
+    process()'s inter-step cleanup. The previous code called os.remove
+    on a path like `…_%03d.jpg`, which is a printf TEMPLATE — no file
+    with that literal name ever exists on disk — so os.remove always
+    raised FileNotFoundError, the except clause swallowed it, and the
+    N actual frame files (`…_001.jpg`, `…_002.jpg`, …) were left
+    behind. Repeated renders accumulated these orphans indefinitely.
+
+    Safety rules (defense in depth — image cleanup MUST NOT remove
+    user-visible deliverables or wander outside the worker's output
+    directory):
+
+      1. No-op if the basename contains no %0Nd token. Caller is
+         responsible for using os.remove on plain paths.
+      2. No-op if the parent directory doesn't exist or isn't a
+         directory.
+      3. Build a strict regex from the literal segments around each
+         %0Nd token (re.escape on every fragment, `\\d+` between
+         tokens). Globbing `*` would be looser and could match files
+         the worker did not create.
+      4. Walk the directory via os.listdir — non-recursive — and
+         match each entry against the strict regex; reject anything
+         that's not a plain file (skips directories AND symlinks
+         pointing outside the worker's output tree).
+      5. Per-file errors are caught and counted but do not abort the
+         loop, so a permission-denied frame does not strand the rest
+         of the sequence.
+
+    Returns the number of files actually removed (useful for logs and
+    test assertions). Path traversal is impossible because we
+    os.path.dirname() the supplied path and refuse to follow into
+    subdirectories.
+    """
+    folder = os.path.dirname(path)
+    basename = os.path.basename(path)
+    if not folder or not os.path.isdir(folder):
+        return 0
+    if not _SEQ_TOKEN_RE.search(basename):
+        return 0
+    parts = _SEQ_TOKEN_RE.split(basename)
+    # Strict regex: literal segments re.escape'd, %0Nd → \d+.
+    pattern = re.compile(r"^" + r"\d+".join(re.escape(p) for p in parts) + r"$")
+    removed = 0
+    try:
+        entries = os.listdir(folder)
+    except OSError:
+        return 0
+    for entry in entries:
+        if not pattern.match(entry):
+            continue
+        full = os.path.join(folder, entry)
+        # os.path.isfile follows symlinks — we want that here because a
+        # genuine sequence frame written by ffmpeg is a regular file,
+        # and ffmpeg never produces symlinks. islink() defensively
+        # rejects anything that resolved to a non-file (e.g. a symlink
+        # to a directory) so we never delete unexpected types.
+        if os.path.islink(full) or not os.path.isfile(full):
+            continue
+        try:
+            os.remove(full)
+            removed += 1
+        except OSError:
+            # Permission denied / file already gone / cross-thread race
+            # against another worker — log and continue.
+            print(f"_cleanup_image_sequence: could not remove {full!r}")
+    return removed
+
+
+def _path_is_sequence(path: str) -> bool:
+    """True iff `path` contains an ffmpeg %0Nd token in its basename."""
+    return bool(_SEQ_TOKEN_RE.search(os.path.basename(path)))
+
+
+def _cleanup_zero_byte_placeholder(path: str) -> bool:
+    """Remove `path` iff it exists, is a regular file, and is exactly 0 bytes.
+
+    Phase 2d follow-up fix (Item 11) for avoid_collision orphan
+    placeholders. `core.naming_utils.avoid_collision` atomically
+    creates a 0-byte file at the chosen output path BEFORE ffmpeg
+    runs (using `open(p, 'x').close()`), so two concurrent workers
+    cannot pick the same target. On a successful encode, ffmpeg's
+    `-y` overwrites the placeholder with multi-KB of real content.
+    On cancel / rc!=0 / Python-level crash, ffmpeg may never have
+    written, leaving an unambiguously orphan 0-byte file behind —
+    Item 11's "temp-file leakage" instance.
+
+    Safety rules — this helper is invoked from cancel/error paths
+    where one wrong rm could destroy a legitimate render:
+
+      1. Size must be EXACTLY 0 bytes. A partial mp4 / mkv is many
+         KB even after a single muxed packet. We refuse to touch
+         any file with real content so the user can still inspect
+         partial outputs (matches the existing
+         "leave partial single-file outputs on disk for diagnostics"
+         intent documented in core/naming_utils.py).
+      2. Symlinks are rejected via os.path.islink before any size
+         check, so we never delete through a link to elsewhere.
+      3. Non-regular targets (directories, FIFOs, devices) are
+         rejected by os.path.isfile.
+      4. Any OSError during the stat/remove (e.g. another worker
+         removed the file concurrently, the filesystem went read-
+         only, the file is locked on Windows) returns False; the
+         caller does not need to handle it.
+
+    Returns True iff a file was actually removed, False otherwise.
+    No-op for non-existent paths and for the printf-template paths
+    used by image sequences (which never have a literal on disk).
+    """
+    try:
+        if os.path.islink(path):
+            return False
+        if not os.path.isfile(path):
+            return False
+        if os.path.getsize(path) != 0:
+            return False
+        os.remove(path)
+        return True
+    except OSError:
+        return False
+
+
 class RenderWorker(QObject):
     progress_updated = Signal(int, int)
     status_updated = Signal(int, str)
@@ -119,6 +252,12 @@ class RenderWorker(QObject):
     def process(self):
         current_input = self.video_path
         final_output = None
+        # Phase 2d follow-up fix (Item 4): track the in-flight step's
+        # output path + image-encoder flag so the outer exception
+        # handler can still clean up a partial sequence if the loop
+        # crashes mid-step. Reset on every successful step transition.
+        current_step_output: Optional[str] = None
+        current_step_is_image = False
         try:
             for i, (encoder_name, encoder_params) in enumerate(
                 zip(self.encoder_names, self.encoder_params_list)
@@ -166,6 +305,12 @@ class RenderWorker(QObject):
                         output_filename = f"{timestamp}_{safe_encoder_name}_{safe_video_name}_step{i + 1}.mp4"
                 output_file = os.path.join(self.output_dir, output_filename)
                 output_file = naming_utils.clip_to_limit(output_file)
+                # Phase 2d follow-up fix (Item 4): record the in-flight
+                # step's output + image flag so the outer exception
+                # handler can clean an incomplete sequence even if a
+                # later line throws before reaching the per-rc cleanup.
+                current_step_output = output_file
+                current_step_is_image = is_image_encoder
                 # Bug 4 fix: honor output_collision setting (3-way branch per PORT_NOTES).
                 if self.output_collision == "overwrite":
                     pass  # ffmpeg -y handles it
@@ -237,6 +382,15 @@ class RenderWorker(QObject):
                         self.error_occurred.emit(
                             f"Skipped (GPU failed): {os.path.basename(output_file)}"
                         )
+                        # Phase 2d follow-up fix (Item 11): skip_file
+                        # returns before any other cleanup path runs.
+                        # Sweep the orphan placeholder + any partial
+                        # image-sequence frames so we don't leak through
+                        # the GPU-fail-skip exit.
+                        if is_image_encoder:
+                            _cleanup_image_sequence(output_file)
+                        else:
+                            _cleanup_zero_byte_placeholder(output_file)
                         return
                     # Default retry_cpu: rebuild command with original (untranslated) params.
                     self.output_updated.emit("\nGPU encode failed, retrying on CPU.\n")
@@ -264,6 +418,16 @@ class RenderWorker(QObject):
                 if self.is_cancelled:
                     self.status_updated.emit(self.thread_index, "Cancelled")
                     self.progress_updated.emit(self.thread_index, 0)
+                    # Phase 2d follow-up fix (Items 4 + 11): cancel
+                    # mid-encode leaves incomplete output. For image
+                    # sequences, remove the partial frames. For single-
+                    # file outputs, remove ONLY the 0-byte avoid_collision
+                    # placeholder; any partial mp4/mkv (>0 bytes) stays
+                    # on disk so the user can inspect it.
+                    if is_image_encoder:
+                        _cleanup_image_sequence(output_file)
+                    else:
+                        _cleanup_zero_byte_placeholder(output_file)
                     return
                 if rc == 0:
                     self.status_updated.emit(
@@ -274,12 +438,24 @@ class RenderWorker(QObject):
                     self.output_updated.emit(
                         f"\n[Thread {self.thread_index + 1}] Completed Step {i + 1}/{len(self.encoder_names)}: {os.path.basename(current_input)} with {encoder_name}\n"
                     )
+                    # Phase 2d follow-up fix (Item 4): inter-step
+                    # intermediate cleanup is now sequence-aware. The
+                    # previous os.remove silently failed for any
+                    # `…_%03d.jpg` template (literal file never exists)
+                    # leaving the N actual frames behind. We now route
+                    # sequence paths through _cleanup_image_sequence
+                    # and keep the single-file branch for video chains.
                     if current_input != self.video_path:
-                        try:
-                            os.remove(current_input)
-                        except OSError:
-                            pass
+                        if _path_is_sequence(current_input):
+                            _cleanup_image_sequence(current_input)
+                        else:
+                            try:
+                                os.remove(current_input)
+                            except OSError:
+                                pass
                     current_input = output_file
+                    current_step_output = None  # transition completed cleanly
+                    current_step_is_image = False
                     if i == len(self.encoder_names) - 1:
                         final_output = output_filename
                 else:
@@ -287,6 +463,16 @@ class RenderWorker(QObject):
                     self.error_occurred.emit(error_msg)
                     self.status_updated.emit(self.thread_index, "Error")
                     self.progress_updated.emit(self.thread_index, 0)
+                    # Phase 2d follow-up fixes (Items 4 + 11): ffmpeg
+                    # failure on an image-sequence step writes 0..N
+                    # partial frames — clean them. For single-file
+                    # outputs, remove only the 0-byte placeholder; a
+                    # partial mp4/mkv with real content is preserved
+                    # for user inspection.
+                    if is_image_encoder:
+                        _cleanup_image_sequence(output_file)
+                    else:
+                        _cleanup_zero_byte_placeholder(output_file)
                     return
             if final_output:
                 self.render_completed.emit(final_output)
@@ -295,6 +481,18 @@ class RenderWorker(QObject):
             self.error_occurred.emit(error_msg)
             self.status_updated.emit(self.thread_index, "Error")
             self.progress_updated.emit(self.thread_index, 0)
+            # Phase 2d follow-up fixes (Items 4 + 11): the loop crashed
+            # mid-step (Python-level exception, not an ffmpeg rc).
+            # current_step_output / current_step_is_image are bounded by
+            # the pre-loop init so this is safe even if the crash
+            # happened before output_file was assigned. Sequence frames
+            # always go; single-file outputs only go if they're the
+            # 0-byte avoid_collision placeholder.
+            if current_step_output:
+                if current_step_is_image:
+                    _cleanup_image_sequence(current_step_output)
+                else:
+                    _cleanup_zero_byte_placeholder(current_step_output)
 
 
 class URLInputDialog(QDialog):
@@ -478,8 +676,14 @@ class VideoRendererTool(QMainWindow):
         # collapse below their designed size, and use resize() for initial geometry.
         self.setMinimumSize(1600, 900)
         self.resize(1600, 900)
-        self.updater.check_and_update("1vmo Auto Render")
-        self.updater.check_and_update("1vmo Auto Render Assets")
+        # Phase 2d follow-up fix (Item 2): updater no longer runs at
+        # startup. Previously two unconditional calls here made network
+        # requests and could pop a modal UpdaterDialog BEFORE the main
+        # window appeared, blocking app launch behind external service
+        # availability. The same checks are now reachable through the
+        # "🔄 Updates" toolbar button (see setup_ui) which calls
+        # `self.check_for_updates()`. Existing updater.py logic is
+        # preserved verbatim — only the trigger moved from auto to manual.
         try:
             icon_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "assets", "Auto_Render.ico"
@@ -551,11 +755,15 @@ class VideoRendererTool(QMainWindow):
         if ultimate_dir.exists():
             self.output_directory = str(ultimate_dir)
             self.dir_label.setText(f"Output Directory: {self.output_directory}")
+            # Phase 2d follow-up fix (Issue 7): full path always reachable
+            # via tooltip when the visible label clips at the right edge.
+            self.dir_label.setToolTip(self.output_directory)
         else:
             last_output = self.config.get("output_dir", "")
             if last_output and os.path.isdir(last_output):
                 self.output_directory = last_output
                 self.dir_label.setText(f"Output Directory: {self.output_directory}")
+                self.dir_label.setToolTip(self.output_directory)
         last_videos = self.config.get("input_files", [])
         if last_videos:
             valid_videos = [video for video in last_videos if os.path.isfile(video)]
@@ -655,8 +863,27 @@ class VideoRendererTool(QMainWindow):
             "❓ Help", self.show_help, "#e3f2fd", "#1976d2", "#bbdefb"
         )
         help_btn.setToolTip("Open user guide")
+        # Phase 2d follow-up fix (Item 2): manual entry point for the
+        # updater. Replaces the previous auto-on-startup behaviour so
+        # the app launches without waiting on a network round-trip and
+        # the user controls when an update dialog can appear.
+        # Phase 2d follow-up fix (Issue 1): expose the button on `self`
+        # so check_for_updates can disable it during the (synchronous,
+        # network-blocking) check. Local-var storage would have lost
+        # the handle.
+        self.check_updates_btn = self.create_video_button(
+            "🔄 Updates",
+            self.check_for_updates,
+            "#ede7f6",
+            "#4527a0",
+            "#d1c4e9",
+        )
+        self.check_updates_btn.setToolTip(
+            "Check for application + asset updates (does not run at startup)"
+        )
         video_controls.addWidget(settings_btn)
         video_controls.addWidget(help_btn)
+        video_controls.addWidget(self.check_updates_btn)
         step1_label = QLabel("📥 Step 1: Add videos")
         step1_label.setStyleSheet(
             "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
@@ -897,7 +1124,13 @@ class VideoRendererTool(QMainWindow):
         dir_btn.setToolTip("Choose output folder")
         dir_btn.clicked.connect(self.select_output_directory)
         self.dir_label = QLabel("Not selected")
-        self.dir_label.setStyleSheet("padding-left: 10px; padding-right: 10px;")
+        # Phase 2d follow-up fix (Issue 7 — fullscreen clipping): the
+        # previous 10px right padding ran the text right up against the
+        # adjacent "📂 Open" button when the window was maximised, so
+        # long output paths visually clipped. Bump to 24px right and
+        # also enable a tooltip whose text we keep in sync with the
+        # path via select_output_directory / __init__ assignments.
+        self.dir_label.setStyleSheet("padding-left: 10px; padding-right: 24px;")
         open_btn = QPushButton("📂 Open")
         open_btn.setFixedWidth(150)
         open_btn.setFixedHeight(35)
@@ -1028,19 +1261,34 @@ class VideoRendererTool(QMainWindow):
         dlg.exec()
 
     def load_config(self) -> Dict[str, Any]:
-        """Tải cấu hình từ config_video_renderer.json nếu tồn tại."""
-        if self.CONFIG_FILE.exists():
-            try:
-                with open(self.CONFIG_FILE, "r", encoding="utf-8") as f:
-                    json.load(f)
-            except json.JSONDecodeError:
-                QMessageBox.warning(
-                    self,
-                    "Error",
-                    "Configuration file is corrupted. Loading default settings.",
-                )
-                return {}
-        return core_config.load(Path(self.CONFIG_FILE), default={})
+        """Tải cấu hình từ config_video_renderer.json nếu tồn tại.
+
+        Phase 2d follow-up fix (Item 3): the previous implementation only
+        caught `json.JSONDecodeError` from the validation open(), so an
+        OSError (locked file, permission denied, network drive offline)
+        would propagate out of __init__ and crash startup. It also read
+        the file twice (once to validate, once via core_config.load).
+
+        New flow: read once directly, catch the same two error classes
+        core_config.load handles (JSONDecodeError + OSError), and show
+        the user-facing warning only on actual failure. On success
+        return the parsed dict; otherwise return {} so downstream
+        `cfg.get(key, default)` lookups still resolve cleanly.
+        """
+        path = Path(self.CONFIG_FILE)
+        if not path.exists():
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            QMessageBox.warning(
+                self,
+                "Error",
+                "Configuration file is corrupted or unreadable. "
+                "Loading default settings.",
+            )
+            return {}
 
     def open_settings(self) -> None:
         """Open the Settings dialog modally and apply changes on OK."""
@@ -1140,17 +1388,27 @@ class VideoRendererTool(QMainWindow):
         self.btn_start.setToolTip("Begin rendering (F5)")
 
     def _apply_slot_defaults(self):
-        """Restore X-Render slot selections from config_video_renderer.json on startup."""
+        """Restore X-Render slot selections from config_video_renderer.json on startup.
+
+        Phase 2d follow-up fix (Item 5): new configs persist preset
+        IDs as combo userData. Legacy configs persisted display
+        names (combo text). Try the ID match first (collision-proof);
+        if it fails, fall back to text match so a saved-before-the-fix
+        config still loads, then save_config will rewrite it as IDs
+        on the next clean exit.
+        """
         slots = self.config.get("sequential_slots", [])
         if not slots:
             return
-        for i, name in enumerate(slots):
+        for i, slot_value in enumerate(slots):
             if i >= SEQUENTIAL_SLOT_COUNT:
                 break
-            if not name:
+            if not slot_value:
                 continue
             combo = self.sequential_combos[i]
-            idx = combo.findText(name)
+            idx = combo.findData(slot_value)
+            if idx < 0:
+                idx = combo.findText(slot_value)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
 
@@ -1161,6 +1419,12 @@ class VideoRendererTool(QMainWindow):
             # so SettingsDialog-managed keys (output_collision, gpu_error_action, etc.)
             # are NOT wiped when main window saves its own state.
             existing = core_config.load(Path(self.CONFIG_FILE), default={})
+            # Phase 2d follow-up fix (Item 5): both selection keys now
+            # persist preset IDs (stable, unique) instead of display
+            # names (ambiguous when 13 known (group,name) collisions
+            # exist in the library). _apply_slot_defaults reads back
+            # via findData() first and falls back to findText() so
+            # configs written by older versions still load cleanly.
             existing.update(
                 {
                     "input_files": self.videos,
@@ -1168,7 +1432,7 @@ class VideoRendererTool(QMainWindow):
                     "encoder_options": self.selected_encoders,
                     "num_threads": self.num_threads,
                     "sequential_slots": [
-                        c.currentText() for c in self.sequential_combos
+                        (c.currentData() or "") for c in self.sequential_combos
                     ],
                 }
             )
@@ -1236,6 +1500,99 @@ class VideoRendererTool(QMainWindow):
         if self.btn_cancel.isEnabled():
             self.cancel_render()
 
+    def _url_thread_is_running(self) -> bool:
+        """Safely test whether the URL download thread is alive and running.
+
+        Phase 2d follow-up fix (Issue 6 — stale QThread RuntimeError):
+        after a URL batch completes, the chain
+            worker.finished → thread.quit → thread.finished →
+            worker.deleteLater + thread.deleteLater
+        destroys the underlying C++ QThread while `self._url_thread`
+        still holds a Python wrapper. The next time the user clicks
+        Add URL, a bare `self._url_thread.isRunning()` raises
+        `RuntimeError("Internal C++ object (PySide6.QtCore.QThread)
+        already deleted")`, taking down the button and stranding the
+        user until app restart.
+
+        This helper:
+          - returns False if the ref was never set;
+          - swallows the RuntimeError if the C++ object is gone,
+            nulls both refs, returns False;
+          - if the thread exists but already finished, nulls the
+            refs and returns False;
+          - otherwise returns True.
+
+        Callers (add_url, closeEvent) get a simple boolean and can
+        trust that `False` means "safe to start a new batch".
+        """
+        t = getattr(self, "_url_thread", None)
+        if t is None:
+            return False
+        try:
+            running = t.isRunning()
+        except RuntimeError:
+            # Underlying C++ object already deleted (deleteLater
+            # processed by the event loop); release the Python ref so
+            # subsequent calls see a clean state.
+            self._url_thread = None
+            self._url_worker = None
+            return False
+        if not running:
+            # Thread object alive but already finished; consume the
+            # stale ref so the next batch starts clean.
+            self._url_thread = None
+            self._url_worker = None
+            return False
+        return True
+
+    def _on_url_thread_finished(self) -> None:
+        """Null out URL thread/worker refs once the thread is done.
+
+        Phase 2d follow-up fix (Issue 6). Connected to
+        `_url_thread.finished` ALONGSIDE the existing deleteLater
+        connections so the Python references are released
+        deterministically — independent of when Qt actually processes
+        the deleteLater queue. After this slot fires,
+        `_url_thread_is_running()` returns False via the cheap
+        `t is None` path without needing to swallow a RuntimeError.
+        """
+        self._url_thread = None
+        self._url_worker = None
+
+    def _on_url_cancel_clicked(self) -> None:
+        """User clicked Cancel on the URL download progress dialog.
+
+        Phase 2d follow-up fix (Issue 4 — cancel/download
+        synchronization): the previous wiring connected
+        `canceled` directly to `worker.cancel()`. The download
+        winds down asynchronously (yt-dlp must observe the
+        cancel_event), so the dialog kept its previous label and
+        an enabled Cancel button while doing nothing visible —
+        users perceived it as frozen or interpreted a second
+        click as the "real" cancel. We now:
+          - call worker.cancel() exactly once, guarded against a
+            deleted worker;
+          - relabel the progress dialog to "Cancelling, please
+            wait…" so the wind-down is visible;
+          - disable the Cancel button to prevent duplicate fires.
+        The dialog is closed by `_on_url_finished` / `_on_url_error`
+        once the worker emits its terminal signal.
+        """
+        worker = getattr(self, "_url_worker", None)
+        if worker is not None:
+            try:
+                worker.cancel()
+            except RuntimeError:
+                # Worker already deleted; nothing to cancel.
+                pass
+        dlg = getattr(self, "_url_progress", None)
+        if dlg is not None:
+            try:
+                dlg.setLabelText("Cancelling, please wait…")
+                dlg.setCancelButton(None)
+            except RuntimeError:
+                pass
+
     def add_url(self):
         """Open the URL input dialog and download the selected URLs.
 
@@ -1252,10 +1609,9 @@ class VideoRendererTool(QMainWindow):
         QMessageBox covers the case where the guard is bypassed (e.g. a
         keyboard shortcut wired straight to this slot).
         """
-        if (
-            getattr(self, "_url_thread", None) is not None
-            and self._url_thread.isRunning()
-        ):
+        # Phase 2d follow-up fix (Issue 6): use the safe helper so a
+        # stale (already-deleted) _url_thread cannot raise RuntimeError.
+        if self._url_thread_is_running():
             QMessageBox.information(
                 self,
                 "URL download",
@@ -1299,6 +1655,13 @@ class VideoRendererTool(QMainWindow):
             self._url_worker.error_message.connect(self._on_url_error)
             self._url_worker.finished.connect(self._url_thread.quit)
             self._url_worker.error_message.connect(self._url_thread.quit)
+            # Phase 2d follow-up fix (Issue 6 — stale QThread): release
+            # Python references when the thread reports finished, BEFORE
+            # deleteLater frees the C++ objects. Order of connections
+            # matters less than presence — Qt invokes them in connect-
+            # order on the main thread, and _on_url_thread_finished only
+            # sets attributes to None (no C++ access).
+            self._url_thread.finished.connect(self._on_url_thread_finished)
             self._url_thread.finished.connect(self._url_worker.deleteLater)
             self._url_thread.finished.connect(self._url_thread.deleteLater)
 
@@ -1308,13 +1671,26 @@ class VideoRendererTool(QMainWindow):
             # the label. Cancel sets the worker's cancel_event.
             n_urls = len(values["urls"])
             self._url_progress = QProgressDialog(
-                "Starting downloads...", "Cancel", 0, n_urls, self
+                # Phase 2d follow-up fix (Issue 3 — perceived delayed
+                # start): initial label is honest about the silent
+                # warm-up phase. yt-dlp probes site metadata before any
+                # bytes flow, so 0% sticking for a few seconds is
+                # normal — we tell the user that up front.
+                "Preparing yt-dlp (initial response may take a moment)…",
+                "Cancel",
+                0,
+                n_urls,
+                self,
             )
             self._url_progress.setWindowTitle("Downloading URLs")
             self._url_progress.setWindowModality(Qt.NonModal)
             self._url_progress.setMinimumDuration(0)
             self._url_progress.setValue(0)
-            self._url_progress.canceled.connect(self._url_worker.cancel)
+            # Phase 2d follow-up fix (Issue 4 — cancel synchronization):
+            # route Cancel through a wrapper that also updates the
+            # dialog label and disables the button, so the wind-down
+            # phase is visible.
+            self._url_progress.canceled.connect(self._on_url_cancel_clicked)
             # Internal completion tally (since the worker's `progress`
             # signal reports per-URL percentages, not batch position).
             self._url_finished_count = 0
@@ -1332,6 +1708,13 @@ class VideoRendererTool(QMainWindow):
             if hasattr(self, "add_url_btn") and self.add_url_btn is not None:
                 self.add_url_btn.setEnabled(False)
             self._url_thread.start()
+            # Phase 2d follow-up fix (Issue 3): force the progress
+            # dialog + output panel to repaint immediately so the user
+            # sees the "Preparing yt-dlp…" message before the worker
+            # thread does its first slow probe call. processEvents() is
+            # safe here because we have just finished mutating UI state
+            # and are about to return to the event loop.
+            QApplication.processEvents()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot open URL dialog: {str(e)}")
 
@@ -1432,12 +1815,24 @@ class VideoRendererTool(QMainWindow):
             QMessageBox.critical(self, "Error", f"Cannot select videos: {str(e)}")
 
     def update_video_list(self):
-        """Cập nhật danh sách video."""
+        """Cập nhật danh sách video.
+
+        Phase 2d follow-up fix (Issues 2 + 5 — blank-row repaint):
+        on macOS, Qt batches paint events while the main thread is
+        busy in a tight loop, so freshly-inserted QTreeWidgetItems
+        could appear blank until the user clicked one of them. Each
+        ffprobe call below now yields the event loop with
+        QApplication.processEvents() so the row paints incrementally,
+        and a final viewport().update() forces a definitive redraw
+        after the loop completes. Tooltip on column 1 carries the
+        full path so the truncated basename is still recoverable.
+        """
         self.tree_videos.clear()
         for idx, video_path in enumerate(self.videos, start=1):
             item = QTreeWidgetItem(self.tree_videos)
             item.setText(0, str(idx))
             item.setText(1, os.path.basename(video_path))
+            item.setToolTip(1, video_path)
             try:
                 duration = self.get_video_duration(video_path)
                 item.setText(2, duration)
@@ -1447,14 +1842,29 @@ class VideoRendererTool(QMainWindow):
                 item.setText(2, "Loading...")
                 item.setText(3, "Loading...")
                 print(f"Error getting video info for {video_path}: {str(e)}")
+            # Yield to the event loop so this row paints before the
+            # next ffprobe call blocks. Safe — we are between rows,
+            # not mid-mutation of a single item.
+            QApplication.processEvents()
         select_btn = self.findChild(QPushButton, "select_btn")
         if select_btn:
             select_btn.setText(f"📥 Select ({len(self.videos)})")
+        # Final belt-and-suspenders refresh in case Qt still cached
+        # the last paint pass.
+        self.tree_videos.viewport().update()
         self._update_empty_hints()
         self._update_start_button_state()
 
     def get_video_duration(self, video_path: str) -> str:
-        """Lấy thời lượng video sử dụng FFprobe."""
+        """Lấy thời lượng video sử dụng FFprobe.
+
+        Phase 2d follow-up fix (Item 6): adds a finite timeout to
+        subprocess.run so a hung ffprobe (corrupt file, stalled network
+        mount, antivirus quarantine) cannot freeze the UI indefinitely.
+        ffprobe metadata extraction on a single file should complete in
+        well under 10s; on TimeoutExpired we return the existing "—"
+        placeholder, identical to the empty-stdout / non-zero-rc branch.
+        """
         command = [
             str(self.FFPROBE_PATH),
             "-v",
@@ -1473,6 +1883,7 @@ class VideoRendererTool(QMainWindow):
                 text=True,
                 startupinfo=startupinfo,
                 creationflags=core_ffmpeg_runner.hidden_creationflags(),
+                timeout=10,
             )
             # Defensive parse per Step 4d-fix-1: ffprobe may return empty stdout
             # if file is still being finalized, codec metadata is missing, or
@@ -1489,12 +1900,21 @@ class VideoRendererTool(QMainWindow):
             minutes = int(duration_seconds % 3600 // 60)
             seconds = int(duration_seconds % 60)
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        except subprocess.TimeoutExpired:
+            print(f"ffprobe duration timed out (>10s) for: {video_path}")
+            return "—"
         except Exception:
             # Belt-and-suspenders: never crash the caller even on subprocess failure.
             return "—"
 
     def get_video_resolution(self, video_path: str) -> str:
-        """Lấy độ phân giải video sử dụng FFprobe."""
+        """Lấy độ phân giải video sử dụng FFprobe.
+
+        Phase 2d follow-up fix (Item 6): same finite-timeout treatment as
+        get_video_duration. On TimeoutExpired we return "Loading..." (the
+        same placeholder the existing exception branch returns) so the
+        tree row still renders cleanly.
+        """
         command = [
             str(self.FFPROBE_PATH),
             "-v",
@@ -1515,8 +1935,12 @@ class VideoRendererTool(QMainWindow):
                 text=True,
                 startupinfo=startupinfo,
                 creationflags=core_ffmpeg_runner.hidden_creationflags(),
+                timeout=10,
             )
             return result.stdout.strip() or "Loading..."
+        except subprocess.TimeoutExpired:
+            print(f"ffprobe resolution timed out (>10s) for: {video_path}")
+            return "Loading..."
         except Exception as e:
             print(f"Failed to get video resolution: {str(e)}")
             return "Loading..."
@@ -1551,6 +1975,10 @@ class VideoRendererTool(QMainWindow):
             if output_dir:
                 self.output_directory = output_dir
                 self.dir_label.setText(f"{self.output_directory}")
+                # Phase 2d follow-up fix (Issue 7): keep tooltip in sync
+                # so the full path is recoverable even when the visible
+                # label clips at the fullscreen right edge.
+                self.dir_label.setToolTip(self.output_directory)
                 self._update_start_button_state()
         except Exception as e:
             QMessageBox.critical(
@@ -1617,10 +2045,15 @@ class VideoRendererTool(QMainWindow):
             return
         else:
             if self.sequential_mode:
+                # Phase 2d follow-up fix (Item 5): sequential slot
+                # identity is the preset id (stored as combo userData),
+                # not the display text. Falsy currentData() means an
+                # unset slot — same semantic as the previous empty-string
+                # text guard, but now collision-proof for duplicate names.
                 self.sequential_encoders = [
-                    combo.currentText()
+                    combo.currentData()
                     for combo in self.sequential_combos
-                    if combo.currentText()
+                    if combo.currentData()
                 ]
                 if not self.sequential_encoders:
                     QMessageBox.warning(
@@ -1637,13 +2070,32 @@ class VideoRendererTool(QMainWindow):
                     )
                     return
                 else:
-                    selected_encoders = []
-                    encoder_params = {}
+                    # Phase 2d follow-up fix (Item 5): tree-mode
+                    # selection is keyed by the stable preset id (stashed
+                    # at Qt.UserRole+1 by load_encoders_to_tree per ADR-
+                    # 0006), not by the display text at column 2. The
+                    # 108-preset library has 13 known (group,name)
+                    # collisions; the previous name-keyed dict silently
+                    # dropped all but the last colliding selection. Items
+                    # without an id (defensive guard — should never
+                    # happen after 2c-c-4) are skipped.
+                    selected_encoders: list[str] = []
+                    encoder_params: dict[str, list[str]] = {}
                     for item in selected_items:
-                        name = item.text(2)
+                        preset_id = item.data(0, Qt.UserRole + 1) or ""
+                        if not preset_id:
+                            continue
                         code = item.data(0, Qt.UserRole).split()
-                        selected_encoders.append(name)
-                        encoder_params[name] = code
+                        selected_encoders.append(preset_id)
+                        encoder_params[preset_id] = code
+                    if not selected_encoders:
+                        QMessageBox.warning(
+                            self,
+                            "Warning",
+                            "Selected presets are missing internal IDs "
+                            "(refresh presets and try again).",
+                        )
+                        return
                     self.selected_encoders = selected_encoders
                     self.encoder_params = encoder_params
             self.is_rendering = True
@@ -1715,7 +2167,12 @@ class VideoRendererTool(QMainWindow):
                         except TypeError:
                             pass
                         thread.quit()
-                        thread.wait()
+                        # Phase 2d follow-up fix (Item 7): bounded wait so a
+                        # stuck ffmpeg child cannot freeze the queue-drain
+                        # terminal cleanup. 5 s matches the existing URL
+                        # close path; in practice quit() returns immediately
+                        # because the worker has already emitted finished.
+                        thread.wait(5000)
                 self.render_threads.clear()
                 self.render_workers.clear()
                 self.is_rendering = False
@@ -1738,8 +2195,18 @@ class VideoRendererTool(QMainWindow):
                 if thread_index == (-1):
                     return
                 else:
-                    video_path, encoder_names, video_idx = self.all_tasks[
+                    # Phase 2d follow-up fix (Item 5): self.all_tasks now
+                    # holds preset IDs in the second slot, not display
+                    # names. We resolve ids→params (collision-proof) and
+                    # ids→display-names (for the worker status emits +
+                    # tree-output cell text) here in the dispatcher; the
+                    # RenderWorker itself is unchanged and still receives
+                    # a list of display strings as `encoder_names`.
+                    video_path, encoder_ids, video_idx = self.all_tasks[
                         self.current_task_index
+                    ]
+                    encoder_names = [
+                        self._encoder_display_name(eid) for eid in encoder_ids if eid
                     ]
                     box_index = self.current_task_index
                     self.update_box_color(box_index, "yellow")
@@ -1762,22 +2229,24 @@ class VideoRendererTool(QMainWindow):
                         f"Processing - {os.path.basename(video_path)}"
                     ] = item
                     encoder_params_list = []
-                    for encoder_name in encoder_names:
-                        if not encoder_name:
+                    for encoder_id in encoder_ids:
+                        if not encoder_id:
                             continue
+                        if self.sequential_mode:
+                            # Sequential mode params live on the loaded
+                            # Preset registry — look up by ID, NOT by name.
+                            idx = self.get_encoder_index_by_id(encoder_id)
+                            if idx is not None:
+                                encoder_params_list.append(
+                                    list(self.encoder_options[idx].params)
+                                )
                         else:
-                            if self.sequential_mode:
-                                for encoder in self.encoder_options:
-                                    if encoder.name == encoder_name:
-                                        encoder_params_list.append(list(encoder.params))
-                                        break
-                            else:
-                                params = self.encoder_params.get(encoder_name)
-                                if params:
-                                    encoder_params_list.append(params)
+                            params = self.encoder_params.get(encoder_id)
+                            if params:
+                                encoder_params_list.append(params)
                     if not encoder_params_list:
                         self.on_render_error(
-                            f"Encoder parameters not found for {encoder_names}"
+                            f"Encoder parameters not found for {encoder_ids}"
                         )
                         return
                     else:
@@ -1835,7 +2304,13 @@ class VideoRendererTool(QMainWindow):
                         except TypeError:
                             pass
                         thread.quit()
-                        thread.wait()
+                        # Phase 2d follow-up fix (Item 7): bounded wait so a
+                        # stuck ffmpeg subprocess cannot freeze cancel_render.
+                        # Cancel already set is_cancelled=True; the worker
+                        # checks that flag in its loop and via should_cancel
+                        # passed to ffmpeg_runner. 5 s is the same cap used
+                        # in the URL-download close path.
+                        thread.wait(5000)
                 self.render_threads.clear()
                 self.render_workers.clear()
             if hasattr(self, "progress_boxes"):
@@ -2018,7 +2493,8 @@ class VideoRendererTool(QMainWindow):
                 except TypeError:
                     pass
                 self.render_threads[thread_index].quit()
-                self.render_threads[thread_index].wait()
+                # Phase 2d follow-up fix (Item 7): bounded per-task wait.
+                self.render_threads[thread_index].wait(5000)
         if self.current_task_index < self.total_tasks:
             self._start_next_task()
         if self.completed_tasks >= self.total_tasks:
@@ -2029,7 +2505,8 @@ class VideoRendererTool(QMainWindow):
                     except TypeError:
                         pass
                     thread.quit()
-                    thread.wait()
+                    # Phase 2d follow-up fix (Item 7): bounded batch-terminal wait.
+                    thread.wait(5000)
             self.render_threads.clear()
             self.render_workers.clear()
             self.is_rendering = False
@@ -2078,17 +2555,28 @@ class VideoRendererTool(QMainWindow):
         self.progress_label.setText(
             f"Progress: {self.completed_tasks}/{self.total_tasks} renders\nETA: {self._compute_eta_string()}"
         )
-        thread_index = worker.thread_index
-        if 0 <= thread_index < len(self.render_workers):
-            self.render_workers[thread_index] = None
-            if thread_index < len(self.render_threads):
-                try:
-                    self.render_threads[thread_index].started.disconnect()
-                except TypeError:
-                    pass
-                self.render_threads[thread_index].quit()
-                self.render_threads[thread_index].wait()
-        self.active_threads -= 1
+        # Phase 2d follow-up fix (Runtime QA — on_render_error crash):
+        # _start_next_task may call this slot DIRECTLY (encoder_params
+        # lookup miss at L2092) instead of via the Qt error_occurred
+        # signal. A direct call leaves `worker = self.sender()` == None,
+        # which would crash on bare `worker.thread_index` access. Mirror
+        # the earlier `if worker:` guards so the no-worker path emits
+        # the error but skips the per-thread cleanup (no thread was
+        # actually started for the failed dispatch).
+        if worker is not None:
+            thread_index = worker.thread_index
+            if 0 <= thread_index < len(self.render_workers):
+                self.render_workers[thread_index] = None
+                if thread_index < len(self.render_threads):
+                    try:
+                        self.render_threads[thread_index].started.disconnect()
+                    except TypeError:
+                        pass
+                    self.render_threads[thread_index].quit()
+                    # Phase 2d follow-up fix (Item 7): bounded wait on the
+                    # error-handler path too (mirror of on_render_completed).
+                    self.render_threads[thread_index].wait(5000)
+            self.active_threads -= 1
         self._start_next_task()
 
     def closeEvent(self, event):
@@ -2099,10 +2587,10 @@ class VideoRendererTool(QMainWindow):
         # a stuck yt-dlp child cannot block app shutdown forever. After
         # this branch, control falls through to the existing render-close
         # path so a simultaneous render+URL session is still handled.
-        if (
-            getattr(self, "_url_thread", None) is not None
-            and self._url_thread.isRunning()
-        ):
+        # Phase 2d follow-up fix (Issue 6): safe helper avoids
+        # RuntimeError when the underlying QThread has already been
+        # deleted by an earlier batch's deleteLater cycle.
+        if self._url_thread_is_running():
             reply = QMessageBox.question(
                 self,
                 "Exit",
@@ -2115,12 +2603,12 @@ class VideoRendererTool(QMainWindow):
             if getattr(self, "_url_worker", None) is not None:
                 try:
                     self._url_worker.cancel()
-                except Exception:
+                except (Exception, RuntimeError):
                     pass
             try:
                 self._url_thread.quit()
                 self._url_thread.wait(5000)
-            except Exception:
+            except (Exception, RuntimeError):
                 pass
 
         if self.is_rendering:
@@ -2143,7 +2631,8 @@ class VideoRendererTool(QMainWindow):
                         except TypeError:
                             pass
                         thread.quit()
-                        thread.wait()
+                        # Phase 2d follow-up fix (Item 7): bounded close-event wait.
+                        thread.wait(5000)
                     self.render_threads.clear()
                     self.render_workers.clear()
                 self.save_config()
@@ -2173,9 +2662,16 @@ class VideoRendererTool(QMainWindow):
         for combo in self.sequential_combos:
             combo.blockSignals(True)
             combo.clear()
-            combo.addItem("")
+            # Empty slot has no preset id; using "" as userData keeps
+            # the "currentData() is falsy → empty slot" check clean.
+            combo.addItem("", "")
             for encoder in sorted_encoders:
-                combo.addItem(encoder.name)
+                # Phase 2d follow-up fix (Item 5): combo carries the
+                # display name as visible text AND the stable preset id
+                # as userData. selection plumbing reads currentData(),
+                # never currentText(), so duplicate display names no
+                # longer collapse onto the same value.
+                combo.addItem(encoder.name, encoder.id)
             combo.blockSignals(False)
         for encoder in sorted_encoders:
             if selected_group == "All Groups" or encoder.group == selected_group:
@@ -2280,7 +2776,20 @@ class VideoRendererTool(QMainWindow):
             self.save_encoder_changes()
 
     def edit_encoder(self) -> None:
-        """Chỉnh sửa encoder đã chọn"""
+        """Chỉnh sửa encoder đã chọn
+
+        Phase 2d follow-up fix (Item 8 / Observation S): EncoderDialog only
+        round-trips name / description / params — it has no `details`
+        field. The previous implementation passed `dialog.result.get(
+        "details", "")` into the new Preset object, which silently wiped
+        the original `details` text every time a user pressed Edit/OK.
+
+        Fix: read the existing `details` from the live Preset object
+        BEFORE the assignment and pass it through unchanged. This is a
+        round-trip preservation, not a UI exposure — editing details
+        remains out of scope until EncoderDialog gains a field for it
+        (which would be a feature addition, not a bug fix).
+        """
         selection = self.tree_encoders.selectedItems()
         if not selection:
             QMessageBox.warning(self, "Warning", "Please select an encoder to edit")
@@ -2314,12 +2823,18 @@ class VideoRendererTool(QMainWindow):
             if idx is not None:
                 # Preserve id across edits — rename of a user preset does not
                 # change its id, matching desktop-app conventions.
+                # Preserve details across edits — EncoderDialog does not
+                # expose details yet, so reuse the live Preset value rather
+                # than letting the dialog implicitly blank it. If the
+                # dialog ever does start returning a "details" key, that
+                # takes precedence; otherwise we fall back to the original.
+                existing_details = self.encoder_options[idx].details
                 self.encoder_options[idx] = core_preset_loader.Preset(
                     id=current_id,
                     group=group,
                     name=name,
                     description=dialog.result["description"],
-                    details=dialog.result.get("details", ""),
+                    details=dialog.result.get("details", existing_details),
                     params=tuple(dialog.result["params"]),
                 )
                 self.save_encoder_changes()
@@ -2372,6 +2887,26 @@ class VideoRendererTool(QMainWindow):
             QMessageBox.warning(
                 self, "Save Failed", f"Could not save preset changes: {e}"
             )
+
+    def _encoder_display_name(self, encoder_id: str) -> str:
+        """Resolve a stable preset ID to its display name for UI labels.
+
+        Phase 2d follow-up fix (Item 5): preset selection / queue
+        identity now travels as the ADR-0006 preset `id` (which is
+        guaranteed unique by EncoderLibrary._ids_unique) rather than
+        the display `name` (which has 13 known collisions across the
+        108-preset library). UI strings still want the human-readable
+        name, so this helper does a single id→name translation. If
+        the id is unknown (stale config, deleted user preset) we
+        return the id itself instead of crashing, so the worker
+        status string still renders something diagnostic.
+        """
+        if not encoder_id:
+            return ""
+        idx = self.get_encoder_index_by_id(encoder_id)
+        if idx is None:
+            return encoder_id
+        return self.encoder_options[idx].name
 
     def get_encoder_index_by_id(self, preset_id: str) -> Optional[int]:
         """2c-c-4: Find encoder index by stable id."""
@@ -2440,13 +2975,22 @@ class VideoRendererTool(QMainWindow):
         return button
 
     def on_mode_changed(self):
-        """Xử lý khi chọn chế độ ghép"""
+        """Xử lý khi chọn chế độ ghép
+
+        Phase 2d follow-up fix (Item 5): mirror combo.currentData()
+        (preset id) instead of combo.currentText() (display name) so
+        self.sequential_encoders is consistent with the start_render
+        path. start_render overwrites this list anyway, but keeping
+        the two writes shape-identical prevents the field from
+        carrying display-name data during the brief moment between
+        a mode flip and the next render.
+        """
         self.sequential_mode = self.mode_sequential.isChecked()
         for combo in self.sequential_combos:
             combo.setEnabled(self.sequential_mode)
         if self.sequential_mode:
             self.sequential_encoders = [
-                self.sequential_combos[i].currentText()
+                (self.sequential_combos[i].currentData() or "")
                 for i in range(SEQUENTIAL_SLOT_COUNT)
             ]
         else:
@@ -2461,6 +3005,70 @@ class VideoRendererTool(QMainWindow):
         )
         dialog = HelpDialog(self, "Help - 1vmo Auto Render", readme_path)
         dialog.exec()
+
+    def check_for_updates(self) -> None:
+        """Manual entry point for the updater (Phase 2d follow-up fix, Item 2).
+
+        Triggers the same DriveUpdater.check_and_update sequence that
+        previously ran from __init__. Now reachable only by user action
+        via the "🔄 Updates" toolbar button so the app can launch
+        without a startup network round-trip and modal dialog. Both
+        the application binary and the asset bundle are checked, in
+        that order — identical to the pre-fix sequence.
+
+        Phase 2d follow-up fix (Issue 1 — Updates button UX): the
+        previous implementation gave no visible feedback during the
+        synchronous, network-blocking check, and repeated clicks
+        re-entered check_and_update each time. We now:
+          - disable the Updates button on entry, re-enable in finally;
+          - emit visible status lines to the output panel so the user
+            sees progress;
+          - call QApplication.processEvents() between phases so the
+            disabled state and status lines actually paint before the
+            blocking network calls begin.
+        Both the disable and the messages are inside a try/finally so
+        an exception in updater.py cannot leave the button stuck off.
+
+        Failure handling: updater.check_and_update already swallows
+        network errors internally (prints "Cannot read version
+        information" on _get_version_info failure and returns). We
+        wrap each call in a broad try/except as belt-and-suspenders so
+        a future regression in updater.py cannot bubble a crash back
+        into the renderer UI; the messagebox keeps the user informed.
+        """
+        btn = getattr(self, "check_updates_btn", None)
+        if btn is not None and not btn.isEnabled():
+            # Already in flight — debounce repeated clicks per Issue 1.
+            return
+        try:
+            if btn is not None:
+                btn.setEnabled(False)
+            self.update_ffmpeg_output("\n[Updates] Checking for application update…\n")
+            QApplication.processEvents()
+            try:
+                self.updater.check_and_update("1vmo Auto Render")
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Update check failed",
+                    f"Could not check for the application update:\n\n{exc}",
+                )
+                return
+            self.update_ffmpeg_output("[Updates] Checking for asset update…\n")
+            QApplication.processEvents()
+            try:
+                self.updater.check_and_update("1vmo Auto Render Assets")
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Update check failed",
+                    f"Could not check for the asset update:\n\n{exc}",
+                )
+                return
+            self.update_ffmpeg_output("[Updates] Check complete.\n")
+        finally:
+            if btn is not None:
+                btn.setEnabled(True)
 
 
 class EncoderDialog(QDialog):

@@ -288,6 +288,48 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution:** Either (a) make translate_to_nvenc default kwargs read from module constants, or (b) remove the unused constants and rely on the kwarg-default mechanism alone. Decision deferred to post-tag review.
 - **Trigger for pickup:** v2.5-complete tag landed.
 
+## B-029: empty_videos_hint label promises drag-drop that doesn't exist
+
+- **Status:** Open, Low
+- **Priority:** Low (UX-flaw)
+- **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-3)
+- **Context:** `auto_render.py:887` builds the `empty_videos_hint` QLabel with the text "Drag videos here or click Add Videos". A grep for `dropEvent`/`dragEnterEvent`/`setAcceptDrops` across `auto_render.py` returns zero matches — drag-drop has never been wired. The hint misleads users about a supported action.
+- **Implication:** Users may try to drag a file into the tree, see no response, and conclude the app is broken. No functional impact otherwise.
+- **Fix sketch (pick one):**
+  - (a) Rewrite the hint to "Click 📥 Select or 🌐 Add URL to load videos" — 1-line change, no code.
+  - (b) Implement `dragEnterEvent` + `dropEvent` on `tree_videos` accepting file URLs and routing into `self.videos` + `update_video_list()` — ~30 lines.
+- **Trigger for pickup:** When user reports the hint or when option (b) is wanted as a polish feature.
+
+## B-030: self.output_mapping dict is dead state (write-only, never read)
+
+- **Status:** Open, Low
+- **Priority:** Low (technical debt)
+- **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-4)
+- **Context:** `auto_render.py` initialises `self.output_mapping = {}` (L725), clears it on every render start (L1957), and inserts `output_mapping[f"Processing - {basename}"] = item` at L2072. Nothing in the file ever reads back from this dict — `on_render_completed` and `on_render_error` route via `worker.tree_item` directly. The whole construct is dead state from an earlier design iteration.
+- **Implication:** Harmless memory waste + reader confusion. Removable without behavior change.
+- **Fix sketch:** Delete L725, L1957 `output_mapping.clear()`, L2072-2074 insertion. Verify py_compile + ruff + smoke. ~5 lines removed.
+- **Trigger for pickup:** Next polish PR touching `start_render` / `_start_next_task`.
+
+## B-031: closeEvent URL-cancel cannot be undone if user declines render-close
+
+- **Status:** Open, Low
+- **Priority:** Low (UX flaw, no data loss)
+- **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-5)
+- **Context:** `auto_render.py::closeEvent` (Phase 2d Bug 2 fix) prompts URL first, then render second. If the user confirms "Cancel URL and exit?" but then clicks No on "Render running, exit?", the URL worker is ALREADY cancelled / joined — there is no un-cancel path. User ends up with the render continuing but the URL batch lost.
+- **Implication:** Worst case: user must re-issue the URL batch from scratch. Partial `.part` files from yt-dlp are still on disk so a manual resume is possible. Minor UX friction.
+- **Fix sketch:** Either (a) ask the render question FIRST so a No there aborts the close before any URL cleanup happens, or (b) consolidate both into a single combined modal "URL download + render are in progress; cancel both and exit?". Option (a) is ~3 lines (reorder branches); (b) is ~10 lines plus a smoke test.
+- **Trigger for pickup:** If users actually hit this in practice. Speculative until then.
+
+## B-032: GPU semaphore acquire is unbounded under contention + cancel
+
+- **Status:** Open, Low
+- **Priority:** Low (technical debt; bounded externally by Phase 2d Item 7 thread.wait(5000))
+- **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-6)
+- **Context:** `auto_render.py::RenderWorker.process` acquires `self.gpu_semaphore` at L359 with bare `acquire()` (no timeout). If two workers contend for a `gpu_max_concurrent=1` semaphore and the holder is hung waiting on ffmpeg, the second waiter blocks. Cancel sets `is_cancelled=True` on both workers, but the second one is inside the blocking `acquire()` call and cannot poll the cancel flag until the holder finally releases. The 5s `thread.wait(5000)` cap in `cancel_render` (Phase 2d Item 7) prevents UI-thread freeze; worst case is a brief zombie worker that exits after the holder eventually releases.
+- **Implication:** UI never freezes (existing Item 7 cap). The semaphore-blocked worker can outlive its parent thread by seconds in rare contention + cancel scenarios. Not observed in practice with the default `gpu_max_concurrent=2`.
+- **Fix sketch:** Replace `acquire()` with a `tryAcquire(timeout_ms)` polling loop that also checks `self.is_cancelled` between attempts. ~10 lines + a smoke test for the cancel-during-acquire path.
+- **Trigger for pickup:** A user report of a stuck worker on cancel, or a deliberate teardown of low-`gpu_max_concurrent` configurations.
+
 ## Resolved
 
 - **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.
