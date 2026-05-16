@@ -211,6 +211,12 @@ def _build_ydl_opts(
         "merge_output_format": "mp4",
         "noplaylist": True,
         "quiet": True,
+        # Phase 2d production-hardening fix (Issue 6): silence yt-dlp's
+        # own progress text to stderr. We already pipe per-URL progress
+        # to the renderer via `progress_hooks`; yt-dlp's default stderr
+        # progress is duplicative and pollutes the console + terminal
+        # output panel.
+        "noprogress": True,
         "no_warnings": True,
         "retries": 3,
         "fragment_retries": 3,

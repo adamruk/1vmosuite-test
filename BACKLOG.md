@@ -288,17 +288,10 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution:** Either (a) make translate_to_nvenc default kwargs read from module constants, or (b) remove the unused constants and rely on the kwarg-default mechanism alone. Decision deferred to post-tag review.
 - **Trigger for pickup:** v2.5-complete tag landed.
 
-## B-029: empty_videos_hint label promises drag-drop that doesn't exist
+## B-029: empty_videos_hint label promises drag-drop that doesn't exist — RESOLVED
 
-- **Status:** Open, Low
-- **Priority:** Low (UX-flaw)
-- **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-3)
-- **Context:** `auto_render.py:887` builds the `empty_videos_hint` QLabel with the text "Drag videos here or click Add Videos". A grep for `dropEvent`/`dragEnterEvent`/`setAcceptDrops` across `auto_render.py` returns zero matches — drag-drop has never been wired. The hint misleads users about a supported action.
-- **Implication:** Users may try to drag a file into the tree, see no response, and conclude the app is broken. No functional impact otherwise.
-- **Fix sketch (pick one):**
-  - (a) Rewrite the hint to "Click 📥 Select or 🌐 Add URL to load videos" — 1-line change, no code.
-  - (b) Implement `dragEnterEvent` + `dropEvent` on `tree_videos` accepting file URLs and routing into `self.videos` + `update_video_list()` — ~30 lines.
-- **Trigger for pickup:** When user reports the hint or when option (b) is wanted as a polish feature.
+- **Status:** Resolved in Phase 2d production-hardening batch (Issue 4).
+- **Resolution:** Implemented option (b) — `VideoRendererTool` now sets `setAcceptDrops(True)` and overrides `dragEnterEvent` / `dragMoveEvent` / `dropEvent` to accept local video file URLs (12-extension allowlist). Dropped paths flow through the same `self.videos` mutation as `select_videos`. Placeholder text also updated. Multi-file, unicode, spaces, and Windows backslash paths handled by `QUrl.toLocalFile`.
 
 ## B-030: self.output_mapping dict is dead state (write-only, never read)
 

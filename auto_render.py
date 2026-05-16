@@ -323,6 +323,42 @@ class RenderWorker(QObject):
                 else:  # "rename" default
                     if not is_image_encoder:
                         output_file = naming_utils.avoid_collision(output_file)
+                # Phase 2d production-hardening fix (Issue 1): for
+                # single-file outputs, render into a sidecar
+                # `<output>.partial` path and only os.replace to the
+                # canonical `output_file` after ffmpeg returns rc == 0.
+                # Cancel / error / Python exception paths delete the
+                # partial. This eliminates the failure mode where a
+                # cancelled or crashed render leaves a `<…>_final.mp4`
+                # on disk whose filename falsely implies success.
+                #
+                # Image sequences are unchanged — they produce N
+                # numbered frame files which are already cleaned up
+                # explicitly by `_cleanup_image_sequence` on every
+                # non-success exit; renaming hundreds of frames
+                # atomically is impractical and unnecessary.
+                #
+                # The 0-byte `output_file` placeholder created by
+                # avoid_collision is preserved as the reservation
+                # marker while ffmpeg writes to the `.partial` path;
+                # `os.replace(temp, output_file)` on success atomically
+                # swaps real content in over the placeholder.
+                if is_image_encoder:
+                    temp_output_file: Optional[str] = None
+                    ffmpeg_target = output_file
+                else:
+                    temp_output_file = output_file + ".partial"
+                    ffmpeg_target = temp_output_file
+                    # Clean any stale `.partial` from a prior aborted
+                    # attempt at this exact target — ffmpeg `-y` would
+                    # overwrite it anyway, but removing it up front
+                    # keeps the on-disk story tidy and prevents any
+                    # follow-on cleanup from misinterpreting it.
+                    if os.path.exists(temp_output_file):
+                        try:
+                            os.remove(temp_output_file)
+                        except OSError:
+                            pass
                 # GPU pipeline (ADR-0007 D2/D3/D7): translate encoder_params for NVENC.
                 # Phase 1 fallback contract: save ORIGINAL params before translator mutates them.
                 encoder_params_original = list(encoder_params)
@@ -346,7 +382,10 @@ class RenderWorker(QObject):
                             command.extend(["-c:v", "libx264"])
                     if not self._has_acodec(encoder_params):
                         command.extend(["-c:a", "aac"])
-                command.extend(["-y", str(Path(output_file))])
+                # Phase 2d production-hardening fix (Issue 1): ffmpeg
+                # writes to `ffmpeg_target` (== `<output>.partial` for
+                # single-file, == `output_file` for image sequences).
+                command.extend(["-y", str(Path(ffmpeg_target))])
                 self.output_updated.emit(
                     f"\n[Thread {self.thread_index + 1}] {progress_info}: Processing {os.path.basename(current_input)} with {encoder_name}\n"
                 )
@@ -382,15 +421,22 @@ class RenderWorker(QObject):
                         self.error_occurred.emit(
                             f"Skipped (GPU failed): {os.path.basename(output_file)}"
                         )
-                        # Phase 2d follow-up fix (Item 11): skip_file
-                        # returns before any other cleanup path runs.
-                        # Sweep the orphan placeholder + any partial
+                        # Phase 2d follow-up fix (Item 11) + production-
+                        # hardening (Issue 1): skip_file returns before
+                        # any other cleanup path runs. Sweep the orphan
+                        # placeholder + the `.partial` sidecar + partial
                         # image-sequence frames so we don't leak through
                         # the GPU-fail-skip exit.
                         if is_image_encoder:
                             _cleanup_image_sequence(output_file)
                         else:
                             _cleanup_zero_byte_placeholder(output_file)
+                            if temp_output_file is not None:
+                                try:
+                                    if os.path.exists(temp_output_file):
+                                        os.remove(temp_output_file)
+                                except OSError:
+                                    pass
                         return
                     # Default retry_cpu: rebuild command with original (untranslated) params.
                     self.output_updated.emit("\nGPU encode failed, retrying on CPU.\n")
@@ -403,7 +449,12 @@ class RenderWorker(QObject):
                         cpu_command.extend(["-c:v", "libx264"])
                     if not self._has_acodec(encoder_params_original):
                         cpu_command.extend(["-c:a", "aac"])
-                    cpu_command.extend(["-y", str(Path(output_file))])
+                    # Phase 2d production-hardening fix (Issue 1):
+                    # CPU retry writes to the same `.partial` sidecar
+                    # as the failed GPU attempt. ffmpeg `-y` overwrites
+                    # whatever the GPU left behind. Atomic rename to
+                    # `output_file` still happens only on rc==0 below.
+                    cpu_command.extend(["-y", str(Path(ffmpeg_target))])
                     rc = core_ffmpeg_runner.run_ffmpeg(
                         cpu_command,
                         dialect="legacy_stderr",
@@ -418,18 +469,54 @@ class RenderWorker(QObject):
                 if self.is_cancelled:
                     self.status_updated.emit(self.thread_index, "Cancelled")
                     self.progress_updated.emit(self.thread_index, 0)
-                    # Phase 2d follow-up fix (Items 4 + 11): cancel
-                    # mid-encode leaves incomplete output. For image
-                    # sequences, remove the partial frames. For single-
-                    # file outputs, remove ONLY the 0-byte avoid_collision
-                    # placeholder; any partial mp4/mkv (>0 bytes) stays
-                    # on disk so the user can inspect it.
+                    # Phase 2d follow-up fix (Items 4 + 11) + production-
+                    # hardening (Issue 1): cancel mid-encode leaves
+                    # incomplete output. For image sequences, remove the
+                    # partial frames. For single-file outputs, remove
+                    # both the 0-byte avoid_collision placeholder AND
+                    # the `.partial` sidecar that ffmpeg was writing to.
+                    # No `<…>_final.mp4` is ever left on disk because
+                    # ffmpeg was never writing to that name.
                     if is_image_encoder:
                         _cleanup_image_sequence(output_file)
                     else:
                         _cleanup_zero_byte_placeholder(output_file)
+                        if temp_output_file is not None:
+                            try:
+                                if os.path.exists(temp_output_file):
+                                    os.remove(temp_output_file)
+                            except OSError:
+                                pass
                     return
                 if rc == 0:
+                    # Phase 2d production-hardening fix (Issue 1):
+                    # atomically promote the `.partial` sidecar to the
+                    # canonical `output_file` on success. This swap is
+                    # what gives the user a `<…>_final.mp4` that is
+                    # GUARANTEED to be a complete render. Image
+                    # sequences skip this step (sequence frames are
+                    # already at their final paths).
+                    #
+                    # os.replace is atomic within a single filesystem;
+                    # the renderer writes both paths into the same
+                    # output directory so this invariant holds. If the
+                    # replace somehow fails (filesystem went read-only,
+                    # antivirus held the handle), we surface it as a
+                    # render error rather than silently treating the
+                    # step as successful — the `.partial` is left for
+                    # the user to inspect.
+                    if temp_output_file is not None and not is_image_encoder:
+                        try:
+                            os.replace(temp_output_file, output_file)
+                        except OSError as exc:
+                            error_msg = (
+                                f"Failed to finalize output "
+                                f"{os.path.basename(output_file)}: {exc}"
+                            )
+                            self.error_occurred.emit(error_msg)
+                            self.status_updated.emit(self.thread_index, "Error")
+                            self.progress_updated.emit(self.thread_index, 0)
+                            return
                     self.status_updated.emit(
                         self.thread_index,
                         f"Completed Step {i + 1}/{len(self.encoder_names)}",
@@ -463,16 +550,23 @@ class RenderWorker(QObject):
                     self.error_occurred.emit(error_msg)
                     self.status_updated.emit(self.thread_index, "Error")
                     self.progress_updated.emit(self.thread_index, 0)
-                    # Phase 2d follow-up fixes (Items 4 + 11): ffmpeg
-                    # failure on an image-sequence step writes 0..N
-                    # partial frames — clean them. For single-file
-                    # outputs, remove only the 0-byte placeholder; a
-                    # partial mp4/mkv with real content is preserved
-                    # for user inspection.
+                    # Phase 2d follow-up fixes (Items 4 + 11) + Issue 1:
+                    # ffmpeg failure on an image-sequence step writes
+                    # 0..N partial frames — clean them. For single-file
+                    # outputs, remove the 0-byte placeholder AND the
+                    # `.partial` sidecar (which contains whatever bytes
+                    # ffmpeg wrote before failing). The canonical
+                    # `<…>_final.mp4` never existed for this attempt.
                     if is_image_encoder:
                         _cleanup_image_sequence(output_file)
                     else:
                         _cleanup_zero_byte_placeholder(output_file)
+                        if temp_output_file is not None:
+                            try:
+                                if os.path.exists(temp_output_file):
+                                    os.remove(temp_output_file)
+                            except OSError:
+                                pass
                     return
             if final_output:
                 self.render_completed.emit(final_output)
@@ -481,18 +575,27 @@ class RenderWorker(QObject):
             self.error_occurred.emit(error_msg)
             self.status_updated.emit(self.thread_index, "Error")
             self.progress_updated.emit(self.thread_index, 0)
-            # Phase 2d follow-up fixes (Items 4 + 11): the loop crashed
-            # mid-step (Python-level exception, not an ffmpeg rc).
-            # current_step_output / current_step_is_image are bounded by
-            # the pre-loop init so this is safe even if the crash
-            # happened before output_file was assigned. Sequence frames
-            # always go; single-file outputs only go if they're the
-            # 0-byte avoid_collision placeholder.
+            # Phase 2d follow-up fixes (Items 4 + 11) + Issue 1: the
+            # loop crashed mid-step (Python-level exception, not an
+            # ffmpeg rc). current_step_output / current_step_is_image
+            # are bounded by the pre-loop init so this is safe even if
+            # the crash happened before output_file was assigned.
+            # Sequence frames always go; single-file outputs sweep the
+            # 0-byte avoid_collision placeholder AND the `.partial`
+            # sidecar if it exists (derived from current_step_output by
+            # appending the same `.partial` suffix used in the loop —
+            # see the comment block beside `temp_output_file` above).
             if current_step_output:
                 if current_step_is_image:
                     _cleanup_image_sequence(current_step_output)
                 else:
                     _cleanup_zero_byte_placeholder(current_step_output)
+                    derived_partial = current_step_output + ".partial"
+                    try:
+                        if os.path.exists(derived_partial):
+                            os.remove(derived_partial)
+                    except OSError:
+                        pass
 
 
 class URLInputDialog(QDialog):
@@ -746,6 +849,14 @@ class VideoRendererTool(QMainWindow):
         )
         self._gpu_semaphore = QSemaphore(self.gpu_max_concurrent)
         self.encoder_options = self.load_encoder_options()
+        # Phase 2d production-hardening fix (Issue 4): main window
+        # accepts video file drops. Handlers are defined further down
+        # (dragEnterEvent / dragMoveEvent / dropEvent) and use the
+        # same `self.videos` mutation path as the 📥 Select button —
+        # so dropping a file is functionally identical to picking it
+        # via the dialog. Drops during an in-flight render queue up
+        # for the next batch, matching select_videos semantics.
+        self.setAcceptDrops(True)
         self.setup_ui()
         self.setup_style()
 
@@ -892,7 +1003,7 @@ class VideoRendererTool(QMainWindow):
         input_layout.addLayout(video_controls)
         self.tree_videos = QTreeWidget()
         self.empty_videos_hint = QLabel(
-            "Drag videos here or click Add Videos", self.tree_videos.viewport()
+            "Drag videos here or click 📥 Select", self.tree_videos.viewport()
         )
         self.empty_videos_hint.setAlignment(Qt.AlignCenter)
         self.empty_videos_hint.setStyleSheet(
@@ -1187,11 +1298,16 @@ class VideoRendererTool(QMainWindow):
 
     def on_resize(self, event):
         """Căn chỉnh kích thước các cột khi cửa sổ thay đổi kích thước"""
+        # Phase 2d production-hardening fix (Issue 9): Resolution column
+        # (col 3) was 0.15 — narrow enough to truncate "3840x2160" on
+        # smaller fullscreen widths. Re-balanced filename and resolution
+        # shares to leave 0.18 for resolution; total is still 1.0
+        # (0.07 + 0.60 + 0.15 + 0.18).
         total_width = self.tree_videos.width()
-        self.tree_videos.setColumnWidth(0, int(total_width * 0.1))
-        self.tree_videos.setColumnWidth(1, int(total_width * 0.7))
+        self.tree_videos.setColumnWidth(0, int(total_width * 0.07))
+        self.tree_videos.setColumnWidth(1, int(total_width * 0.60))
         self.tree_videos.setColumnWidth(2, int(total_width * 0.15))
-        self.tree_videos.setColumnWidth(3, int(total_width * 0.15))
+        self.tree_videos.setColumnWidth(3, int(total_width * 0.18))
         total_width = self.tree_encoders.width()
         self.tree_encoders.setColumnWidth(0, int(total_width * 0.1))
         self.tree_encoders.setColumnWidth(1, int(total_width * 0.2))
@@ -1211,7 +1327,7 @@ class VideoRendererTool(QMainWindow):
 
     def setup_style(self):
         self.setStyleSheet(
-            '\n            QMainWindow { background-color: #f8f9fa; }\n            QFrame#top_frame, QFrame#bottom_frame { background-color: transparent; border: none; }\n            QFrame#input_frame, QFrame#config_frame, QFrame#progress_frame, QFrame#output_frame, QFrame#mode_frame {\n                background-color: white; border: 2px solid #dee2e6; border-radius: 8px;\n            }\n            QFrame#progress_info_frame { \n                background-color: #e3f2fd; \n                border: 1px solid #bbdefb; \n                border-radius: 4px;\n            }\n            QFrame#canvas { background-color: #f0f0f0; border: none; }\n            QPushButton {\n                background-color: #007bff; \n                color: white; \n                border: none; \n                border-radius: 4px; \n                padding: 4px 8px;\n                min-width: 120px; \n                max-width: 120px; \n                font-weight: bold;\n                font-size: 12px;\n            }\n            QPushButton:hover { background-color: #0056b3; }\n            QPushButton:disabled { background-color: #6c757d; }\n            QPushButton[delete="true"] { background-color: #dc3545; }\n            QPushButton[delete="true"]:hover { background-color: #c82333; }\n            QTreeWidget { \n                border: 1px solid #dee2e6; \n                border-radius: 4px;\n                background-color: white;\n                alternate-background-color: #f8f9fa;\n                color: #212529;\n            }\n            QTreeWidget::item { \n                padding: 2px; \n                border-bottom: 1px solid #dee2e6;\n                height: 25px;\n                min-height: 25px;\n                color: #212529;\n                background-color: transparent;\n            }\n            QTreeWidget::item:selected { \n                background-color: #007bff; \n                color: white; \n            }\n            QHeaderView::section { \n                background-color: #e3f2fd; \n                padding: 2px; \n                border: 1px solid #bbdefb; \n                font-weight: bold; \n                text-align: center; \n                color: #1976d2;\n                height: 25px;\n            }\n            QProgressBar { \n                border: 1px solid #dee2e6; \n                border-radius: 2px; \n                text-align: center; \n                height: 15px; \n            }\n            QProgressBar::chunk { background-color: #007bff; }\n            QTextEdit { \n                background-color: black; \n                color: white; \n                font-family: Consolas; \n                border-radius: 4px;\n                border: 2px solid #1976d2;  /* Thêm viền xanh */\n                padding: 5px;  /* Thêm padding */\n            }\n            QLabel {\n                color: #1976d2;\n                font-weight: bold;\n                padding: 5px;\n            }\n            QComboBox {\n                border: 1px solid #ced4da;\n                border-radius: 4px;\n                padding: 2px 4px;\n                background-color: white;\n                font-size: 12px;\n            }\n            QComboBox:hover { border: 1px solid #80bdff; }\n            QComboBox:focus { border: 1px solid #80bdff; outline: none; }\n            QComboBox::drop-down {\n                border: none;\n                width: 20px;\n            }\n            QComboBox::down-arrow {\n                width: 12px;\n                height: 12px;\n                margin-right: 5px;\n            }\n            QSpinBox {\n                border: 1px solid #ced4da;\n                border-radius: 4px;\n                padding: 5px;\n                background-color: white;\n            }\n            QSpinBox:hover { border: 1px solid #80bdff; }\n            QSpinBox:focus { border: 1px solid #80bdff; outline: none; }\n        '
+            '\n            QMainWindow { background-color: #f8f9fa; }\n            QFrame#top_frame, QFrame#bottom_frame { background-color: transparent; border: none; }\n            QFrame#input_frame, QFrame#config_frame, QFrame#progress_frame, QFrame#output_frame, QFrame#mode_frame {\n                background-color: white; border: 2px solid #dee2e6; border-radius: 8px;\n            }\n            QFrame#progress_info_frame { \n                background-color: #e3f2fd; \n                border: 1px solid #bbdefb; \n                border-radius: 4px;\n            }\n            QFrame#canvas { background-color: #f0f0f0; border: none; }\n            QPushButton {\n                background-color: #007bff; \n                color: white; \n                border: none; \n                border-radius: 4px; \n                padding: 4px 8px;\n                min-width: 120px; \n                max-width: 120px; \n                font-weight: bold;\n                font-size: 12px;\n            }\n            QPushButton:hover { background-color: #0056b3; }\n            QPushButton:disabled { background-color: #6c757d; }\n            QPushButton[delete="true"] { background-color: #dc3545; }\n            QPushButton[delete="true"]:hover { background-color: #c82333; }\n            QTreeWidget { \n                border: 1px solid #dee2e6; \n                border-radius: 4px;\n                background-color: white;\n                alternate-background-color: #f8f9fa;\n                color: #212529;\n            }\n            QTreeWidget::item { \n                padding: 2px; \n                border-bottom: 1px solid #dee2e6;\n                height: 25px;\n                min-height: 25px;\n                color: #212529;\n                background-color: transparent;\n            }\n            QTreeWidget::item:selected { \n                background-color: #007bff; \n                color: white; \n            }\n            QHeaderView::section { \n                background-color: #e3f2fd; \n                padding: 2px; \n                border: 1px solid #bbdefb; \n                font-weight: bold; \n                text-align: center; \n                color: #1976d2;\n                height: 25px;\n            }\n            QProgressBar { \n                border: 1px solid #dee2e6; \n                border-radius: 2px; \n                text-align: center; \n                height: 15px; \n            }\n            QProgressBar::chunk { background-color: #007bff; }\n            QTextEdit { \n                background-color: black; \n                color: white; \n                font-family: Consolas; \n                border-radius: 4px;\n                border: 2px solid #1976d2;  /* Thêm viền xanh */\n                padding: 5px;  /* Thêm padding */\n            }\n            QLabel {\n                color: #1976d2;\n                font-weight: bold;\n                padding: 5px;\n            }\n            QComboBox {\n                border: 1px solid #ced4da;\n                border-radius: 4px;\n                padding: 2px 4px;\n                background-color: white;\n                color: #212529;\n                font-size: 12px;\n            }\n            QComboBox QAbstractItemView {\n                background-color: white;\n                color: #212529;\n                selection-background-color: #007bff;\n                selection-color: white;\n            }\n            QComboBox:hover { border: 1px solid #80bdff; }\n            QComboBox:focus { border: 1px solid #80bdff; outline: none; }\n            QComboBox::drop-down {\n                border: none;\n                width: 20px;\n            }\n            QComboBox::down-arrow {\n                width: 12px;\n                height: 12px;\n                margin-right: 5px;\n            }\n            QSpinBox {\n                border: 1px solid #ced4da;\n                border-radius: 4px;\n                padding: 5px;\n                background-color: white;\n                color: #212529;\n            }\n            QLineEdit {\n                background-color: white;\n                color: #212529;\n                border: 1px solid #ced4da;\n                border-radius: 4px;\n                padding: 4px;\n            }\n            QSpinBox:hover { border: 1px solid #80bdff; }\n            QSpinBox:focus { border: 1px solid #80bdff; outline: none; }\n        '
         )
 
     def _check_dependencies(self) -> None:
@@ -1678,8 +1794,17 @@ class VideoRendererTool(QMainWindow):
                 # normal — we tell the user that up front.
                 "Preparing yt-dlp (initial response may take a moment)…",
                 "Cancel",
+                # Phase 2d production-hardening fix (Issue 5 — URL
+                # progress bar misleading): range is 0-100 (percent of
+                # the OVERALL batch). Each URL's downloading-percent
+                # contributes 1/n_urls of that scale, and each finished
+                # URL bumps the bar by 100/n_urls. Previously the bar
+                # max was n_urls so it only moved at all-or-nothing
+                # boundaries while the label said "95%" — single-URL
+                # downloads appeared frozen at 0%. New scale is honest:
+                # bar tracks the same number the label shows.
                 0,
-                n_urls,
+                100,
                 self,
             )
             self._url_progress.setWindowTitle("Downloading URLs")
@@ -1720,28 +1845,50 @@ class VideoRendererTool(QMainWindow):
 
     @Slot(int, str, float, str)
     def _on_url_progress(self, idx: int, url: str, pct: float, status: str) -> None:
-        """Per-URL progress callback from URLDownloadWorker (main thread)."""
+        """Per-URL progress callback from URLDownloadWorker (main thread).
+
+        Phase 2d production-hardening fix (Issue 5): the QProgressDialog
+        now has a 0-100 range and we feed it the OVERALL batch percent
+        — `(finished * 100 + current_pct) / n_urls` — so the bar tracks
+        the same number the label shows. Single-URL batches see the
+        bar move from 0 → 100 smoothly instead of jumping from 0 to
+        100 at the finished signal. Multi-URL batches see the bar
+        accumulate one URL's share at a time, with intra-URL progress
+        adding fractional movement within that slice.
+        """
+        total = max(1, self._url_total_count)
         if status == "downloading":
             self.update_ffmpeg_output(f"[URL {idx + 1}] {pct:5.1f}%  {url}\n")
-            # Update the dialog label with the in-flight URL + percent.
+            # Update the dialog label + bar with the in-flight URL.
             if hasattr(self, "_url_progress") and self._url_progress is not None:
                 shortened = (url[:60] + "…") if len(url) > 60 else url
                 self._url_progress.setLabelText(
-                    f"Downloading {idx + 1}/{self._url_total_count}: "
-                    f"{shortened}  ({pct:.0f}%)"
+                    f"Downloading {idx + 1}/{total}: {shortened}  ({pct:.0f}%)"
                 )
+                overall_pct = int((self._url_finished_count * 100 + pct) / total)
+                # Clamp into the bar's 0-100 range as belt-and-suspenders
+                # — pct comes from yt-dlp's downloader and should already
+                # be in 0..100, but a future regression at the source
+                # cannot break the bar widget.
+                self._url_progress.setValue(max(0, min(100, overall_pct)))
         elif status == "finished":
             self.update_ffmpeg_output(f"[URL {idx + 1}] done    {url}\n")
             if hasattr(self, "_url_progress") and self._url_progress is not None:
                 self._url_finished_count += 1
-                self._url_progress.setValue(self._url_finished_count)
+                overall_pct = int(self._url_finished_count * 100 / total)
+                self._url_progress.setValue(max(0, min(100, overall_pct)))
 
     @Slot(list)
     def _on_url_finished(self, results: list) -> None:
         """Batch complete: append successful paths to self.videos."""
         # Close the progress dialog before showing the summary modal.
         if hasattr(self, "_url_progress") and self._url_progress is not None:
-            self._url_progress.setValue(self._url_total_count)
+            # Phase 2d production-hardening fix (Issue 5): dialog max is
+            # now 100 (percent of batch). Setting to 100 visually
+            # completes the bar regardless of which URLs succeeded or
+            # were cancelled — the per-URL outcomes are surfaced in the
+            # summary modal below.
+            self._url_progress.setValue(100)
             self._url_progress.close()
             self._url_progress = None
 
@@ -2121,6 +2268,15 @@ class VideoRendererTool(QMainWindow):
                     st["percent"] = 0
                     st["error"] = ""
                     self._render_worker_label(idx)
+            # Phase 2d production-hardening fix (Issue 7): reset the
+            # per-worker QProgressBar values too. Without this, bars
+            # from the previous batch stayed at their last value
+            # (typically full blue) between renders, which looked
+            # like the new batch had started already at 100%. Cosmetic
+            # but visible in normal use.
+            if hasattr(self, "thread_bars"):
+                for bar in self.thread_bars:
+                    bar.setValue(0)
             for i in range(total_tasks):
                 box = self.create_progress_box(i)
                 self.progress_boxes.append(box)
@@ -2578,6 +2734,78 @@ class VideoRendererTool(QMainWindow):
                     self.render_threads[thread_index].wait(5000)
             self.active_threads -= 1
         self._start_next_task()
+
+    # Phase 2d production-hardening fix (Issue 4): real drag-and-drop
+    # support. The previous "Drag videos here" placeholder text was
+    # misleading — no drop handlers existed. We register the main
+    # window as a drop target and accept local file URLs whose
+    # extension matches one of the suite's known video containers.
+    # Multi-file, unicode, spaces, and Windows backslash paths are
+    # all handled (QUrl.toLocalFile normalises separators per
+    # platform). Files that don't match the allowlist are silently
+    # ignored — never raises.
+    _DRAG_DROP_VIDEO_EXTENSIONS = (
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".avi",
+        ".webm",
+        ".flv",
+        ".mpg",
+        ".mpeg",
+        ".m4v",
+        ".wmv",
+        ".ts",
+        ".m2ts",
+    )
+
+    def dragEnterEvent(self, event):
+        """Accept the drag only if at least one local video file is present."""
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            event.ignore()
+            return
+        for url in mime.urls():
+            if not url.isLocalFile():
+                continue
+            if url.toLocalFile().lower().endswith(self._DRAG_DROP_VIDEO_EXTENSIONS):
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Mirror dragEnterEvent so the cursor stays correct while hovering."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        """Append dropped video files to self.videos and refresh the tree.
+
+        Cancel-safe: this only mutates UI state through the same code
+        path as `select_videos`; if a render is already running, the
+        new files queue up for the next batch (start_render reads
+        self.videos at dispatch time, not at this drop event).
+        """
+        mime = event.mimeData()
+        if not mime.hasUrls():
+            event.ignore()
+            return
+        new_paths = []
+        for url in mime.urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            if not path.lower().endswith(self._DRAG_DROP_VIDEO_EXTENSIONS):
+                continue
+            if path not in self.videos:
+                new_paths.append(path)
+        if new_paths:
+            self.videos.extend(new_paths)
+            self.update_video_list()
+            self.btn_delete.setEnabled(True)
+        event.acceptProposedAction()
 
     def closeEvent(self, event):
         """Xử lý khi đóng ứng dụng."""

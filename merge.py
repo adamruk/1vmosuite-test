@@ -741,7 +741,13 @@ class VideoMergeTool(QMainWindow):
         # collapse below their designed size, and use resize() for initial geometry.
         self.setMinimumSize(1600, 900)
         self.resize(1600, 900)
-        self.updater.check_and_update("1vmo Merge")
+        # Phase 2d production-hardening fix (Issue 2): updater no longer
+        # runs at startup. See auto_render.py for the full rationale;
+        # in short, the previous call here made a network request and
+        # could pop a modal UpdaterDialog before the main window was
+        # visible. Now reachable via the "🔄 Updates" toolbar button
+        # which calls `self.check_for_updates()`. updater.py byte-
+        # identical.
         self.setup_icon()
         self.initialize_state()
         self.config = self.load_config()
@@ -836,6 +842,19 @@ class VideoMergeTool(QMainWindow):
         help_btn = self.create_video_button(
             "❓ Help", self.show_help, "#e3f2fd", "#1976d2", "#bbdefb"
         )
+        # Phase 2d production-hardening fix (Issue 2): manual updater
+        # entry. Stored on `self` so check_for_updates can disable it
+        # during the synchronous check. Same pattern as auto_render.py.
+        self.check_updates_btn = self.create_video_button(
+            "🔄 Updates",
+            self.check_for_updates,
+            "#ede7f6",
+            "#4527a0",
+            "#d1c4e9",
+        )
+        self.check_updates_btn.setToolTip(
+            "Check for application + asset updates (does not run at startup)"
+        )
         video_controls_top.addWidget(self.btn_group1)
         video_controls_top.addWidget(self.btn_group2)
         video_controls_top.addWidget(self.btn_group3)
@@ -843,6 +862,7 @@ class VideoMergeTool(QMainWindow):
         video_controls_top.addWidget(self.btn_delete)
         video_controls_top.addStretch()
         video_controls_top.addWidget(help_btn)
+        video_controls_top.addWidget(self.check_updates_btn)
         video_controls_bottom = QHBoxLayout()
         self.btn_audio = self.create_video_button(
             "🎵 Audio (0)", self.select_audio_files, "#e1bee7", "#7b1fa2", "#ce93d8"
@@ -1248,7 +1268,7 @@ class VideoMergeTool(QMainWindow):
 
     def setup_style(self):
         self.setStyleSheet(
-            '\n            QMainWindow { background-color: #f8f9fa; }\n            QFrame#top_frame, QFrame#bottom_frame { background-color: transparent; border: none; }\n            QFrame#input_frame, QFrame#config_frame, QFrame#progress_frame, QFrame#output_frame {\n                background-color: white; border: 2px solid #dee2e6; border-radius: 8px;\n            }\n            QFrame#sub_frame { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; }\n            QLabel#sub_title { color: #495057; font-size: 14px; font-weight: bold; padding: 5px; }\n            QLabel { padding: 5px; }\n            QLabel#dir_label { padding-left: 10px; padding-right: 10px; }\n            QLabel.status_label { \n                color: #1976d2; \n                font-weight: bold; \n                background-color: #e3f2fd; \n                border: 1px solid #bbdefb; \n                border-radius: 4px; \n                padding: 4px 8px; \n            }\n            QLabel.config_label {\n                color: #1976d2;\n                font-weight: bold;\n                font-size: 11px;\n                padding: 2px 4px;\n                background-color: #e3f2fd;\n                border: 1px solid #bbdefb;\n                border-radius: 3px;\n            }\n            QPushButton {\n                background-color: #007bff; color: white; border: none; border-radius: 4px; padding: 5px 10px;\n                min-width: 100px; max-width: 120px; font-weight: bold; font-size: 12px;\n            }\n            QPushButton:hover { background-color: #0056b3; }\n            QPushButton:disabled { background-color: #6c757d; }\n            QPushButton[delete="true"] { background-color: #dc3545; }\n            QPushButton[delete="true"]:hover { background-color: #c82333; }\n            QTreeWidget { border: 1px solid #dee2e6; border-radius: 4px; }\n            QTreeWidget::item { padding: 5px; border-bottom: 1px solid #dee2e6; }\n            QTreeWidget::item:selected { background-color: #007bff; color: white; }\n            QHeaderView::section { \n                background-color: #e3f2fd; \n                padding: 5px; \n                border: 1px solid #bbdefb; \n                font-weight: bold; \n                text-align: center; \n                color: #1976d2; \n            }\n            QProgressBar { \n                border: 1px solid #dee2e6; \n                border-radius: 4px; \n                text-align: center; \n                background-color: #f8f9fa; \n                font-weight: bold; \n            }\n            QProgressBar::chunk { background-color: #e3f2fd; border-radius: 3px; }\n            QTextEdit { background-color: black; color: white; font-family: Consolas; border-radius: 4px; }\n            QFrame#progress_info_frame { background-color: #e3f2fd; border: 1px solid #bbdefb; border-radius: 4px; }\n            QFrame#canvas { background-color: #f0f0f0; border: none; }\n            QComboBox {\n                border: 1px solid #bdc3c7;\n                border-radius: 3px;\n                padding: 1px 12px 1px 3px;\n                background: white;\n                min-height: 20px;\n                font-size: 11px;\n            }\n            QComboBox:hover { \n                border-color: #3498db; \n            }\n            QComboBox:focus { \n                border-color: #2980b9; \n            }\n            QComboBox::drop-down {\n                border: none;\n                width: 12px;\n            }\n            QComboBox::down-arrow {\n                width: 4px;\n                height: 4px;\n                margin-right: 4px;\n                image: none;\n                border: none;\n                border-radius: 2px;\n                background-color: #3498db;\n                opacity: 0.7;\n            }\n            QComboBox::down-arrow:hover {\n                background-color: #2980b9;\n                opacity: 1;\n            }\n            QComboBox::down-arrow:on {\n                background-color: #2980b9;\n                opacity: 1;\n            }\n            QComboBox QAbstractItemView {\n                border: 1px solid #bdc3c7;\n                selection-background-color: #3498db;\n                selection-color: white;\n                background: white;\n                font-size: 11px;\n            }\n            QSlider::groove:horizontal {\n                border: 1px solid #bdc3c7;\n                height: 8px;\n                background: #f0f0f0;\n                margin: 2px 0;\n                border-radius: 4px;\n            }\n            QSlider::handle:horizontal {\n                background: #007bff;\n                border: 1px solid #0056b3;\n                width: 18px;\n                margin: -5px 0;\n                border-radius: 9px;\n            }\n        '
+            '\n            QMainWindow { background-color: #f8f9fa; }\n            QFrame#top_frame, QFrame#bottom_frame { background-color: transparent; border: none; }\n            QFrame#input_frame, QFrame#config_frame, QFrame#progress_frame, QFrame#output_frame {\n                background-color: white; border: 2px solid #dee2e6; border-radius: 8px;\n            }\n            QFrame#sub_frame { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; }\n            QLabel#sub_title { color: #495057; font-size: 14px; font-weight: bold; padding: 5px; }\n            QLabel { padding: 5px; }\n            QLabel#dir_label { padding-left: 10px; padding-right: 10px; }\n            QLabel.status_label { \n                color: #1976d2; \n                font-weight: bold; \n                background-color: #e3f2fd; \n                border: 1px solid #bbdefb; \n                border-radius: 4px; \n                padding: 4px 8px; \n            }\n            QLabel.config_label {\n                color: #1976d2;\n                font-weight: bold;\n                font-size: 11px;\n                padding: 2px 4px;\n                background-color: #e3f2fd;\n                border: 1px solid #bbdefb;\n                border-radius: 3px;\n            }\n            QPushButton {\n                background-color: #007bff; color: white; border: none; border-radius: 4px; padding: 5px 10px;\n                min-width: 100px; max-width: 120px; font-weight: bold; font-size: 12px;\n            }\n            QPushButton:hover { background-color: #0056b3; }\n            QPushButton:disabled { background-color: #6c757d; }\n            QPushButton[delete="true"] { background-color: #dc3545; }\n            QPushButton[delete="true"]:hover { background-color: #c82333; }\n            QTreeWidget { border: 1px solid #dee2e6; border-radius: 4px; }\n            QTreeWidget::item { padding: 5px; border-bottom: 1px solid #dee2e6; }\n            QTreeWidget::item:selected { background-color: #007bff; color: white; }\n            QHeaderView::section { \n                background-color: #e3f2fd; \n                padding: 5px; \n                border: 1px solid #bbdefb; \n                font-weight: bold; \n                text-align: center; \n                color: #1976d2; \n            }\n            QProgressBar { \n                border: 1px solid #dee2e6; \n                border-radius: 4px; \n                text-align: center; \n                background-color: #f8f9fa; \n                font-weight: bold; \n            }\n            QProgressBar::chunk { background-color: #e3f2fd; border-radius: 3px; }\n            QTextEdit { background-color: black; color: white; font-family: Consolas; border-radius: 4px; }\n            QFrame#progress_info_frame { background-color: #e3f2fd; border: 1px solid #bbdefb; border-radius: 4px; }\n            QFrame#canvas { background-color: #f0f0f0; border: none; }\n            QComboBox {\n                border: 1px solid #bdc3c7;\n                border-radius: 3px;\n                padding: 1px 12px 1px 3px;\n                background: white;\n                color: #212529;\n                min-height: 20px;\n                font-size: 11px;\n            }\n            QComboBox:hover { \n                border-color: #3498db; \n            }\n            QComboBox:focus { \n                border-color: #2980b9; \n            }\n            QComboBox::drop-down {\n                border: none;\n                width: 12px;\n            }\n            QComboBox::down-arrow {\n                width: 4px;\n                height: 4px;\n                margin-right: 4px;\n                image: none;\n                border: none;\n                border-radius: 2px;\n                background-color: #3498db;\n                opacity: 0.7;\n            }\n            QComboBox::down-arrow:hover {\n                background-color: #2980b9;\n                opacity: 1;\n            }\n            QComboBox::down-arrow:on {\n                background-color: #2980b9;\n                opacity: 1;\n            }\n            QComboBox QAbstractItemView {\n                border: 1px solid #bdc3c7;\n                selection-background-color: #3498db;\n                selection-color: white;\n                background: white;\n                color: #212529;\n                font-size: 11px;\n            }\n            QSlider::groove:horizontal {\n                border: 1px solid #bdc3c7;\n                height: 8px;\n                background: #f0f0f0;\n                margin: 2px 0;\n                border-radius: 4px;\n            }\n            QSlider::handle:horizontal {\n                background: #007bff;\n                border: 1px solid #0056b3;\n                width: 18px;\n                margin: -5px 0;\n                border-radius: 9px;\n            }\n        '
         )
 
     def load_config(self) -> dict:
@@ -1962,6 +1982,33 @@ class VideoMergeTool(QMainWindow):
         )
         dialog = HelpDialog(self, "Help - 1vmo Merge", readme_path)
         dialog.exec()
+
+    def check_for_updates(self) -> None:
+        """Manual entry point for the updater (Phase 2d Issue 2).
+
+        Same pattern as auto_render.py / cutter.py: debounce via
+        button.isEnabled, try/finally re-enable, broad except so a
+        future updater.py regression cannot bubble a crash into the
+        renderer UI. updater.py is unchanged.
+        """
+        btn = getattr(self, "check_updates_btn", None)
+        if btn is not None and not btn.isEnabled():
+            return
+        try:
+            if btn is not None:
+                btn.setEnabled(False)
+            QApplication.processEvents()
+            try:
+                self.updater.check_and_update("1vmo Merge")
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Update check failed",
+                    f"Could not check for the application update:\n\n{exc}",
+                )
+        finally:
+            if btn is not None:
+                btn.setEnabled(True)
 
     def update_ratio_value(self, value):
         self.ratio_value.setText(f"{value}:{10 - value}")

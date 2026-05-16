@@ -226,13 +226,39 @@ class SettingsDialog(QDialog):
         self.gpu_enabled_check.setChecked(bool(self._get("gpu_enabled")))
         form.addRow("", self.gpu_enabled_check)
 
-        # Codec dropdown per ADR-0007 D4
+        # Codec dropdown per ADR-0007 D4.
+        # Phase 2d production-hardening fix (Issue 8): hide codecs the
+        # host GPU does not support. AV1 NVENC is Ada/Blackwell only;
+        # offering it on an Ampere RTX 3050 (or any non-Ada card) leads
+        # to ffmpeg failures at encode time. We read `gpu_caps` from
+        # the parent VideoRendererTool — it is populated once at
+        # startup by `gpu_detect.detect(FFMPEG_PATH)` and never
+        # mutated. If gpu_caps is unavailable (e.g. tests instantiate
+        # the dialog standalone) we leave the dropdown unfiltered so
+        # the prior behaviour is preserved.
+        gpu_caps = getattr(self.parent(), "gpu_caps", None)
+        h264_ok = getattr(gpu_caps, "h264_available", True) if gpu_caps else True
+        hevc_ok = getattr(gpu_caps, "hevc_available", True) if gpu_caps else True
+        av1_ok = getattr(gpu_caps, "av1_available", True) if gpu_caps else True
+        codec_choices = []
+        if h264_ok:
+            codec_choices.append(("h264_nvenc", "H.264 (NVENC) - fast, universal"))
+        if hevc_ok:
+            codec_choices.append(("hevc_nvenc", "HEVC (NVENC) - smaller files"))
+        if av1_ok:
+            codec_choices.append(("av1_nvenc", "AV1 (NVENC) - smallest, Ada+ only"))
+        if not codec_choices:
+            # Defensive: every NVENC codec disabled by gpu_caps. Fall
+            # back to the full original list so the dialog still has
+            # *something* selectable. AppDefaults.gpu_codec ("h264_nvenc")
+            # remains the canonical default.
+            codec_choices = [
+                ("h264_nvenc", "H.264 (NVENC) - fast, universal"),
+                ("hevc_nvenc", "HEVC (NVENC) - smaller files"),
+                ("av1_nvenc", "AV1 (NVENC) - smallest, experimental"),
+            ]
         self.gpu_codec_combo = QComboBox()
-        for value, label in [
-            ("h264_nvenc", "H.264 (NVENC) - fast, universal"),
-            ("hevc_nvenc", "HEVC (NVENC) - smaller files"),
-            ("av1_nvenc", "AV1 (NVENC) - smallest, experimental"),
-        ]:
+        for value, label in codec_choices:
             self.gpu_codec_combo.addItem(label, value)
         self._set_combo_data(self.gpu_codec_combo, self._get("gpu_codec"))
         form.addRow("Codec:", self.gpu_codec_combo)
