@@ -143,3 +143,19 @@ def avoid_collision(path: str) -> str:
                 # Last-resort: return the candidate even though we couldn't reserve it.
                 # Caller will get a real error when ffmpeg fails to open it.
                 return candidate
+
+
+def partial_path(final_path: str) -> str:
+    """Return a sibling temp path that preserves FFmpeg's recognised extension.
+
+    FFmpeg infers the output muxer from the file extension. A path like
+    ``out.mp4.partial`` cannot be muxed (no ``.partial`` muxer exists),
+    so the temp file is constructed with the marker BEFORE the extension:
+    ``out.mp4`` -> ``out.partial.mp4``. Files with no extension fall
+    back to a literal ``.partial`` suffix.
+    """
+    import os
+    base, ext = os.path.splitext(final_path)
+    if not ext:
+        return final_path + ".partial"
+    return f"{base}.partial{ext}"

@@ -347,7 +347,7 @@ class RenderWorker(QObject):
                     temp_output_file: Optional[str] = None
                     ffmpeg_target = output_file
                 else:
-                    temp_output_file = output_file + ".partial"
+                    temp_output_file = naming_utils.partial_path(output_file)
                     ffmpeg_target = temp_output_file
                     # Clean any stale `.partial` from a prior aborted
                     # attempt at this exact target — ffmpeg `-y` would
@@ -590,7 +590,7 @@ class RenderWorker(QObject):
                     _cleanup_image_sequence(current_step_output)
                 else:
                     _cleanup_zero_byte_placeholder(current_step_output)
-                    derived_partial = current_step_output + ".partial"
+                    derived_partial = naming_utils.partial_path(current_step_output)
                     try:
                         if os.path.exists(derived_partial):
                             os.remove(derived_partial)

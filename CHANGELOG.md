@@ -62,6 +62,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- **Render pipeline `.partial` muxer bug (F-001).** Temp paths during rendering were constructed as `<output>.mp4.partial`, which FFmpeg could not muxer-infer (no `.partial` muxer registered); 101 of 108 presets returned rc 234 with no output written. `core/naming_utils.py` gains a `partial_path()` helper that inserts `.partial` before the extension (`out.mp4` -> `out.partial.mp4`); auto_render.py:350 and :593 use it.
+
 - **Help dialog content translated to English (F-002).** Four README files in `assets/` (AutoRender, Cutter, Merge, Mixer) rewritten from Vietnamese to English. Stale UI labels corrected to match actual button names (`Videos`/`Delete`/`Main Videos`/`Group 1-4` had bogus emoji prefixes in the Vietnamese original; removed). Non-existent encoder filter groups (`Gaming`/`Movie`/`Music`/`Social`) replaced with the 11 real groups present in `Encoder.json`. `README GPM.md` left untouched (already English, unused).
 
 
