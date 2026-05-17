@@ -27,11 +27,11 @@ If a prompt conflicts with these rules, flag the conflict and stop — do not si
 
 ## Project
 
-**1vmo Video Suite** — four PyQt5 desktop apps (`auto_render.py`, `cutter.py`, `merge.py`, `mixer.py`) wrapping bundled FFmpeg for video editing.
+**1vmo Video Suite** — four PySide6 desktop apps (`auto_render.py`, `cutter.py`, `merge.py`, `mixer.py`) wrapping bundled FFmpeg for video editing.
 Solo dev, Windows + Python 3.13 + RTX 4080 NVENC.
 Originally decompiled from a college-era PyInstaller build, currently in a structured refactor.
 
-Repo root: `C:\Users\adamm\Downloads\1vmo Auto Render v3.5 testing\1vmo-suite`
+Repo root: `C:\Users\adamm\Downloads\1vmo-suite-final-handoff-4b68846`
 
 Layout:
 
