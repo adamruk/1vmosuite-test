@@ -200,6 +200,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- Updater rewritten as a passive "open GitHub releases page" button pointing at https://github.com/adamruk/1vmosuite-test/releases. The Google Sheet + Dropbox auto-update path is removed. Version tracking preserved at assets/Version AutoRender.json. Resolves F-005 (deferred to v3.10), F-029 (Google Sheet ID), F-038 (Popen shell=True footgun).
+
 - **Phase 2d follow-up — tooling gates aligned + comment corrections.** Pure housekeeping that ships alongside the Bug 1 / Bug 2 fix above; no runtime behavior change beyond the two bug fixes themselves.
   - `ruff check --fix .` applied repo-wide — 15 `I001` import-sort fixes across 16 files (`auto_render.py`, `bench.py`, `cutter.py`, `merge.py`, `mixer.py`, `settings_dialog.py`, `help_dialog.py`, `updater.py`, `core/ffmpeg_runner.py`, `core/preset_loader.py`, `core/widgets.py`, `tools/check_encoder_schema.py`, `tools/check_user_data.py`, `tools/generate_encoder_json.py`, `tools/test_integration_smoke.py`, `tests/smoke/test_url_downloader.py`). Pure import-block reordering — no API, no runtime semantics changed. Brings the tree into compliance with the AGENTS.md "ruff check . clean" gate now that the lint config is centralized in `pyproject.toml`.
   - `ruff format` applied to the two pre-existing test files Adam flagged as drifted from the project format (`tests/smoke/test_url_downloader.py`, `tools/test_integration_smoke.py`). All 39 .py files now pass `ruff format --check`.
