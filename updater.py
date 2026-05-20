@@ -130,6 +130,33 @@ class DriveUpdater:
                     if self._compare_versions(version, saved_version) <= 0:
                         print("You are using the latest version")
                         return
+                    # macOS stabilization (Step 4): the in-app self-
+                    # replace ladder below (download .exe + write batch
+                    # file + cmd /c + Popen) is Windows-only. On macOS
+                    # the .app bundle structure, code signing, and
+                    # Gatekeeper quarantine make in-process binary
+                    # replacement unsafe. Surface a clear "manual
+                    # update required" message instead of attempting
+                    # the Windows path on darwin.
+                    if sys.platform == "darwin":
+                        msg = QMessageBox()
+                        if self.icon:
+                            msg.setWindowIcon(self.icon)
+                        msg.setWindowTitle("Update available (macOS)")
+                        msg.setIcon(QMessageBox.Information)
+                        msg.setText(
+                            "✨ A new version of "
+                            f"{app_name} is available.\n\n"
+                            f"v{saved_version} → v{version}\n\n"
+                            "📦 The in-app auto-update path is "
+                            "Windows-only. To update on macOS, please "
+                            "download the latest release manually or "
+                            "rebuild from source. See "
+                            "docs/MACOS_BUILD.md for the build recipe."
+                        )
+                        msg.setStandardButtons(QMessageBox.Ok)
+                        msg.exec()
+                        return
                     dialog = UpdaterDialog(saved_version, version)
                     if self.icon:
                         dialog.setWindowIcon(self.icon)

@@ -777,7 +777,14 @@ class VideoRendererTool(QMainWindow):
         self.setGeometry(100, 100, 1600, 900)
         # Allow resize and maximize — set a reasonable minimum so layouts don't
         # collapse below their designed size, and use resize() for initial geometry.
-        self.setMinimumSize(1600, 900)
+        # macOS stabilization (Step 1): minimum size reduced from
+        # 1600×900 to 1280×800 so the app fits on a 13" MacBook
+        # (1440×900 effective) and a 14" MacBook (1512×982 effective)
+        # without horizontal overflow. The initial resize() target
+        # stays at 1600×900 — Qt auto-shrinks to the available screen
+        # rect on smaller displays. Windows users with ≥1080p screens
+        # see the same launch size they had before.
+        self.setMinimumSize(1280, 800)
         self.resize(1600, 900)
         # Phase 2d follow-up fix (Item 2): updater no longer runs at
         # startup. Previously two unconditional calls here made network

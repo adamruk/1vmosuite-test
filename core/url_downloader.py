@@ -23,11 +23,49 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, Optional
+
+
+# macOS stabilization (Step 5): resolve the bundled ffmpeg directory so
+# yt-dlp uses the same binary the renderer uses, not whatever brew /
+# system ffmpeg happens to be in PATH. yt-dlp invokes ffmpeg as a
+# subprocess for muxing (merge_output_format=mp4) and subtitle remux;
+# a mismatched system ffmpeg can produce containers the renderer
+# rejects or codecs the bundled ffmpeg can't read.
+#
+# Resolution order:
+#   1. PyInstaller frozen bundle:   sys._MEIPASS / "ffmpeg"
+#   2. Source mode (Mac/Linux/Win): <repo_root> / "ffmpeg"
+#   3. Fallback (no folder found):  None → yt-dlp uses PATH (legacy
+#                                   behaviour; no regression on systems
+#                                   that always relied on PATH ffmpeg).
+def _resolve_bundled_ffmpeg_dir() -> Optional[str]:
+    """Return the directory containing the bundled ffmpeg binary, or None.
+
+    The path is passed to yt-dlp's `ffmpeg_location` option so the
+    downloader and the renderer agree on which ffmpeg performs
+    post-download muxing.
+    """
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "ffmpeg")
+    # Source-mode: this file lives at core/url_downloader.py, so the
+    # repo root is the parent's parent.
+    candidates.append(Path(__file__).resolve().parent.parent / "ffmpeg")
+    suffix = ".exe" if os.name == "nt" else ""
+    for cand in candidates:
+        if (cand / f"ffmpeg{suffix}").is_file():
+            return str(cand)
+    return None
+
+
+_BUNDLED_FFMPEG_DIR = _resolve_bundled_ffmpeg_dir()
 
 logger = logging.getLogger("core.url_downloader")
 
@@ -219,6 +257,15 @@ def _build_ydl_opts(
         "noprogress": True,
         "no_warnings": True,
         "retries": 3,
+        # macOS stabilization (Step 5): pin yt-dlp's muxer to the
+        # bundled ffmpeg. On macOS source-mode the user may have
+        # multiple ffmpeg builds in PATH (homebrew, MacPorts, system);
+        # on frozen .app bundles PATH may not contain ffmpeg at all.
+        # If we have a bundled binary, force yt-dlp to use it so the
+        # renderer downstream sees the same codec / container support.
+        # If no bundled ffmpeg is found, fall back to yt-dlp's default
+        # PATH lookup (legacy behaviour).
+        **({"ffmpeg_location": _BUNDLED_FFMPEG_DIR} if _BUNDLED_FFMPEG_DIR else {}),
         "fragment_retries": 3,
         "retry_sleep_functions": {
             "http": lambda n: 2**n,
