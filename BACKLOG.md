@@ -38,16 +38,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Partial cleanup (2026-04-29, v2.5.3):** The stale `nvenc_quality_offset` reference in the `_reload_config_settings` comment block (`auto_render.py` L885) was removed.
 - **Partial fix (2026-05-11, Phase 1 / `ffcf529`):** The 5 GPU Pipeline keys (`gpu_enabled`, `gpu_codec`, `gpu_preset`, `gpu_max_quality_mode`, `gpu_max_concurrent`) are now refreshed on Settings dialog OK without an app restart, sourced from `core.config.APP_DEFAULTS` for default values. `QSemaphore` is rebuilt only when `gpu_max_concurrent` actually changes; in-flight workers retain their existing semaphore reference. Pre-existing wiring for `output_collision` / `gpu_error_action` preserved. B-014 stays Open for the remaining 3 keys above.
 
-## B-015: translate_to_nvenc codec routing contradicts ADR-0007 D4
-
-- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; LOW priority)
-- **Priority:** LOW (niche — only affects libx265 presets when user has gpu_codec=h264_nvenc)
-- **Surfaced:** v2.5.1 PARALLEL audit (2026-04-28)
-- **Context:** core/preset_translator.py `translate_to_nvenc` computes `mapped = _CODEC_MAP.get(input_codec, input_codec)` (which would map libx265->hevc_nvenc per D4) but then ignores `mapped` in the `if input_codec in _CODEC_MAP:` branch and uses the `codec` kwarg instead. Comment says "respect codec arg over preset map" — intentional, but contradicts ADR-0007 D4 which states `libx265 -> hevc_nvenc`.
-- **Implication:** User has libx265 preset + gpu_codec=h264_nvenc (default) → preset gets translated to h264_nvenc, NOT hevc_nvenc. Codec intent of preset overridden by user's default. Quality/compatibility consequences depending on use case.
-- **Resolution:** Either (a) honor `_CODEC_MAP` per-preset mapping, OR (b) update ADR-0007 D4 commentary in a new ADR to reflect actual single-knob behavior. Document chosen direction in the implementing commit. Dead `mapped` variable in else-branch can be cleaned up regardless.
-- **Trigger for pickup:** post-tag review or first user report involving libx265 preset on GPU.
-
 ## B-016: anchor #8 missing thread_bars[idx].setValue(0)
 
 - **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; cosmetic)
@@ -315,7 +305,8 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ## B-032: GPU semaphore acquire is unbounded under contention + cancel
 
-- **Status:** Open, Low
+- **Status:** RESOLVED [b8f3cb1] 2026-05-24 — bounded cancellable acquire via module-level `_acquire_gpu_slot()` (tryAcquire+cancel-poll); `finally` releases only a held slot. Headless test `tests/smoke/test_gpu_semaphore_cancel.py`; live cancel-mid-NVENC is MANUAL-VERIFIED.
+- **Status (original):** Open, Low
 - **Priority:** Low (technical debt; bounded externally by Phase 2d Item 7 thread.wait(5000))
 - **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-6)
 - **Context:** `auto_render.py::RenderWorker.process` acquires `self.gpu_semaphore` at L359 with bare `acquire()` (no timeout). If two workers contend for a `gpu_max_concurrent=1` semaphore and the holder is hung waiting on ffmpeg, the second waiter blocks. Cancel sets `is_cancelled=True` on both workers, but the second one is inside the blocking `acquire()` call and cannot poll the cancel flag until the holder finally releases. The 5s `thread.wait(5000)` cap in `cancel_render` (Phase 2d Item 7) prevents UI-thread freeze; worst case is a brief zombie worker that exits after the holder eventually releases.
@@ -428,7 +419,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ## B-041: "5s Cycle Zoom" preset has stray shell double-quotes that reach ffmpeg literally
 
-- **Status:** Open, backlog. Surfaced during the #6 tokenizer investigation (2026-05-24). Adam to decide whether to fix this session. **Not fixed by #6** (tokenizer scope; see below).
+- **Status:** RESOLVED [ea7a67d] 2026-05-24 — removed the stray outer double-quotes from `assets/Encoder.txt` L43 and regenerated `assets/Encoder.json` (both in ea7a67d). A content fix, not a tokenizer change (see B-042). Surfaced during the #6 tokenizer investigation. Live render is MANUAL-VERIFIED.
 - **Priority:** MEDIUM (the preset fails to render — ffmpeg rejects the filtergraph).
 - **Locations:**
   - `assets/Encoder.txt` L43 ("5s Cycle Zoom")
@@ -452,6 +443,8 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Surfaced/closed by:** Phase-3 fix-pass #6 investigation, 2026-05-24.
 
 ## Resolved
+
+- **B-015** — translate_to_nvenc codec routing: codified single-knob routing (user's gpu_codec wins over per-preset map) and removed the dead `mapped` variable; corrected the `_CODEC_MAP` "per ADR-0007 D4" mis-citation (D4 is the codec dropdown, not routing). Resolved [c051473], documented in [ADR-0015](docs/decisions/ADR-0015-nvenc-codec-routing.md). 2026-05-24.
 
 - **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.
 
