@@ -263,7 +263,11 @@ def detect(ffmpeg_path: Path) -> GPUCapabilities:
         primary = caps.primary_device
         gen = primary.generation if primary else GPUGeneration.UNKNOWN
         hw_supports_hevc = gen.supports_hevc or gen == GPUGeneration.UNKNOWN
-        caps.h264_available = hw_supports_hevc and codecs.h264
+        # H.264 NVENC is supported by every NVENC-era NVIDIA GPU, so it unlocks
+        # from the ffmpeg probe alone — independent of the HEVC hardware gate.
+        # (A4: previously `hw_supports_hevc and codecs.h264`, which wrongly hid
+        # H.264 on pre-Turing cards that lack HEVC NVENC but do support H.264.)
+        caps.h264_available = codecs.h264
         caps.hevc_available = hw_supports_hevc and codecs.hevc
         caps.av1_available = gen.supports_av1 and codecs.av1
         caps.nvenc_available = (
