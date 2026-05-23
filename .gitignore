@@ -20,9 +20,12 @@ dist/
 Thumbs.db
 .DS_Store
 
-# Bundled ffmpeg binaries (huge, reproducible from your bundling setup)
+# Bundled ffmpeg binaries (huge, reproducible from your bundling setup).
+# Shared-build DLLs are large (~154 MB) and provisioned by setup.ps1 on clone,
+# so they stay out of git alongside the .exe wrappers.
 ffmpeg/ffmpeg.exe
 ffmpeg/ffprobe.exe
+ffmpeg/*.dll
 
 # Runtime logs / user data
 *.log
