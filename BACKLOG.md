@@ -38,16 +38,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Partial cleanup (2026-04-29, v2.5.3):** The stale `nvenc_quality_offset` reference in the `_reload_config_settings` comment block (`auto_render.py` L885) was removed.
 - **Partial fix (2026-05-11, Phase 1 / `ffcf529`):** The 5 GPU Pipeline keys (`gpu_enabled`, `gpu_codec`, `gpu_preset`, `gpu_max_quality_mode`, `gpu_max_concurrent`) are now refreshed on Settings dialog OK without an app restart, sourced from `core.config.APP_DEFAULTS` for default values. `QSemaphore` is rebuilt only when `gpu_max_concurrent` actually changes; in-flight workers retain their existing semaphore reference. Pre-existing wiring for `output_collision` / `gpu_error_action` preserved. B-014 stays Open for the remaining 3 keys above.
 
-## B-015: translate_to_nvenc codec routing contradicts ADR-0007 D4
-
-- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; LOW priority)
-- **Priority:** LOW (niche — only affects libx265 presets when user has gpu_codec=h264_nvenc)
-- **Surfaced:** v2.5.1 PARALLEL audit (2026-04-28)
-- **Context:** core/preset_translator.py `translate_to_nvenc` computes `mapped = _CODEC_MAP.get(input_codec, input_codec)` (which would map libx265->hevc_nvenc per D4) but then ignores `mapped` in the `if input_codec in _CODEC_MAP:` branch and uses the `codec` kwarg instead. Comment says "respect codec arg over preset map" — intentional, but contradicts ADR-0007 D4 which states `libx265 -> hevc_nvenc`.
-- **Implication:** User has libx265 preset + gpu_codec=h264_nvenc (default) → preset gets translated to h264_nvenc, NOT hevc_nvenc. Codec intent of preset overridden by user's default. Quality/compatibility consequences depending on use case.
-- **Resolution:** Either (a) honor `_CODEC_MAP` per-preset mapping, OR (b) update ADR-0007 D4 commentary in a new ADR to reflect actual single-knob behavior. Document chosen direction in the implementing commit. Dead `mapped` variable in else-branch can be cleaned up regardless.
-- **Trigger for pickup:** post-tag review or first user report involving libx265 preset on GPU.
-
 ## B-016: anchor #8 missing thread_bars[idx].setValue(0)
 
 - **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; cosmetic)
@@ -315,7 +305,8 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ## B-032: GPU semaphore acquire is unbounded under contention + cancel
 
-- **Status:** Open, Low
+- **Status:** RESOLVED [b8f3cb1] 2026-05-24 — bounded cancellable acquire via module-level `_acquire_gpu_slot()` (tryAcquire+cancel-poll); `finally` releases only a held slot. Headless test `tests/smoke/test_gpu_semaphore_cancel.py`; live cancel-mid-NVENC is MANUAL-VERIFIED.
+- **Status (original):** Open, Low
 - **Priority:** Low (technical debt; bounded externally by Phase 2d Item 7 thread.wait(5000))
 - **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-6)
 - **Context:** `auto_render.py::RenderWorker.process` acquires `self.gpu_semaphore` at L359 with bare `acquire()` (no timeout). If two workers contend for a `gpu_max_concurrent=1` semaphore and the holder is hung waiting on ffmpeg, the second waiter blocks. Cancel sets `is_cancelled=True` on both workers, but the second one is inside the blocking `acquire()` call and cannot poll the cancel flag until the holder finally releases. The 5s `thread.wait(5000)` cap in `cancel_render` (Phase 2d Item 7) prevents UI-thread freeze; worst case is a brief zombie worker that exits after the holder eventually releases.
@@ -410,7 +401,67 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - Local-only by construction: queue file lives in the user's local `user_data_dir`, no network code, no auth, no remote endpoint.
   - Test coverage: `tests/smoke/test_queue_store.py` (16 cases) covers all 11 scenarios from the design doc §6.1 — ADR-0003 narrow-pytest exception (pure-IO unit, no Qt/ffmpeg/GPU, <2s, deterministic).
 
+## B-040: gpu_detect HEVC gen-gate under-reports HEVC NVENC on Maxwell/Pascal (A4-class)
+
+- **Status:** Open, backlog. **Do NOT fix in the current GPU fix-pass** — filed for a later, dedicated NVENC-gate pass.
+- **Priority:** LOW–MEDIUM (HEVC GPU path silently hidden on Maxwell/Pascal cards that actually support it; same bug class as A4, one codec over).
+- **Surfaced:** B-015 VERIFY review (2026-05-24), while confirming the A4 fix (`d438fb0`).
+- **Locations:**
+  - `gpu_detect.py` — `GPUGeneration.supports_hevc` (returns True only for Turing/Ampere/Ada/Blackwell, i.e. CC 7.5+)
+  - `gpu_detect.py::detect()` — `caps.hevc_available = hw_supports_hevc and codecs.hevc`
+- **Context:** `supports_hevc` gates HEVC to Turing-and-newer. But ADR-0007 D5 (line 149) states "NVENC works on any NVIDIA GPU from Maxwell (2014) forward; h264_nvenc and hevc_nvenc are universal across that range." NVIDIA hardware sides with the ADR: 2nd-gen Maxwell (GM206, GTX 950/960) and all Pascal (GTX 10xx) ship HEVC NVENC encoders. So a Maxwell/Pascal card with `hevc_nvenc` present in ffmpeg is wrongly reported `hevc_available=False`, hiding the HEVC GPU path. This is the exact A4 bug class (hardware gate too strict relative to the real ffmpeg-probe signal), shifted from H.264 to HEVC.
+- **Nuance (why this is not a trivial one-liner):** the floor is not simply "all PRE_TURING". 1st-gen Maxwell (GM107) and Kepler lack HEVC NVENC, so blindly enabling HEVC for the whole `PRE_TURING` bucket would over-report. The robust fix likely mirrors A4 by leaning on the ffmpeg `codecs.hevc` probe as the real capability signal (the probe already reflects what THIS build/GPU exposes), rather than widening the hardware-generation gate alone. NVENC is high-risk per CLAUDE.md §13 — needs a repro test and care.
+- **Wrong assumption to correct WHEN B-040 is fixed:** the A4 fix embedded the inaccurate premise that Maxwell/Pascal have "no HEVC". When fixing B-040, correct that wording in two places so the repo stops shipping the wrong premise:
+  - the A4 CHANGELOG entry under `[Unreleased]` ### Fixed ("Pascal/Maxwell — H.264-capable, no HEVC"),
+  - the A4 test docstrings/comments in `tests/smoke/test_gpu_detect.py` (`test_h264_decoupled_from_hevc_on_pre_turing` says "no HEVC hardware support" / "Pascal genuinely lacks HEVC NVENC"). The A4 *test assertions* stay valid (the PRE_TURING fixture uses CC 6.1 with `hevc=False` in the mocked ffmpeg probe, so `hevc_available=False` is correct for that fixture); only the prose rationale is wrong.
+- **Resolution sketch:** rework the HEVC gate to honor the ffmpeg `codecs.hevc` probe for the HEVC-capable pre-Turing range (mirroring A4's H.264 decoupling), add a repro test (Maxwell/Pascal-class fixture + `hevc=True` → `hevc_available=True`), and correct the two A4 wording sites above in the same commit.
+- **Trigger for pickup:** a user on a Maxwell/Pascal card reports HEVC GPU encoding unavailable, OR a focused `gpu_detect` generation-gate pass.
+
+## B-041: "5s Cycle Zoom" preset has stray shell double-quotes that reach ffmpeg literally
+
+- **Status:** **FIX COMMITTED — pending live 4080 render** (2026-05-24). NOT yet RESOLVED: the headless render passes, but render correctness on hardware (zoom looks right + audio/output valid) must be confirmed by Adam on the RTX 4080 before this closes — we are deliberately not repeating the premature "RESOLVED" call. The double-quote removal in `ea7a67d` was correct but **INCOMPLETE**: a live render on the RTX 4080 (VERIFY session) showed the preset still failed — `ffmpeg rc=-22`, `[AVFilterGraph] No option name near 'ih*1.5'`, filterchain parse error, no output. `ea7a67d` only peeled the outer shell-double-quote layer (changed the error from "No such filter" to a deeper filtergraph error); it did not make the preset renderable. The earlier "RESOLVED [ea7a67d] … Live render is MANUAL-VERIFIED" status was premature (render correctness had NOT actually been verified at that point).
+  - **Root cause 1 (parse):** `zoompan=…:s='iw*1.5:ih*1.5'` — zoompan's `s=` (output size) is parsed by `av_parse_video_size` and accepts only a literal `WxH`, never `iw`/`ih` expressions; additionally the `:` inside the single-quoted value is not honored, so the option string splits on it → "No option name near 'ih*1.5'".
+  - **Root cause 2 (runtime):** the `z`/`x`/`y` expressions use `mod(t,5)`, but **`t` is not a zoompan variable** — the timestamp variable in zoompan is `time`. With `t`, even after fixing `s=`, the filter fails at runtime (`Invalid argument` / "Nothing was written"). Verified by isolation: `…mod(time,5)…` renders, `…mod(t,5)…` fails.
+  - **Root cause 3 (A/V desync):** `zoompan` defaults to **25 fps**, so a 30 fps source rendered at 25 fps → video 7.2 s vs copied audio 6.0 s (1.2 s desync, ~20% slow-motion). Surfaced once the preset actually rendered.
+  - **Fix applied (3 edits + fps), headless render-validated:** `mod(t,5)` → `mod(time,5)` (×2 in `z`); `s='iw*1.5:ih*1.5'` → literal `s=576x1024` (matching sibling Zoom presets 1.1x/1.2x CRF); appended `:fps=30` to `zoompan` (restores 30 fps, video duration == audio duration, A/V delta 0.000s). `time` was verified on the bundled ffmpeg to drive the cycle correctly (zoom area ratios match z² within ~2%, transitions at 3s/4s; `it` lagged, `t` failed). Pre-scale `scale=iw*1.5:ih*1.5` kept (smoothness guard). `assets/Encoder.txt` L43 + regenerated `assets/Encoder.json`. Accepted trade-off: fixed 30 fps normalizes all outputs (a 60 fps source is halved; `zoompan` has no match-source-fps token).
+  - **Remaining to close:** Adam's live 4080 render confirming the zoom looks right and the output (incl. copied audio) is valid; then mark RESOLVED with the commit hash. Backfill this commit's hash into the CHANGELOG B-041 entry + here.
+- **Priority:** MEDIUM (the preset fails to render — ffmpeg rejects the filtergraph).
+- **Locations:**
+  - `assets/Encoder.txt` L43 ("5s Cycle Zoom")
+  - `assets/Encoder.json` (generated from Encoder.txt; the same token is embedded in its `params` list)
+- **Context:** L43's command is `-vf "scale=iw*1.5:ih*1.5,zoompan=z='…':…:s='iw*1.5:ih*1.5'" -c:a copy …` — the whole `-vf` value is wrapped in shell-style **double** quotes. The app tokenizes via `code.split()` and invokes ffmpeg via `subprocess` **list** form (no shell), so the literal `"` characters are never stripped by a shell — they reach ffmpeg as part of the argv token. ffmpeg's filtergraph parser does not treat `"` as a quote char (it uses `'` and `\`), so it sees a filter named `"scale…` → "No such filter" → the preset fails. The inner single quotes (`zoompan=z='…'`) are correct ffmpeg quoting and must stay. (Broken by inspection; a live render would confirm the exact error.)
+- **Why #6 does NOT fix it:** #6 is a tokenizer change. Per the #6 investigation, neither `code.split()` nor `shlex.split(posix=False)` removes these outer double-quotes; `shlex.split(posix=True)` would remove them but regresses other presets by stripping ffmpeg's own single-quotes (e.g. the `enable='lt(mod(t,10),1)*gte(t,0)'` in "Cut & Overlay 1s per 10s"). The correct fix is a **content** fix, not a tokenizer fix.
+- **Resolution sketch:** In `assets/Encoder.txt` L43, drop only the outer double-quotes — `-vf "scale=…s='iw*1.5:ih*1.5'"` → `-vf scale=…s='iw*1.5:ih*1.5'` — keeping the inner zoompan single-quotes. Regenerate `assets/Encoder.json` via `tools/generate_encoder_json.py`. Verify with a live render that the filtergraph is accepted. The #6 tokenizer sweep found only L43 with this outer-double-quote pattern; re-confirm none others before/after.
+- **Trigger for pickup:** a user reports "5s Cycle Zoom" fails to render, OR Adam authorizes the content fix.
+
+## B-042: preset_loader tokenizer code.split() vs shlex (fix-pass item #6) — CLOSED (won't-fix)
+
+- **Status:** CLOSED — won't-fix (2026-05-24). No code change to `core/preset_loader.py`.
+- **Origin:** Phase-3 fix-pass item #6 ("preset_loader.py:161 uses `tuple(code.split())`, which breaks presets with quoted args; switch to `shlex.split`").
+- **Investigation (all 106 Encoder.txt presets tokenized both ways):**
+  - `code.split()` mis-splits a preset ONLY when a quoted value contains a literal space (e.g. `text='hello world'`). NO shipping preset has that, so `split()` mis-tokenizes nothing today — the bug is **latent**, not active.
+  - `shlex.split(code)` (posix=True) **strips** quote characters. ffmpeg filtergraph quoting (`enable='lt(mod(t,10),1)*gte(t,0)'`, `zoompan=z='…'`, drawtext `text='…'`) is parsed BY ffmpeg, so those quotes must remain in the argv token (the app invokes ffmpeg via `subprocess` list form — no shell strips them). posix=True would therefore **regress** such presets (e.g. "Cut & Overlay 1s per 10s": the commas in the `enable` expression get exposed → filtergraph breaks).
+  - `shlex.split(code, posix=False)` keeps quotes but only groups across spaces for token-**boundary** quotes (`'a b'`). ffmpeg presets use **embedded** quotes (`key='a b'`), for which posix=False tokenizes IDENTICALLY to `split()` — verified equal on all 106 presets and on the embedded-quote latent case. So posix=False is a **no-op**.
+- **Decision (rationale):** `code.split()` is the correct model for ffmpeg's quoting — the quote characters belong IN the argv token and ffmpeg parses them itself. `shlex` models SHELL quoting, the wrong layer: it either strips the quotes ffmpeg needs (posix=True regression) or does nothing useful (posix=False no-op). Switching is inappropriate. The latent "space inside a quoted value" risk is real but theoretical (no preset triggers it).
+- **Future work (out of scope):** if first-class arbitrary-quoted-arg support is ever needed, write an ffmpeg-**aware** tokenizer that splits on whitespace while respecting `'…'` and `\` escaping AND retains the quote characters. That is a new component with its own design + tests, not a one-line `code.split()` swap.
+- **Preset-authoring guideline (interim mitigation):** when authoring Encoder.txt preset commands, do NOT place a literal space inside a quoted ffmpeg value, and do NOT wrap a whole value in shell-style double-quotes (see B-041). Keep ffmpeg's own `'…'` quoting for expressions containing `:` or `,`.
+- **Surfaced/closed by:** Phase-3 fix-pass #6 investigation, 2026-05-24.
+
+## B-043: cycle presets (#5) "video loops, audio plays once" — CLOSED (won't-fix)
+
+- **Status:** CLOSED — won't-fix (2026-05-24). No code change.
+- **Origin:** Phase-3 fix-pass item #5 ("Cycle-loop presets: video loops 300x but audio plays once; add -stream_loop so audio matches").
+- **Affected presets (investigated):** `assets/Encoder.txt` L4–L10, group "🕹️ 1vmo Ultimate" — "Cycle Ns (a-b-c) Nx Zoom" and "… Flip + Zoom" (split=300 for the 100x variants, split=18 for the 6x).
+- **What they actually do (decoded):** each preset runs `[0:v]split=N`, trims N **sequential, non-overlapping windows of the SOURCE timeline** (6x example: trim 0:4, 4:7, 7:10, … 57:60 = 6×(4-3-3) = 60s), applies the zoom pattern per segment, and `concat=n=N:v=1[v]`. Audio is `-map 0:a -c:a copy` (the **full** source audio). So the presets **slice / re-zoom a ≥60s source** — they do NOT loop a short clip. Output video ≈ min(source, cycle_total); audio = full source.
+- **Why the backlog premise was wrong:** "video loops 300x / audio plays once" misread the filtergraph. Nothing loops — `split → trim → concat` is a pre-calculated reassembly of source segments. The audio is already full-length (`-map 0:a`), not truncated to one cycle. The only realistic mismatch is the **opposite** (audio overruns the capped video when source > cycle_total), not audio underrun.
+- **Why -stream_loop / aloop are inappropriate:** `-stream_loop` is an **input** option (must precede `-i`); a preset's code field only contributes post-`-i` params, so `-stream_loop` in a preset is a **no-op**. Placing it before `-i` (a code change) would loop **both** streams and double-loop the already-assembled video. An audio-side `aloop` would lengthen an audio track that is, if anything, already too long, and introduces audio seams. There is no clean filtergraph way to loop a short clip; the standard approach is a pre-calculated concat — which is exactly what `split=N` already encodes at authoring time.
+- **Decision:** the presets work as designed for their intended ≥60s footage. Close won't-fix.
+- **Future work (separate feature, NOT a preset edit):** if short-clip looping is ever wanted, it belongs in `auto_render.py` command construction — `-stream_loop <n>` before `-i` plus `-shortest` (or explicit duration math) to bound the output — as an opt-in feature with its own design, not in Encoder.txt.
+- **Surfaced/closed by:** Phase-3 fix-pass #5 discovery, 2026-05-24.
+
 ## Resolved
+
+- **B-015** — translate_to_nvenc codec routing: codified single-knob routing (user's gpu_codec wins over per-preset map) and removed the dead `mapped` variable; corrected the `_CODEC_MAP` "per ADR-0007 D4" mis-citation (D4 is the codec dropdown, not routing). Resolved [c051473], documented in [ADR-0015](docs/decisions/ADR-0015-nvenc-codec-routing.md). 2026-05-24.
 
 - **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.
 

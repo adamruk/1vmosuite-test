@@ -26,7 +26,11 @@ _PRESET_MAP = {
     "veryslow": "p7",
 }
 
-# CPU codec -> NVENC codec mapping per ADR-0007 D4.
+# CPU codecs eligible for NVENC translation. Per ADR-0015 (single-knob
+# routing) only the KEYS are consulted — membership marks a preset codec as
+# "translate to the user's gpu_codec". The mapped values are kept for
+# documentation/readability only and are NOT used for routing (B-015).
+# (ADR-0007 D4 governs the Settings codec DROPDOWN, not this routing.)
 _CODEC_MAP = {
     "libx264": "h264_nvenc",
     "libx265": "hevc_nvenc",
@@ -83,15 +87,18 @@ def translate_to_nvenc(
     while i < len(params):
         p = params[i]
 
-        # -c:v / -vcodec -> map to NVENC codec
+        # -c:v / -vcodec -> route to the user's single gpu_codec setting.
+        # Single-knob routing per ADR-0015 (B-015): when the preset names a CPU
+        # codec we translate (in _CODEC_MAP, i.e. libx264/libx265), the target
+        # NVENC codec is the `codec` kwarg (the gpu_codec setting), NOT a
+        # per-preset map. Codecs we don't translate (already-NVENC, av1 sources,
+        # etc.) pass through unchanged.
         if p in ("-c:v", "-vcodec") and i + 1 < len(params):
             input_codec = params[i + 1]
-            mapped = _CODEC_MAP.get(input_codec, input_codec)
-            # If user explicitly chose codec via Settings, respect codec arg over preset map.
             if input_codec in _CODEC_MAP:
                 out.extend([p, codec])
             else:
-                out.extend([p, mapped])
+                out.extend([p, input_codec])
             i += 2
             continue
 

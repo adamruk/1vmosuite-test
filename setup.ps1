@@ -111,23 +111,63 @@ if ($SkipFfmpeg) {
     if ((Test-Path $ffExe) -and (Test-Path $ffProbe)) {
         Write-Ok "ffmpeg.exe and ffprobe.exe already present"
     } else {
-        # Search sibling folders (../*/ffmpeg/ffmpeg.exe) for a usable bundle.
+        # Search sibling folders (../*/ffmpeg/) for a CAPABILITY-qualified bundle.
+        # Selection is by capability, never by name/mtime: a build must expose
+        # libvmaf (HARD - the VMAF scoring axis needs it) and preferably an NVENC
+        # encoder (SOFT - GPU renders fall back to CPU per ADR-0007 D5 if absent).
         $parent = Split-Path -Parent $root
-        $source = Get-ChildItem -Path $parent -Directory -ErrorAction SilentlyContinue |
-            ForEach-Object { Join-Path $_.FullName 'ffmpeg' } |
-            Where-Object { (Test-Path (Join-Path $_ 'ffmpeg.exe')) -and (Test-Path (Join-Path $_ 'ffprobe.exe')) } |
-            Where-Object { $_ -ne $ffDir } |
-            Select-Object -First 1
+
+        # Candidate sibling ffmpeg dirs that physically have both exes, sorted
+        # alphabetically by path so the tiebreak among equally-qualified builds
+        # is deterministic and stable (NOT dependent on filesystem enumeration
+        # order). The first qualifying build in this order wins.
+        $candidates = @(
+            Get-ChildItem -Path $parent -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object { Join-Path $_.FullName 'ffmpeg' } |
+                Where-Object { (Test-Path (Join-Path $_ 'ffmpeg.exe')) -and (Test-Path (Join-Path $_ 'ffprobe.exe')) } |
+                Where-Object { $_ -ne $ffDir } |
+                Sort-Object
+        )
+
+        $source   = $null   # first build with libvmaf + nvenc (full capability)
+        $fallback = $null   # first build with libvmaf but no nvenc
+        foreach ($cand in $candidates) {
+            $candExe = Join-Path $cand 'ffmpeg.exe'
+            try {
+                $filters  = & $candExe -hide_banner -filters  2>$null | Out-String
+                $encoders = & $candExe -hide_banner -encoders 2>$null | Out-String
+            } catch {
+                Write-Warn "Candidate ffmpeg failed to run (missing DLLs?), skipping: $cand"
+                continue
+            }
+            # Match the libvmaf FILTER line specifically (flags column + name
+            # column), not an incidental substring in another filter's text.
+            if ($filters -notmatch '(?m)^\s*\S+\s+libvmaf\b') {
+                Write-Warn "Rejecting $cand : missing libvmaf (required for VMAF scoring)"
+                continue
+            }
+            # NVENC is preferred but soft: match an encoder whose name column ends
+            # in _nvenc (h264_nvenc / hevc_nvenc / av1_nvenc).
+            if ($encoders -match '(?m)^\s*\S+\s+\w+_nvenc\b') {
+                $source = $cand   # full capability - take it, stop searching
+                break
+            }
+            if (-not $fallback) { $fallback = $cand }   # remember first libvmaf-only
+        }
+        if (-not $source -and $fallback) {
+            $source = $fallback
+            Write-Warn "Using libvmaf-only ffmpeg (no NVENC): $source - GPU renders fall back to CPU (ADR-0007 D5)"
+        }
 
         if ($source) {
-            Write-Ok "Found ffmpeg bundle: $source"
+            Write-Ok "Selected ffmpeg by capability: $source"
             if (-not (Test-Path $ffDir)) { New-Item -ItemType Directory -Path $ffDir | Out-Null }
             # Copy exes plus any shared-build DLLs (shared ffmpeg builds need them).
             Copy-Item (Join-Path $source '*') -Destination $ffDir -Force
             Write-Ok "Copied ffmpeg binaries into ffmpeg/"
         } else {
-            Write-Warn "No ffmpeg bundle found in sibling folders."
-            Write-Warn "Place ffmpeg.exe + ffprobe.exe (and any DLLs) into: $ffDir"
+            Write-Warn "No ffmpeg bundle with libvmaf found in sibling folders."
+            Write-Warn "Place a libvmaf-capable ffmpeg.exe + ffprobe.exe (and any DLLs) into: $ffDir"
         }
     }
 }

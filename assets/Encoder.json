@@ -781,7 +781,7 @@
       "details": "📑 Details,Tạo chu kỳ zoom 5 giây, 3 giây đầu giữ nguyên kích thước, 1 giây tiếp theo phóng to 1.25x, 1 giây cuối phóng to 1.5x, Sử dụng mã hóa H.264 với CRF 18 và preset superfast",
       "params": [
         "-vf",
-        "\"scale=iw*1.5:ih*1.5,zoompan=z='if(between(mod(t,5),0,3),1,if(between(mod(t,5),3,4),1.25,1.5))':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s='iw*1.5:ih*1.5'\"",
+        "scale=iw*1.5:ih*1.5,zoompan=z='if(between(mod(time,5),0,3),1,if(between(mod(time,5),3,4),1.25,1.5))':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=576x1024:fps=30",
         "-c:a",
         "copy",
         "-vcodec",
@@ -1388,7 +1388,7 @@
       "details": "📑 Details,Chuyển đổi sang tỉ lệ khung hình 9:16, Điều chỉnh kích thước thành 720x1280, Đặt bitrate 1400k, Sử dụng mã hóa H.264 với preset superfast",
       "params": [
         "-filter_complex",
-        "[v]scale=720x1280,setdar=9/16",
+        "[0:v]scale=720x1280,setdar=9/16",
         "-vcodec",
         "libx264",
         "-crf",
