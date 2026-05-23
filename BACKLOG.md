@@ -442,6 +442,18 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Preset-authoring guideline (interim mitigation):** when authoring Encoder.txt preset commands, do NOT place a literal space inside a quoted ffmpeg value, and do NOT wrap a whole value in shell-style double-quotes (see B-041). Keep ffmpeg's own `'…'` quoting for expressions containing `:` or `,`.
 - **Surfaced/closed by:** Phase-3 fix-pass #6 investigation, 2026-05-24.
 
+## B-043: cycle presets (#5) "video loops, audio plays once" — CLOSED (won't-fix)
+
+- **Status:** CLOSED — won't-fix (2026-05-24). No code change.
+- **Origin:** Phase-3 fix-pass item #5 ("Cycle-loop presets: video loops 300x but audio plays once; add -stream_loop so audio matches").
+- **Affected presets (investigated):** `assets/Encoder.txt` L4–L10, group "🕹️ 1vmo Ultimate" — "Cycle Ns (a-b-c) Nx Zoom" and "… Flip + Zoom" (split=300 for the 100x variants, split=18 for the 6x).
+- **What they actually do (decoded):** each preset runs `[0:v]split=N`, trims N **sequential, non-overlapping windows of the SOURCE timeline** (6x example: trim 0:4, 4:7, 7:10, … 57:60 = 6×(4-3-3) = 60s), applies the zoom pattern per segment, and `concat=n=N:v=1[v]`. Audio is `-map 0:a -c:a copy` (the **full** source audio). So the presets **slice / re-zoom a ≥60s source** — they do NOT loop a short clip. Output video ≈ min(source, cycle_total); audio = full source.
+- **Why the backlog premise was wrong:** "video loops 300x / audio plays once" misread the filtergraph. Nothing loops — `split → trim → concat` is a pre-calculated reassembly of source segments. The audio is already full-length (`-map 0:a`), not truncated to one cycle. The only realistic mismatch is the **opposite** (audio overruns the capped video when source > cycle_total), not audio underrun.
+- **Why -stream_loop / aloop are inappropriate:** `-stream_loop` is an **input** option (must precede `-i`); a preset's code field only contributes post-`-i` params, so `-stream_loop` in a preset is a **no-op**. Placing it before `-i` (a code change) would loop **both** streams and double-loop the already-assembled video. An audio-side `aloop` would lengthen an audio track that is, if anything, already too long, and introduces audio seams. There is no clean filtergraph way to loop a short clip; the standard approach is a pre-calculated concat — which is exactly what `split=N` already encodes at authoring time.
+- **Decision:** the presets work as designed for their intended ≥60s footage. Close won't-fix.
+- **Future work (separate feature, NOT a preset edit):** if short-clip looping is ever wanted, it belongs in `auto_render.py` command construction — `-stream_loop <n>` before `-i` plus `-shortest` (or explicit duration math) to bound the output — as an opt-in feature with its own design, not in Encoder.txt.
+- **Surfaced/closed by:** Phase-3 fix-pass #5 discovery, 2026-05-24.
+
 ## Resolved
 
 - **B-015** — translate_to_nvenc codec routing: codified single-knob routing (user's gpu_codec wins over per-preset map) and removed the dead `mapped` variable; corrected the `_CODEC_MAP` "per ADR-0007 D4" mis-citation (D4 is the codec dropdown, not routing). Resolved [c051473], documented in [ADR-0015](docs/decisions/ADR-0015-nvenc-codec-routing.md). 2026-05-24.
