@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Optional, Tuple
 
 import requests
@@ -310,6 +311,81 @@ class DriveUpdater:
                 error_msg = "Downloaded file is too small"
                 print(f"❌ {error_msg}")
                 return (False, error_msg)
+
+            # v3.9 Phase 3.6 closure — partial updater hardening per
+            # ADR-0013 D5. Two safety steps added BEFORE the swap;
+            # leaves the rest of the existing flow intact.
+            #
+            # 1. SHA256 verify (best-effort). If a sibling ".sha256"
+            #    URL exists at the same Dropbox folder and returns
+            #    200, compare it to the downloaded file's hash. A
+            #    404 / network error is tolerated (the original
+            #    Phase 2d unsigned flow continues unchanged). A
+            #    200 with a MISMATCH aborts the swap.
+            try:
+                import hashlib
+
+                sha_url = download_link.split("?")[0].rstrip("/") + ".sha256"
+                if "?" in download_link:
+                    sha_url += "?" + download_link.split("?", 1)[1]
+                sha_resp = session.get(sha_url, timeout=10, allow_redirects=True)
+                if sha_resp.status_code == 200:
+                    expected = sha_resp.text.strip().split()[0].lower()
+                    h = hashlib.sha256()
+                    with open(temp_file, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(65536), b""):
+                            h.update(chunk)
+                    actual = h.hexdigest().lower()
+                    if expected and actual != expected:
+                        error_msg = (
+                            f"SHA256 mismatch (expected {expected[:12]}…, "
+                            f"got {actual[:12]}…). Update aborted."
+                        )
+                        print(f"❌ {error_msg}")
+                        try:
+                            os.remove(temp_file)
+                        except OSError:
+                            pass
+                        return (False, error_msg)
+                    if expected:
+                        print(f"✅ SHA256 verified: {actual[:12]}…")
+            except Exception as exc:
+                print(f"⚠️ SHA256 verify skipped: {exc}")
+
+            # 2. Backup-before-swap. If the target file exists, rename
+            #    it to <name>.backup_<ts> first. shutil.move below
+            #    then proceeds to overwrite (which is now safe — the
+            #    user can roll back by deleting the new file and
+            #    renaming the backup). Keep last 3 backups only;
+            #    older ones are removed to bound disk usage.
+            try:
+                if os.path.isfile(new_exe_name):
+                    ts = int(time.time())
+                    backup_path = f"{new_exe_name}.backup_{ts}"
+                    try:
+                        os.replace(new_exe_name, backup_path)
+                        print(f"💾 Previous version backed up to {backup_path}")
+                    except OSError as exc:
+                        print(f"⚠️ Backup-before-swap failed: {exc}")
+                    # Bounded retention — keep last 3 backups.
+                    try:
+                        backups = sorted(
+                            [
+                                f
+                                for f in os.listdir(".")
+                                if f.startswith(new_exe_name + ".backup_")
+                            ]
+                        )
+                        for old in backups[:-3]:
+                            try:
+                                os.remove(old)
+                            except OSError:
+                                pass
+                    except OSError:
+                        pass
+            except Exception as exc:
+                print(f"⚠️ Backup pruning skipped: {exc}")
+
             print("🔄 Moving new version to current directory...")
             shutil.move(temp_file, new_exe_name)
             print("✅ File moved successfully")

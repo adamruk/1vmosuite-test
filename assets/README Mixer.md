@@ -1,46 +1,47 @@
 # 🎲 1vmo Mixer v3
 
-## 🎯 Hướng dẫn sử dụng
+## 🎯 User Guide
 
 ### Input Controls
-- 📁 Main Videos: Thêm video chính
-- 📁 Intro Videos: Thêm video intro
-- 📁 Outro Videos: Thêm video outro
-- ❌ Delete: Xóa video đã chọn
-- ❓ Help: Hiển thị hướng dẫn sử dụng
+- Main Videos: Add main videos
+- Intro Videos: Add intro videos
+- Outro Videos: Add outro videos
+- Delete: Remove the selected video
+- ❓ Help: Show this user guide
+- 🔄 Updates: Check for new versions on GitHub
 
 ### Configuration
-- Mix Mode: Chọn chế độ trộn video
-  - Main Mix Mode: Cách trộn video chính
-    - 🎲 Random: Ngẫu nhiên
-    - 🔁 Order: Theo thứ tự
-  - Intro Mix Mode: Cách trộn video intro
-    - 🎲 Random: Ngẫu nhiên
-    - 🔁 Order: Theo thứ tự
-  - Outro Mix Mode: Cách trộn video outro
-    - 🎲 Random: Ngẫu nhiên
-    - 🔁 Order: Theo thứ tự
+- Mix Mode: Choose how to mix videos
+  - Main Mix Mode: How to mix the main videos
+    - 🎲 Random: Pick at random
+    - 🔁 Order: Use in order
+  - Intro Mix Mode: How to mix the intro videos
+    - 🎲 Random: Pick at random
+    - 🔁 Order: Use in order
+  - Outro Mix Mode: How to mix the outro videos
+    - 🎲 Random: Pick at random
+    - 🔁 Order: Use in order
 - Mix Options:
-  - Main Videos to Mix: Số video chính cần trộn
-  - Total Output Videos: Tổng số video muốn tạo ra
-  - Output Name Option: Cách đặt tên file đầu ra
-    - Time + Index: Thời gian + số thứ tự
-    - First Video Name + Time + Index: Tên video đầu + thời gian + số thứ tự
+  - Main Videos to Mix: How many main videos per output
+  - Total Output Videos: Total number of output videos to produce
+  - Output Name Option: How to name output files
+    - Time + Index: Timestamp + index number
+    - First Video Name + Time + Index: First main video name + timestamp + index
 
 ### Output Controls
-- 📍 Directory: Chọn thư mục lưu video
-- 📂 Open: Mở thư mục đầu ra
-- 🚀 Start: Bắt đầu trộn video
-- 🛑 Stop: Dừng quá trình trộn
+- 📍 Directory: Choose the output folder
+- 📂 Open: Open the output folder
+- 🚀 Start: Begin mixing
+- 🛑 Stop: Stop mixing
 
 ### Output List
-Hiển thị thông tin của các file đã xử lý:
-- Số thứ tự
-- Tên file gốc
-- Tên file output
-- Thời lượng (Loading... khi đang xử lý)
-- Độ phân giải (Loading... khi đang xử lý)
-- Trạng thái xử lý:
-  - 🟡 Processing: Đang xử lý
-  - 🟢 Completed: Hoàn thành
-  - 🔴 Error: Lỗi (kèm thông tin lỗi)
+Shows information about processed files:
+- Index number
+- Source filename
+- Output filename
+- Duration (Loading… while processing)
+- Resolution (Loading… while processing)
+- Status:
+  - 🟡 Processing: In progress
+  - 🟢 Completed: Done
+  - 🔴 Error: Failed (with error details)

@@ -143,3 +143,28 @@ def avoid_collision(path: str) -> str:
                 # Last-resort: return the candidate even though we couldn't reserve it.
                 # Caller will get a real error when ffmpeg fails to open it.
                 return candidate
+
+
+def partial_path(final_path: str) -> str:
+    """Return a sibling temp path that preserves FFmpeg's recognised extension.
+
+    v3.9 F-001 ship-blocker fix: FFmpeg infers the output muxer from the
+    file extension. A path like ``out.mp4.partial`` cannot be muxed — no
+    ``.partial`` muxer exists — so on Windows ffmpeg fails with
+    ``Error opening output file ... .mp4.partial: Invalid argument``,
+    breaking 101 of 108 presets that target single-file outputs.
+
+    The fix: construct the temp marker BEFORE the extension so the muxer
+    still recognises the file:
+        ``out.mp4``   -> ``out.partial.mp4``
+        ``out.mkv``   -> ``out.partial.mkv``
+        ``out`` (no ext) -> ``out.partial`` (literal fallback)
+
+    The caller (RenderWorker.process) then ``os.replace(partial, final)``
+    on success — atomic rename preserves the existing
+    "cancelled renders leave no fake _final.mp4" contract.
+    """
+    base, ext = os.path.splitext(final_path)
+    if not ext:
+        return final_path + ".partial"
+    return f"{base}.partial{ext}"

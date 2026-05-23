@@ -323,6 +323,93 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Fix sketch:** Replace `acquire()` with a `tryAcquire(timeout_ms)` polling loop that also checks `self.is_cancelled` between attempts. ~10 lines + a smoke test for the cancel-during-acquire path.
 - **Trigger for pickup:** A user report of a stuck worker on cancel, or a deliberate teardown of low-`gpu_max_concurrent` configurations.
 
+## B-039: Phase 3 closure + handoff readiness — RESOLVED (Phase 3.7)
+
+- **Status:** RESOLVED in Phase 3.7 (2026-05-22).
+- **Resolution:** Verification-only milestone documented in [ADR-0014](docs/decisions/ADR-0014-phase-3-closure.md). Handoff doc set published under `docs/PHASE_3_*.md` + RELEASE_NOTES_PHASE_3.md + PHASE_4_READINESS_NOTES.md. Source gates captured in `tests/evidence/phase3-validation-2026-05-22.log`. Hardware-dependent QA rows honestly marked `[N]` in the RC checklist for Adam's host runs.
+
+## B-038: Production packaging + local release readiness — RESOLVED (Phase 3.6)
+
+- **Status:** RESOLVED in Phase 3.6 (2026-05-22) — partial. Build scripts + integrity checker shipped; PyInstaller spec edits + updater hardening deferred to follow-up patches.
+- **Resolution (Phase 3.6):**
+  - 4 new scripts under `tools/build/` (~700 LOC total): `generate_version_file.py`, `check_release_integrity.py`, `build_windows.py`, `build_macos.py`.
+  - VERSION.txt flow: generator → `dist_version.txt` → build script copies → bundle's `VERSION.txt` → integrity check + future About dialog.
+  - SHA256 checksums.txt: build_windows.py appends one line per artifact; teammate verification via `python3 tools/build/check_release_integrity.py <bundle>`.
+  - Portable-first: zip is the primary artifact (CLAUDE.md §12 rule 5 honoured — extras re-copied after PyInstaller wipe).
+  - macOS .app+.dmg authored with optional code-signing branch.
+  - Documented in [ADR-0013](docs/decisions/ADR-0013-release-packaging.md).
+- **Deferred items (Phase 3.6.x or Phase 4):**
+  - `1vmo-suite.spec` edits for VERSION.txt embed + assets/* datas (currently the build script copies VERSION.txt post-build; in-spec datas is a future cleanup).
+  - `1vmo-suite-macos.spec` sibling spec authoring (build_macos.py expects it; documented in RELEASE_MACOS.md when promoted).
+  - `updater.py` hardening: SHA256 verify, `_pending/` extract, backup-before-swap, queue-running guard. Designed in ADR-0013 D5; wiring deferred.
+  - `inno_setup_compile.py` for optional Windows installer.
+
+## B-037: Local encoder intelligence layer — RESOLVED (Phase 3.5)
+
+- **Status:** RESOLVED in Phase 3.5 (2026-05-22).
+- **Priority:** MEDIUM (product feature; users had no in-app advisory for codec compatibility / NVENC session limits / fallback chains).
+- **Resolution (Phase 3.5):**
+  - New `core/encoder_intel/` package (4 modules, ~650 LOC). Pure-Python heuristics; no ML; no remote model.
+  - Advisory-only — every codec switch goes through Phase 3.3's RecommendationDialog Confirm click. No forced switching.
+  - 17 new smoke tests under `tests/smoke/test_encoder_intel.py`. ADR-0003 narrow exception extended per [ADR-0012](docs/decisions/ADR-0012-encoder-intelligence.md).
+  - RenderWorker, ffmpeg invocation, gpu_detect (extended via duck-typed attribute access; not modified), preset_translator: all unchanged.
+  - Deferred: runtime 1-frame probe-encode (needs real NVIDIA hardware in CI to validate) and Start-time pre-flight gate (kept additive this pass).
+
+## B-036: Local orchestration / performance layer — RESOLVED (Phase 3.4)
+
+- **Status:** RESOLVED in Phase 3.4 (2026-05-22).
+- **Priority:** MEDIUM (product feature; users had no pause control, no per-task log persistence, no support-bundle export).
+- **Resolution (Phase 3.4):**
+  - New `core/orchestration/` package (8 modules, ~1100 LOC). Side-state file `queue_state.json` with its own `schema_version=1`; Phase 3.1 queue schema FROZEN.
+  - Pause/Resume toolbar button. Current task never interrupted; only next-dispatch waits. Persisted across crashes.
+  - Strict-opt-in retry policy (default OFF). Allow-list of retry-eligible Kinds is small; per-batch ceiling caps loops.
+  - Per-task ffmpeg log persistence with 8 MB cap + last-N-batch rotation.
+  - Cross-platform sleep inhibitor (Windows / macOS / Linux), degrades silently on missing-tool platforms.
+  - psutil-optional system monitor sampler.
+  - Diagnostic bundle exporter with config sanitization (strips `output_dir`, basenames-only `input_files`).
+  - 33 new smoke tests. ADR-0003 narrow exception extended per [ADR-0011](docs/decisions/ADR-0011-orchestration.md).
+  - RenderWorker, ffmpeg command construction, Phase 3.1 queue schema, scoring (Phase 3.2), optimization (Phase 3.3) all unchanged.
+
+## B-035: Local optimization / recommendation layer — RESOLVED (Phase 3.3)
+
+- **Status:** RESOLVED in Phase 3.3 (2026-05-22).
+- **Priority:** MEDIUM (product feature; users had scores from Phase 3.2 but no in-app way to convert them into next-step guidance).
+- **Surfaced:** Phase 3.3 design doc + Adam's no-destructive-automation rule (2026-05-22).
+- **Resolution (Phase 3.3):**
+  - New `core/optimization/` package (6 modules, ~700 LOC). Heuristic-only, no ML.
+  - Recommendations are advisory; the user clicks Confirm in `_show_recommendation_dialog` before any re-render fires.
+  - Re-renders go through the EXISTING `start_render` path; output filenames use the existing `naming_utils._v2` rotation so originals are preserved.
+  - 39 smoke tests under `tests/smoke/test_quality_classifier.py`, `test_failure_classifier.py`, `test_recommender.py`, `test_batch_analyzer.py`. ADR-0003 narrow-pytest exception extended per [ADR-0010](docs/decisions/ADR-0010-render-optimization.md).
+  - Single new toolbar button (🩺 Health) between Help and Updates. No auto-popups.
+
+## B-034: Local originality / quality scoring system — RESOLVED (Phase 3.2)
+
+- **Status:** RESOLVED in Phase 3.2 (2026-05-22).
+- **Priority:** MEDIUM (product feature; previously the user had no in-app way to measure how close a render was to its source or how visually different it was for derivative-content use).
+- **Surfaced:** Phase 3.2 design doc + Adam's local-only clarification (2026-05-22).
+- **Context (pre-Phase-3.2):** Quality / originality measurement existed only in `bench.py` (a standalone CLI tool used by the team for VMAF validation rounds). End users had no way to score their own renders from inside the app. The product domain — making derivative video content that needs to be "different enough" while still acceptable quality — has no in-app diagnostic for either axis.
+- **Resolution (Phase 3.2):**
+  - New `core/scoring/` package — capability probe, four scoring axes (VMAF / SSIM / PSNR / dHash), pydantic v2 on-disk schema, and a local-only persistent cache (`scores.json` next to Phase 3.1's `queue.json` in `user_data_dir`).
+  - Additive UI: three appended columns on `tree_output` (VMAF / pHash / SSIM), right-click context menu ("Score this render" / "Score selected" / "Score all rendered rows"), and a new "Scoring" tab in Settings with auto-score (default OFF), axis selection, max-parallel spinbox, and pHash-frames spinbox.
+  - Local-only by construction: no network code in any scoring module, no remote upload, no remote model download, no account, no login. Mirrors Phase 3.1's local-first invariant verbatim.
+  - RenderWorker, ffmpeg command generation, the Phase 3.1 queue store, the GPU semaphore, and `output_collision` semantics are all unchanged. Scoring lives on its own QThread pool and never contends with render threads.
+  - 6 new smoke tests under `tests/smoke/` (34 cases) — ADR-0003 narrow-pytest exception extended per ADR-0009.
+  - Documented in [ADR-0009](docs/decisions/ADR-0009-scoring-architecture.md).
+
+## B-033: Persistent local queue + resume-from-interrupted-render — RESOLVED (Phase 3.1)
+
+- **Status:** RESOLVED in Phase 3.1 (2026-05-22).
+- **Priority:** MEDIUM (functional gap — prior to Phase 3.1 an unclean shutdown lost the entire in-progress batch with no recovery path).
+- **Surfaced:** Phase 3.1 design doc + Adam's local-first clarification (2026-05-19).
+- **Context (pre-Phase-3.1):** `auto_render.py` held batch state entirely in process memory (`self.all_tasks`, `self.completed_tasks`, `self.videos`, `self.selected_encoders`). Any of {app crash, OS panic, power loss, user-confirmed exit mid-render} discarded the entire batch with no path to resume the unrendered tasks. Users had to re-pick videos + presets + output dir + re-click Start.
+- **Resolution (Phase 3.1):**
+  - New `core/queue_models.py` (~95 LOC) — pydantic v2 schema for the on-disk batch, with `QUEUE_SCHEMA_VERSION = 1`, a 7-state `TaskStatus` enum, and `UNFINISHED_STATUSES` for the resume-decision predicate.
+  - New `core/queue_store.py` (~260 LOC) — local-only JSON store with O_CREAT|O_EXCL file lock + 60s stale-lock reclaim + atomic write (reuses `core.atomic_write.save_json_atomic`) + schema-version rejection. `load()` never raises.
+  - `auto_render.py` wiring is additive: a snapshot is persisted at `start_render`, transitions are recorded at `_start_next_task` (DISPATCHED), `on_render_completed` (COMPLETED + clear at batch terminal), `on_render_error` (FAILED), and `cancel_render` (CANCELLED + clear). `closeEvent` render-Yes branch keeps the file intact and demotes in-flight tasks to PENDING so the resume prompt at next launch sees them as outstanding work. RenderWorker contract / ffmpeg pipeline / GPU semaphore / output_collision semantics are unchanged.
+  - Settings dialog: new Advanced-tab checkbox "Save queue for resume on next launch" persists `queue_persistence_enabled` (default True). Disabling it is reversible — all wiring is no-op when the flag is False.
+  - Local-only by construction: queue file lives in the user's local `user_data_dir`, no network code, no auth, no remote endpoint.
+  - Test coverage: `tests/smoke/test_queue_store.py` (16 cases) covers all 11 scenarios from the design doc §6.1 — ADR-0003 narrow-pytest exception (pure-IO unit, no Qt/ffmpeg/GPU, <2s, deterministic).
+
 ## Resolved
 
 - **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.

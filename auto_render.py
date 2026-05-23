@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -55,6 +56,13 @@ from core.preset_loader import (
     load_user_presets_json,
     save_user_presets_json,
 )
+from core.queue_models import (
+    UNFINISHED_STATUSES,
+    QueueBatch,
+    QueueTask,
+    TaskStatus,
+)
+from core.queue_store import QueueStore
 from core.user_data import migrate_legacy_configs, resolve_or_die
 from help_dialog import HelpDialog
 from settings_dialog import SettingsDialog
@@ -347,7 +355,15 @@ class RenderWorker(QObject):
                     temp_output_file: Optional[str] = None
                     ffmpeg_target = output_file
                 else:
-                    temp_output_file = output_file + ".partial"
+                    # v3.9 F-001 ship-blocker fix: use naming_utils.partial_path
+                    # so the temp file keeps its real extension
+                    # (out.partial.mp4, not out.mp4.partial). ffmpeg infers
+                    # the muxer from the extension; ``.partial`` has no
+                    # registered muxer and breaks 101/108 presets on Windows
+                    # with "Error opening output file ... .mp4.partial:
+                    # Invalid argument". The on-success os.replace + cleanup
+                    # contracts are unchanged.
+                    temp_output_file = naming_utils.partial_path(output_file)
                     ffmpeg_target = temp_output_file
                     # Clean any stale `.partial` from a prior aborted
                     # attempt at this exact target — ffmpeg `-y` would
@@ -581,16 +597,19 @@ class RenderWorker(QObject):
             # are bounded by the pre-loop init so this is safe even if
             # the crash happened before output_file was assigned.
             # Sequence frames always go; single-file outputs sweep the
-            # 0-byte avoid_collision placeholder AND the `.partial`
-            # sidecar if it exists (derived from current_step_output by
-            # appending the same `.partial` suffix used in the loop —
-            # see the comment block beside `temp_output_file` above).
+            # 0-byte avoid_collision placeholder AND the partial sidecar
+            # if it exists. v3.9 F-001 fix: the partial filename now lives
+            # at `naming_utils.partial_path(current_step_output)` (which
+            # produces `out.partial.mp4`, not `out.mp4.partial`). The
+            # cleanup MUST match the same construction used inside the
+            # render loop, otherwise orphan `.partial.<ext>` files would
+            # accumulate on crash/cancel.
             if current_step_output:
                 if current_step_is_image:
                     _cleanup_image_sequence(current_step_output)
                 else:
                     _cleanup_zero_byte_placeholder(current_step_output)
-                    derived_partial = current_step_output + ".partial"
+                    derived_partial = naming_utils.partial_path(current_step_output)
                     try:
                         if os.path.exists(derived_partial):
                             os.remove(derived_partial)
@@ -754,6 +773,157 @@ class URLDownloadWorker(QObject):
         self._cancel_event.set()
 
 
+class ScoreWorker(QObject):
+    """Phase 3.2 — QThread-friendly wrapper around the scoring runners.
+
+    Runs in its own QThread (see VideoRendererTool._score_threads).
+    Computes the requested axes for one (reference, distorted) pair,
+    in order: VMAF → SSIM/PSNR → pHash. Each axis is independent —
+    a failure in one does not abort the others.
+
+    The worker NEVER touches RenderWorker, the render pipeline, the
+    Phase 3.1 queue, or ffmpeg's encode invocation. It only spawns
+    its own short-lived ffmpeg children for the scoring filters.
+
+    Signals:
+        axis_progress(task_index: int, axis: str, pct: int)
+            Coarse progress (0/50/100) for the current axis. Optional.
+        score_ready(task_index: int, result: object)
+            Emitted once when all requested axes finish. `result`
+            is a ScoreResult instance; consumer is the main thread.
+        score_error(task_index: int, message: str)
+            Emitted on a runner-level catastrophe (not per-axis failure).
+
+    Cancel:
+        cancel() sets a threading.Event polled by every runner. In-flight
+        ffmpeg children are terminated within ~250 ms of the cancel.
+    """
+
+    axis_progress = Signal(int, str, int)
+    score_ready = Signal(int, object)
+    score_error = Signal(int, str)
+
+    def __init__(
+        self,
+        task_index: int,
+        ffmpeg_path: Path,
+        reference: Path,
+        distorted: Path,
+        *,
+        axes: list,
+        n_phash_frames: int = 20,
+        base_result=None,
+    ):
+        super().__init__()
+        self._task_index = int(task_index)
+        self._ffmpeg_path = Path(ffmpeg_path)
+        self._reference = Path(reference)
+        self._distorted = Path(distorted)
+        # Defensive copy + lowercase so the caller doesn't have to
+        # care about case. Filtered to known axes inside `process`.
+        self._axes = [str(a).lower() for a in axes]
+        self._n_phash_frames = int(n_phash_frames)
+        self._base_result = base_result
+        self._cancel_event = threading.Event()
+
+    @Slot()
+    def process(self) -> None:
+        """Execute all requested axes sequentially. Emits one final signal.
+
+        Imports happen lazily inside the slot so a module import
+        failure in scoring/* never blocks app launch.
+        """
+        try:
+            from core.scoring import (
+                ScoreAxisStatus,
+                ScoreResult,
+                score_phash,
+                score_ssim_psnr,
+                score_vmaf,
+            )
+        except Exception as exc:
+            self.score_error.emit(
+                self._task_index, f"scoring module import failed: {exc}"
+            )
+            return
+
+        # Seed the result row — runners chain into base_result.
+        if self._base_result is not None:
+            result = self._base_result
+        else:
+            try:
+                ref_m = self._reference.stat().st_mtime
+            except OSError:
+                ref_m = 0.0
+            try:
+                dist_m = self._distorted.stat().st_mtime
+            except OSError:
+                dist_m = 0.0
+            result = ScoreResult(
+                reference_path=str(self._reference),
+                reference_mtime=ref_m,
+                distorted_path=str(self._distorted),
+                distorted_mtime=dist_m,
+                computed_at=time.time(),
+            )
+
+        def cancelled() -> bool:
+            return self._cancel_event.is_set()
+
+        try:
+            if "vmaf" in self._axes and not cancelled():
+                self.axis_progress.emit(self._task_index, "vmaf", 0)
+                result = score_vmaf(
+                    self._ffmpeg_path,
+                    self._reference,
+                    self._distorted,
+                    should_cancel=cancelled,
+                )
+                self.axis_progress.emit(self._task_index, "vmaf", 100)
+
+            if ("ssim" in self._axes or "psnr" in self._axes) and not cancelled():
+                self.axis_progress.emit(self._task_index, "ssim_psnr", 0)
+                result = score_ssim_psnr(
+                    self._ffmpeg_path,
+                    self._reference,
+                    self._distorted,
+                    should_cancel=cancelled,
+                    base_result=result,
+                )
+                self.axis_progress.emit(self._task_index, "ssim_psnr", 100)
+
+            if "phash" in self._axes and not cancelled():
+                self.axis_progress.emit(self._task_index, "phash", 0)
+                result = score_phash(
+                    self._ffmpeg_path,
+                    self._reference,
+                    self._distorted,
+                    n_frames=self._n_phash_frames,
+                    should_cancel=cancelled,
+                    base_result=result,
+                )
+                self.axis_progress.emit(self._task_index, "phash", 100)
+        except Exception as exc:
+            self.score_error.emit(self._task_index, f"scoring crashed: {exc}")
+            return
+
+        # If everything was cancelled, mark unscored axes accordingly.
+        if cancelled():
+            for axis_attr in (
+                "vmaf_status",
+                "ssim_status",
+                "psnr_status",
+                "phash_status",
+            ):
+                if getattr(result, axis_attr) == ScoreAxisStatus.PENDING:
+                    setattr(result, axis_attr, ScoreAxisStatus.CANCELLED)
+
+        self.score_ready.emit(self._task_index, result)
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+
 class VideoRendererTool(QMainWindow):
     def __init__(self, app_name: str = "1vmo Auto Render"):
         super().__init__()
@@ -835,6 +1005,61 @@ class VideoRendererTool(QMainWindow):
             print(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
         self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_renderer.json"
         self.USER_PRESETS_FILE = self.USER_DATA_DIR / "encoder.user.json"
+        # Phase 3.1 local persistent queue (no cloud / no remote queue).
+        # The store wraps a single JSON file at
+        # `USER_DATA_DIR/queue.json` with file-lock + atomic write so
+        # an interrupted render (crash, Cmd-Q, kill -9) can be resumed
+        # on next launch. RenderWorker / ffmpeg pipeline are unchanged.
+        # All store calls are wrapped in try/except OSError downstream
+        # so a disk-full state cannot crash the renderer.
+        self.queue_store = QueueStore(self.USER_DATA_DIR)
+        # Saved-batch loaded from disk (if any). Filled in below after
+        # setup_ui so the resume prompt does not block the main window
+        # from appearing.
+        self._pending_resume_batch: Optional[QueueBatch] = None
+        # Per-batch state used by queue persistence — populated in
+        # start_render(). Pre-declare here so the close path can read
+        # them safely even if no batch has run yet this session.
+        self._current_batch_uuid: Optional[str] = None
+        self._task_uuids: list[str] = []
+        # Phase 3.2 — local-only scoring system (no cloud / no remote
+        # analysis). Lazy import inside try/except so a defective
+        # scoring module cannot block app launch — the rest of the
+        # app still runs without scoring.
+        self.scoring_caps = None
+        self.score_cache = None
+        try:
+            from core.scoring import (
+                ScoreCache as _ScoreCache,
+            )
+            from core.scoring import (
+                detect as _scoring_detect,
+            )
+
+            self.scoring_caps = _scoring_detect(self.FFMPEG_PATH)
+            self.score_cache = _ScoreCache(self.USER_DATA_DIR)
+        except Exception as exc:
+            print(f"scoring: init failed (continuing without scoring): {exc}")
+        # Phase 3.4 — pause/resume flag. Loaded from queue_state.json
+        # at startup if present; persisted on toggle. Default False
+        # so behavior matches pre-3.4 builds when no side file exists.
+        self.is_paused = False
+        try:
+            from core.orchestration.queue_state import load_queue_state
+
+            _qs = load_queue_state(self.USER_DATA_DIR)
+            if _qs is not None and _qs.paused:
+                self.is_paused = True
+        except Exception as exc:
+            print(f"queue_state: load failed (continuing unpaused): {exc}")
+        # Active ScoreWorker threads — separate from render_threads
+        # so scoring NEVER contends for the render thread pool.
+        # Tuple shape: (QThread, ScoreWorker, task_index).
+        self._score_threads: list = []
+        # Per-render-row latest ScoreResult, keyed by row reference.
+        # Used by the UI cell renderer; never persisted directly
+        # (the source of truth is self.score_cache).
+        self._score_rows_by_tree_item: dict = {}
         self.ENCODER_FILE = self.SCRIPT_DIR / "assets" / "Encoder.txt"
         self._check_dependencies()
 
@@ -898,6 +1123,28 @@ class VideoRendererTool(QMainWindow):
         QShortcut(QKeySequence("F5"), self, self._on_start_shortcut)
         QShortcut(QKeySequence(Qt.Key_Escape), self, self._on_stop_shortcut)
         QShortcut(QKeySequence(Qt.Key_Delete), self.tree_videos, self.delete_videos)
+
+        # Phase 3.1 — load any saved batch from disk and schedule a
+        # resume prompt AFTER the event loop starts. Using a single-
+        # shot 0ms timer means the main window paints first; the
+        # modal then appears on top of an already-visible app, which
+        # is the correct UX (mirrors the FastFlix prompt pattern).
+        # All disk reads are wrapped — a corrupt or unreadable queue
+        # file logs a warning and is silently ignored, never crashes
+        # startup.
+        if self.config.get("queue_persistence_enabled", True):
+            try:
+                saved = self.queue_store.load()
+            except Exception as exc:
+                print(f"queue_store: load() failed at startup: {exc}")
+                saved = None
+            if saved is not None and any(
+                t.status in UNFINISHED_STATUSES for t in saved.tasks
+            ):
+                self._pending_resume_batch = saved
+                from PySide6.QtCore import QTimer
+
+                QTimer.singleShot(0, self._prompt_resume_saved_batch)
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -999,8 +1246,45 @@ class VideoRendererTool(QMainWindow):
         self.check_updates_btn.setToolTip(
             "Check for application + asset updates (does not run at startup)"
         )
+        # Phase 3.3 — "🩺 Health" toolbar button opens RenderHealthDialog,
+        # a read-only summary of scores + recommendations across the
+        # current/last batch. Never auto-opens; toolbar-only discovery.
+        self.health_btn = self.create_video_button(
+            "🩺 Health",
+            self._open_render_health_dialog,
+            "#e8f5e9",
+            "#2e7d32",
+            "#c8e6c9",
+        )
+        self.health_btn.setToolTip(
+            "Open Render Health: per-row scores + optimization suggestions"
+        )
+        # Phase 3.4 — Pause/Resume button + Diagnostics export.
+        self.pause_btn = self.create_video_button(
+            "⏸️ Pause",
+            self._toggle_pause,
+            "#fff8e1",
+            "#f57f17",
+            "#ffe082",
+        )
+        self.pause_btn.setToolTip(
+            "Pause/Resume queue. Current task finishes; next dispatch waits."
+        )
+        self.diagnostics_btn = self.create_video_button(
+            "🧰 Diagnostics",
+            self._open_diagnostics_export,
+            "#ede7f6",
+            "#311b92",
+            "#d1c4e9",
+        )
+        self.diagnostics_btn.setToolTip(
+            "Export local diagnostic bundle (logs + queue + scores + sanitized config)"
+        )
         video_controls.addWidget(settings_btn)
         video_controls.addWidget(help_btn)
+        video_controls.addWidget(self.health_btn)
+        video_controls.addWidget(self.pause_btn)
+        video_controls.addWidget(self.diagnostics_btn)
         video_controls.addWidget(self.check_updates_btn)
         step1_label = QLabel("📥 Step 1: Add videos")
         step1_label.setStyleSheet(
@@ -1287,6 +1571,12 @@ class VideoRendererTool(QMainWindow):
         controls_layout.addWidget(step4_label)
         controls_layout.addLayout(bottom_controls)
         output_layout.addWidget(controls_frame)
+        # Phase 3.2 — three extra columns appended for local scoring
+        # output (VMAF mean/p5, dHash distance, SSIM). Hidden by default
+        # only if the bundled ffmpeg + scoring module are absent; the
+        # column titles stay visible so the right-click "Score this
+        # render" menu has a target. RenderWorker is unaware of these
+        # columns — they are purely UI state.
         self.tree_output = core_widgets.create_output_tree(
             [
                 "No.",
@@ -1295,7 +1585,17 @@ class VideoRendererTool(QMainWindow):
                 "Duration",
                 "Resolution",
                 "Status",
+                "VMAF",
+                "pHash",
+                "SSIM",
             ]
+        )
+        # Phase 3.2 — context-menu wiring for manual scoring.
+        from PySide6.QtCore import Qt as _Qt
+
+        self.tree_output.setContextMenuPolicy(_Qt.CustomContextMenu)
+        self.tree_output.customContextMenuRequested.connect(
+            self._show_output_context_menu
         )
         output_layout.addWidget(self.tree_output)
         self.resizeEvent = self.on_resize
@@ -1324,12 +1624,30 @@ class VideoRendererTool(QMainWindow):
         if hasattr(self, "empty_videos_hint"):
             self.empty_videos_hint.setGeometry(self.tree_videos.viewport().rect())
         total_width = self.tree_output.width()
-        self.tree_output.setColumnWidth(0, int(total_width * 0.1))
-        self.tree_output.setColumnWidth(1, int(total_width * 0.25))
-        self.tree_output.setColumnWidth(2, int(total_width * 0.35))
-        self.tree_output.setColumnWidth(3, int(total_width * 0.15))
-        self.tree_output.setColumnWidth(4, int(total_width * 0.15))
-        self.tree_output.setColumnWidth(5, int(total_width * 0.15))
+        # Phase 3.2 — column count grew from 6 to 9 (+VMAF/pHash/SSIM).
+        # Re-balanced shares; pre-existing 6 columns each lose ~30% of
+        # their share to make room. Sums to 1.0. The user can still
+        # drag-resize at runtime; this just sets the initial split.
+        if self.tree_output.columnCount() >= 9:
+            self.tree_output.setColumnWidth(0, int(total_width * 0.05))
+            self.tree_output.setColumnWidth(1, int(total_width * 0.18))
+            self.tree_output.setColumnWidth(2, int(total_width * 0.25))
+            self.tree_output.setColumnWidth(3, int(total_width * 0.08))
+            self.tree_output.setColumnWidth(4, int(total_width * 0.09))
+            self.tree_output.setColumnWidth(5, int(total_width * 0.10))
+            self.tree_output.setColumnWidth(6, int(total_width * 0.10))  # VMAF
+            self.tree_output.setColumnWidth(7, int(total_width * 0.07))  # pHash
+            self.tree_output.setColumnWidth(8, int(total_width * 0.08))  # SSIM
+        else:
+            # Fallback to the pre-3.2 layout if the tree was built
+            # with only the legacy 6 columns (defensive — should not
+            # happen at runtime, but covers test harnesses).
+            self.tree_output.setColumnWidth(0, int(total_width * 0.1))
+            self.tree_output.setColumnWidth(1, int(total_width * 0.25))
+            self.tree_output.setColumnWidth(2, int(total_width * 0.35))
+            self.tree_output.setColumnWidth(3, int(total_width * 0.15))
+            self.tree_output.setColumnWidth(4, int(total_width * 0.15))
+            self.tree_output.setColumnWidth(5, int(total_width * 0.15))
         super().resizeEvent(event)
 
     def setup_style(self):
@@ -1458,8 +1776,48 @@ class VideoRendererTool(QMainWindow):
             self.gpu_max_concurrent = new_concurrent
             self._gpu_semaphore = QSemaphore(self.gpu_max_concurrent)
 
-        # num_threads, show_ffmpeg_command, open_output_when_done: not
-        # rewired here. NVENC quality offset is baked into preset_translator
+        # Phase 3.1 — propagate queue-save toggle into the in-memory
+        # config dict so _queue_persistence_enabled() picks up the
+        # change without an app restart. The persisted JSON is the
+        # single source of truth; this just keeps the cached copy in
+        # sync after a Settings OK.
+        self.config["queue_persistence_enabled"] = cfg.get(
+            "queue_persistence_enabled", True
+        )
+        # Phase 3.2 — propagate scoring settings without restart.
+        # auto-scoring + axes selection + parallelism are all read
+        # via _auto_scoring_enabled / _scoring_default_axes /
+        # _scoring_max_parallel which consult self.config at call
+        # time, so a Settings OK takes effect on the next render.
+        self.config["scoring_auto_enabled"] = cfg.get("scoring_auto_enabled", False)
+        self.config["scoring_default_axes"] = cfg.get(
+            "scoring_default_axes", ["vmaf", "phash"]
+        )
+        self.config["scoring_max_parallel"] = cfg.get("scoring_max_parallel", 1)
+        self.config["scoring_phash_frames"] = cfg.get("scoring_phash_frames", 20)
+
+        # B-014 closure: re-read the remaining 3 keys that previously
+        # required an app restart. These are read on the next render
+        # dispatch (start_render reads num_threads at task-build time;
+        # show_ffmpeg_command + open_output_when_done are read at the
+        # render-complete callback), so propagating them into the
+        # in-memory config + the corresponding self.* attribute is
+        # enough to make Settings OK take effect immediately. The new
+        # num_threads value applies to the NEXT batch — an in-flight
+        # batch keeps its dispatch fan-out unchanged.
+        # num_threads is not in AppDefaults; fall back to the historical
+        # default of 3 to match settings_dialog DEFAULTS.
+        new_threads = int(cfg.get("num_threads", 3) or 3)
+        self.config["num_threads"] = new_threads
+        try:
+            self.num_threads = new_threads
+        except Exception:
+            pass
+        self.config["show_ffmpeg_command"] = bool(cfg.get("show_ffmpeg_command", True))
+        self.config["open_output_when_done"] = bool(
+            cfg.get("open_output_when_done", False)
+        )
+        # NVENC quality offset is baked into preset_translator
         # (-crf N -> -cq N+offset) per ADR-0007 D3 / ADR-0008.
 
     def _update_empty_hints(self):
@@ -2197,6 +2555,14 @@ class VideoRendererTool(QMainWindow):
                 return None
         if not self.validate_inputs():
             return
+        # Phase 3.5 lightweight pre-flight gate (advisory only).
+        # Classifies the user's currently-selected presets against the
+        # gpu_caps snapshot. On BLOCK verdicts, offers a single modal
+        # with Cancel / Proceed-Anyway. On WARN, surfaces a non-blocking
+        # toast in the output panel. Soft-fails on any internal error —
+        # a defective intelligence module must NEVER block a render.
+        if not self._encoder_intel_preflight():
+            return
         else:
             if self.sequential_mode:
                 # Phase 2d follow-up fix (Item 5): sequential slot
@@ -2306,6 +2672,13 @@ class VideoRendererTool(QMainWindow):
                 for video_idx, video_path in enumerate(self.videos):
                     for encoder_idx, encoder_name in enumerate(self.selected_encoders):
                         self.all_tasks.append((video_path, [encoder_name], video_idx))
+            # Phase 3.1 — persist a snapshot of the batch BEFORE any
+            # worker is dispatched. This guarantees that even if the
+            # very first thread.start() crashes the process, the next
+            # launch will detect the saved batch and offer a resume
+            # prompt. _save_queue_snapshot() is a no-op if the user
+            # has disabled queue persistence in settings.
+            self._save_queue_snapshot()
             for i in range(self.num_threads):
                 thread = QThread()
                 self.render_threads.append(thread)
@@ -2316,6 +2689,10 @@ class VideoRendererTool(QMainWindow):
     def _start_next_task(self):
         """Khởi chạy task tiếp theo nếu còn."""
         if not self.is_rendering:
+            return
+        # Phase 3.4 — pause gate. Current task already running on
+        # its worker is NOT interrupted; only NEW dispatch waits.
+        if getattr(self, "is_paused", False):
             return
         else:
             if self.current_task_index >= len(self.all_tasks):
@@ -2342,6 +2719,12 @@ class VideoRendererTool(QMainWindow):
                 self.btn_start.setEnabled(True)
                 self.btn_cancel.setEnabled(False)
                 self.current_label.setText("Idle")
+                # Phase 3.1 — terminal cleanup path reachable when the
+                # final dispatched task errors and on_render_error
+                # recurses back into _start_next_task. The batch is
+                # complete (success or with failures) and must no longer
+                # appear in the resume prompt at next launch.
+                self._clear_queue_snapshot()
                 QMessageBox.information(
                     self,
                     "Success",
@@ -2449,11 +2832,49 @@ class VideoRendererTool(QMainWindow):
                             )
                         thread.start()
                         self.active_threads += 1
+                        # Phase 3.1 — record DISPATCHED transition for
+                        # the just-launched task BEFORE incrementing the
+                        # cursor (the task_uuid is indexed by
+                        # current_task_index pre-increment). Safe no-op
+                        # if queue persistence is disabled.
+                        self._update_queue_task_status(
+                            self._task_uuid_for_index(self.current_task_index),
+                            TaskStatus.DISPATCHED,
+                            started_at=time.time(),
+                        )
                         self.current_task_index += 1
 
     def cancel_render(self):
         """Hủy quá trình render."""
         if self.is_rendering:
+            # Phase 3.1 — mark all still-unfinished tasks as CANCELLED
+            # in the saved queue BEFORE flipping is_rendering off and
+            # tearing down workers. Source-of-truth is the on-disk
+            # batch (already reflects every COMPLETED/FAILED transition
+            # via update_task_status); anything still in
+            # PENDING/DISPATCHED/RUNNING is the cancel target. After
+            # cancellation, the queue file is cleared so the next
+            # launch does NOT offer to resume a batch the user just
+            # explicitly cancelled.
+            if self._queue_persistence_enabled():
+                try:
+                    persisted = self.queue_store.load()
+                except (OSError, ValueError) as exc:
+                    print(f"queue_store: cancel load failed: {exc}")
+                    persisted = None
+                if persisted is not None:
+                    now = time.time()
+                    for task in persisted.tasks:
+                        if task.status in UNFINISHED_STATUSES:
+                            self._update_queue_task_status(
+                                task.task_uuid,
+                                TaskStatus.CANCELLED,
+                                completed_at=now,
+                            )
+            # Clear the snapshot — user-initiated cancel means the
+            # batch is intentionally abandoned; no resume on next
+            # launch.
+            self._clear_queue_snapshot()
             self.is_rendering = False
             if hasattr(self, "render_workers"):
                 for worker in self.render_workers:
@@ -2642,7 +3063,34 @@ class VideoRendererTool(QMainWindow):
         box_index = getattr(worker, "task_index", self.completed_tasks)
         self.update_box_color(box_index, "green")
         self.completed_tasks += 1
+        # Phase 3.1 — persist COMPLETED transition for the finished
+        # task. We resolve task_uuid via the task_index stamped on the
+        # worker at dispatch (see _start_next_task), not via the
+        # post-increment cursor, so out-of-order completion across
+        # workers is recorded correctly. Safe no-op if persistence is
+        # disabled or task_index is out of range.
+        self._update_queue_task_status(
+            self._task_uuid_for_index(box_index),
+            TaskStatus.COMPLETED,
+            completed_at=time.time(),
+            final_output=output_filename,
+        )
         self._record_task_duration()
+        # Phase 3.2 — fire auto-scoring AFTER queue + counter updates,
+        # BEFORE the next-task dispatch. Default is OFF; only spawns
+        # a ScoreWorker if the user has enabled auto-scoring AND at
+        # least one ffmpeg-supported axis is configured. Never blocks
+        # the render hot path (ScoreWorker lives on its own QThread).
+        try:
+            tree_item_for_score = getattr(worker, "tree_item", None)
+            self._maybe_auto_score(
+                task_index=box_index,
+                video_path=worker.video_path,
+                output_filename=output_filename,
+                tree_item=tree_item_for_score,
+            )
+        except Exception as exc:
+            print(f"scoring: auto-score wire failed (ignored): {exc}")
         self.progress_label.setText(
             f"Progress: {self.completed_tasks}/{self.total_tasks} renders\nETA: {self._compute_eta_string()}"
         )
@@ -2676,6 +3124,13 @@ class VideoRendererTool(QMainWindow):
             self.btn_start.setEnabled(True)
             self.btn_cancel.setEnabled(False)
             self.current_label.setText("Idle")
+            # Phase 3.1 — batch fully drained successfully; the saved
+            # queue file is no longer needed and must be removed so
+            # the next launch does NOT prompt the user to resume a
+            # batch that already finished. Failed/cancelled batches
+            # retain their queue file via the cancel_render and
+            # closeEvent paths below.
+            self._clear_queue_snapshot()
             QMessageBox.information(
                 self, "Success", f"Successfully rendered {self.total_tasks} video(s)!"
             )
@@ -2714,6 +3169,18 @@ class VideoRendererTool(QMainWindow):
         box_index = getattr(worker, "task_index", self.completed_tasks)
         self.update_box_color(box_index, "red")
         self.completed_tasks += 1
+        # Phase 3.1 — persist FAILED transition. `box_index` is the
+        # task_index set on the worker at dispatch (matches the
+        # _task_uuids slot). For the worker=None direct-call path
+        # (encoder_params miss inside _start_next_task), box_index
+        # falls back to `self.completed_tasks` which is the current
+        # dispatch slot — still aligned with the _task_uuids index.
+        self._update_queue_task_status(
+            self._task_uuid_for_index(box_index),
+            TaskStatus.FAILED,
+            completed_at=time.time(),
+            error_message=error_message,
+        )
         self._record_task_duration()
         self.progress_label.setText(
             f"Progress: {self.completed_tasks}/{self.total_tasks} renders\nETA: {self._compute_eta_string()}"
@@ -2850,7 +3317,12 @@ class VideoRendererTool(QMainWindow):
             reply = QMessageBox.question(
                 self,
                 "Exit",
-                "A rendering process is running. Do you really want to exit?",
+                (
+                    "A rendering process is running.\n\n"
+                    "If you exit now, the in-progress batch will be saved "
+                    "and you can resume it on next launch.\n\n"
+                    "Do you really want to exit?"
+                ),
                 QMessageBox.Yes | QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
@@ -2870,11 +3342,53 @@ class VideoRendererTool(QMainWindow):
                         thread.wait(5000)
                     self.render_threads.clear()
                     self.render_workers.clear()
+                # Phase 3.1 — exit-during-render is INTENTIONALLY a
+                # resumable scenario (distinct from cancel_render).
+                # Mark any still-running task back to PENDING so the
+                # resume prompt at next launch treats it as
+                # outstanding work to redo. We do NOT clear the
+                # queue file — that is the whole point of the
+                # resume feature.
+                if self._queue_persistence_enabled():
+                    try:
+                        persisted = self.queue_store.load()
+                    except (OSError, ValueError) as exc:
+                        print(f"queue_store: closeEvent load failed: {exc}")
+                        persisted = None
+                    if persisted is not None:
+                        for task in persisted.tasks:
+                            if task.status in (
+                                TaskStatus.DISPATCHED,
+                                TaskStatus.RUNNING,
+                            ):
+                                # Demote in-flight tasks back to
+                                # PENDING — the worker never finished
+                                # them. Pending state means "resume
+                                # will re-attempt this task".
+                                self._update_queue_task_status(
+                                    task.task_uuid,
+                                    TaskStatus.PENDING,
+                                )
+                # Phase 3.2 — cancel any in-flight scoring workers
+                # alongside the render cancel. ScoreWorkers spawn
+                # short-lived ffmpeg children that must not outlive
+                # the app process.
+                try:
+                    self._cancel_all_score_workers()
+                except Exception as exc:
+                    print(f"scoring: cancel-on-close failed (ignored): {exc}")
                 self.save_config()
                 event.accept()
             else:
                 event.ignore()
         else:
+            # Phase 3.2 — even on a clean exit (no rendering), there may
+            # be background scoring workers (auto-score from a prior
+            # render still finishing). Stop them politely.
+            try:
+                self._cancel_all_score_workers()
+            except Exception as exc:
+                print(f"scoring: cancel-on-close failed (ignored): {exc}")
             self.save_config()
             event.accept()
 
@@ -2938,11 +3452,23 @@ class VideoRendererTool(QMainWindow):
         )
 
     def _update_encoder_buttons_enabled(self) -> None:
-        """2c-c-4: disable Edit/Delete when any selected encoder is built-in."""
+        """2c-c-4: disable Edit/Delete when any selected encoder is built-in.
+
+        B-018 closure: when the buttons are disabled because of a
+        built-in selection, the tooltip becomes explicit so users no
+        longer think the buttons are broken. Per ADR-0006, built-in
+        presets are immutable — the user can copy the params into a
+        new preset via 'Add' to customize. The label-style hint at
+        `_update_encoder_status_label` (Option B) explains this
+        inline; the tooltip change here closes the same UX gap on
+        the buttons themselves (Option A from the BACKLOG).
+        """
         selected = self.tree_encoders.selectedItems()
         if not selected:
             self.btn_edit_encoder.setEnabled(False)
             self.btn_delete_encoder.setEnabled(False)
+            self.btn_edit_encoder.setToolTip("Select a preset first to edit it")
+            self.btn_delete_encoder.setToolTip("Select a preset first to delete it")
             return
         any_builtin = any(
             (item.data(0, Qt.UserRole + 1) or "").startswith("builtin:")
@@ -2950,6 +3476,18 @@ class VideoRendererTool(QMainWindow):
         )
         self.btn_edit_encoder.setEnabled(not any_builtin)
         self.btn_delete_encoder.setEnabled(not any_builtin)
+        if any_builtin:
+            self.btn_edit_encoder.setToolTip(
+                "Built-in presets are read-only (ADR-0006). "
+                "Use 'Add' to create your own copy you can edit."
+            )
+            self.btn_delete_encoder.setToolTip(
+                "Built-in presets are read-only (ADR-0006). "
+                "Only user-created presets can be deleted."
+            )
+        else:
+            self.btn_edit_encoder.setToolTip("Edit the selected preset")
+            self.btn_delete_encoder.setToolTip("Delete the selected preset")
 
     def _update_encoder_status_label(self) -> None:
         """B-018 Option B: show context-aware help text based on selection.
@@ -3304,6 +3842,1103 @@ class VideoRendererTool(QMainWindow):
         finally:
             if btn is not None:
                 btn.setEnabled(True)
+
+    # ------------------------------------------------------------------
+    # Phase 3.1 — local persistent queue helpers
+    # ------------------------------------------------------------------
+
+    def _build_batch_from_state(self) -> QueueBatch:
+        """Snapshot the current batch state into a QueueBatch.
+
+        Called from start_render() after `self.all_tasks` is built.
+        Generates a fresh task_uuid per task and stores them on
+        `self._task_uuids` for later update_task_status() calls.
+
+        No-side-effect on the renderer state — purely builds the
+        on-disk projection. Tasks start in PENDING status.
+        """
+        self._current_batch_uuid = str(uuid.uuid4())
+        self._task_uuids = [str(uuid.uuid4()) for _ in self.all_tasks]
+        tasks = []
+        for i, (video_path, encoder_ids, video_idx) in enumerate(self.all_tasks):
+            tasks.append(
+                QueueTask(
+                    task_uuid=self._task_uuids[i],
+                    task_index=i,
+                    video_path=str(video_path),
+                    # encoder_ids is a list[str] after Item 5; copy
+                    # to detach from any mutation that follows.
+                    encoder_ids=list(encoder_ids),
+                    video_idx=int(video_idx),
+                    status=TaskStatus.PENDING,
+                )
+            )
+        return QueueBatch(
+            batch_uuid=self._current_batch_uuid,
+            created_at=time.time(),
+            output_directory=str(self.output_directory),
+            sequential_mode=bool(self.sequential_mode),
+            num_threads=int(self.num_threads),
+            settings_snapshot={
+                "gpu_enabled": bool(self.gpu_enabled),
+                "gpu_codec": str(self.gpu_codec),
+                "gpu_preset": str(self.gpu_preset),
+                "gpu_max_concurrent": int(self.gpu_max_concurrent),
+                "gpu_error_action": str(self.gpu_error_action),
+                "output_collision": str(self.output_collision),
+            },
+            total_tasks=int(self.total_tasks),
+            completed_tasks=0,
+            tasks=tasks,
+        )
+
+    def _queue_persistence_enabled(self) -> bool:
+        """Settings checkbox 'Save queue for resume on next launch'."""
+        return bool(self.config.get("queue_persistence_enabled", True))
+
+    def _save_queue_snapshot(self) -> None:
+        """Persist the current batch. Swallows OSError so a disk-full
+        cannot crash the renderer mid-batch."""
+        if not self._queue_persistence_enabled():
+            return
+        try:
+            batch = self._build_batch_from_state()
+            self.queue_store.save(batch)
+        except (OSError, ValueError) as exc:
+            print(f"queue_store: snapshot save failed: {exc}")
+
+    def _update_queue_task_status(
+        self,
+        task_uuid: Optional[str],
+        status: TaskStatus,
+        **fields,
+    ) -> None:
+        """Tiny adapter that swallows errors so the renderer keeps
+        going if the disk is unwriteable."""
+        if not task_uuid or not self._queue_persistence_enabled():
+            return
+        try:
+            self.queue_store.update_task_status(task_uuid, status, **fields)
+        except (OSError, ValueError) as exc:
+            print(f"queue_store: status update failed: {exc}")
+
+    def _task_uuid_for_index(self, index: int) -> Optional[str]:
+        """Look up the task_uuid for a dispatched task index. Returns
+        None if the index is out of range (defensive)."""
+        if 0 <= index < len(self._task_uuids):
+            return self._task_uuids[index]
+        return None
+
+    def _clear_queue_snapshot(self) -> None:
+        """Remove the on-disk queue file. Idempotent."""
+        try:
+            self.queue_store.clear()
+        except (OSError, ValueError) as exc:
+            print(f"queue_store: clear failed: {exc}")
+        self._current_batch_uuid = None
+        self._task_uuids = []
+
+    def _prompt_resume_saved_batch(self) -> None:
+        """Show the resume modal for a batch loaded at startup.
+
+        Three user choices:
+          Yes      — resume: re-queue unfinished tasks and start
+                     rendering immediately.
+          No       — discard: clear the on-disk batch.
+          Cancel   — decide later: leave the on-disk batch intact;
+                     prompt will re-appear on next launch.
+
+        Missing inputs / missing preset IDs are filtered with a
+        single end-of-resume notice listing the skipped count.
+        """
+        batch = self._pending_resume_batch
+        self._pending_resume_batch = None  # consume regardless of answer
+        if batch is None:
+            return
+
+        unfinished = [t for t in batch.tasks if t.status in UNFINISHED_STATUSES]
+        if not unfinished:
+            # Defensive: load() already filters via the same set;
+            # if we still got here with no work, just clear.
+            self._clear_queue_snapshot()
+            return
+
+        completed_count = sum(
+            1 for t in batch.tasks if t.status is TaskStatus.COMPLETED
+        )
+        age_seconds = max(0, time.time() - batch.created_at)
+        age_human = (
+            f"{int(age_seconds // 60)} min ago"
+            if age_seconds < 3600
+            else f"{int(age_seconds // 3600)} hr ago"
+        )
+
+        reply = QMessageBox.question(
+            self,
+            "Resume previous batch?",
+            (
+                f"An interrupted batch from {age_human} was found:\n\n"
+                f"• {completed_count} of {batch.total_tasks} task(s) completed\n"
+                f"• {len(unfinished)} task(s) still pending\n"
+                f"• Output dir: {batch.output_directory}\n\n"
+                "Resume will use your CURRENT settings, not the settings\n"
+                "from when the batch started.\n\n"
+                "Yes → resume the remaining tasks\n"
+                "No → discard the saved batch\n"
+                "Cancel → decide later (the saved batch stays on disk)"
+            ),
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            QMessageBox.Yes,
+        )
+        if reply == QMessageBox.No:
+            self._clear_queue_snapshot()
+            return
+        if reply == QMessageBox.Cancel:
+            return  # leave queue file alone — re-prompt next launch
+
+        # Yes → filter against current disk + preset state, then resume.
+        self._resume_batch(batch, unfinished)
+
+    def _resume_batch(self, batch: QueueBatch, unfinished: list[QueueTask]) -> None:
+        """Re-queue the unfinished tasks from a previously-saved batch.
+
+        Skips:
+          • tasks whose video_path no longer exists on disk
+          • tasks whose encoder_ids no longer resolve via
+            get_encoder_index_by_id
+        A summary of skipped reasons is shown after resume kicks off.
+        """
+        skipped_missing_input: list[str] = []
+        skipped_missing_preset: list[str] = []
+        resumable_videos: list[str] = []
+        resumable_encoder_id_lists: list[list[str]] = []
+
+        for task in unfinished:
+            if not os.path.isfile(task.video_path):
+                skipped_missing_input.append(os.path.basename(task.video_path))
+                continue
+            unknown = [
+                eid
+                for eid in task.encoder_ids
+                if self.get_encoder_index_by_id(eid) is None
+            ]
+            if unknown:
+                skipped_missing_preset.append(
+                    f"{os.path.basename(task.video_path)} ({', '.join(unknown)})"
+                )
+                continue
+            resumable_videos.append(task.video_path)
+            resumable_encoder_id_lists.append(list(task.encoder_ids))
+
+        # If nothing survived filtering, discard and notify.
+        if not resumable_videos:
+            self._clear_queue_snapshot()
+            QMessageBox.information(
+                self,
+                "Nothing to resume",
+                "All saved tasks reference files or presets that are no "
+                "longer available. The saved batch has been discarded.",
+            )
+            return
+
+        # Apply output_directory + videos from the saved batch.
+        self.output_directory = batch.output_directory
+        if self.output_directory:
+            self.dir_label.setText(f"Output Directory: {self.output_directory}")
+            self.dir_label.setToolTip(self.output_directory)
+
+        # Restore the unique input list (preserve order, dedupe).
+        seen: set[str] = set()
+        self.videos = [v for v in resumable_videos if not (v in seen or seen.add(v))]
+        self.update_video_list()
+        if self.videos:
+            self.btn_delete.setEnabled(True)
+
+        # Restore selection identity for the renderer. We bypass the
+        # tree-mode UI by directly populating selected_encoders /
+        # encoder_params from the resumable encoder IDs, then call
+        # start_render() with `_resume_payload` so it knows to re-use
+        # rather than rebuild from tree selection.
+        flat_ids: list[str] = []
+        for ids in resumable_encoder_id_lists:
+            for eid in ids:
+                if eid not in flat_ids:
+                    flat_ids.append(eid)
+
+        self.selected_encoders = flat_ids
+        self.encoder_params = {}
+        for eid in flat_ids:
+            idx = self.get_encoder_index_by_id(eid)
+            if idx is not None:
+                self.encoder_params[eid] = list(self.encoder_options[idx].params)
+
+        # Brief skip summary (only if anything was filtered).
+        skip_msgs = []
+        if skipped_missing_input:
+            skip_msgs.append(
+                f"Missing input files ({len(skipped_missing_input)}):\n  "
+                + "\n  ".join(skipped_missing_input[:10])
+                + ("\n  …" if len(skipped_missing_input) > 10 else "")
+            )
+        if skipped_missing_preset:
+            skip_msgs.append(
+                f"Missing presets ({len(skipped_missing_preset)}):\n  "
+                + "\n  ".join(skipped_missing_preset[:10])
+                + ("\n  …" if len(skipped_missing_preset) > 10 else "")
+            )
+        if skip_msgs:
+            QMessageBox.warning(
+                self,
+                "Some tasks skipped on resume",
+                "The following tasks could not be resumed:\n\n"
+                + "\n\n".join(skip_msgs)
+                + "\n\nThe remaining tasks will start now.",
+            )
+
+        # Clear the on-disk batch — start_render() will write a fresh
+        # snapshot below. This is intentional: the resumed batch is a
+        # new batch_uuid with new task_uuids in the eyes of the queue
+        # store. Original batch identity is captured in the log only.
+        self._clear_queue_snapshot()
+
+        # Kick off the render. start_render() reads selected_encoders
+        # + videos exactly the way the user would have triggered it
+        # via ▶️ Start.
+        self.start_render()
+
+    # ------------------------------------------------------------------
+    # Phase 3.2 — local-only scoring helpers
+    # ------------------------------------------------------------------
+
+    def _scoring_enabled(self) -> bool:
+        """True if the scoring subsystem is available (caps + cache OK)."""
+        return self.scoring_caps is not None and self.score_cache is not None
+
+    def _auto_scoring_enabled(self) -> bool:
+        """Settings checkbox: 'Score every render automatically'."""
+        return bool(self.config.get("scoring_auto_enabled", False))
+
+    def _scoring_max_parallel(self) -> int:
+        """Settings spinbox: max simultaneous ScoreWorkers. Default 1."""
+        try:
+            val = int(self.config.get("scoring_max_parallel", 1))
+        except (TypeError, ValueError):
+            val = 1
+        return max(1, min(val, 4))
+
+    def _scoring_default_axes(self) -> list:
+        """Settings: which axes to compute when auto-scoring fires.
+
+        Filters to axes the bundled ffmpeg actually supports. pHash
+        is always available. VMAF/SSIM/PSNR are filtered by
+        scoring_caps so a missing libvmaf does not request VMAF.
+        """
+        raw = self.config.get("scoring_default_axes", ["vmaf", "phash"])
+        if not isinstance(raw, list):
+            raw = ["vmaf", "phash"]
+        axes = [str(a).lower() for a in raw]
+        caps = self.scoring_caps
+        out: list = []
+        if "vmaf" in axes and caps is not None and caps.vmaf_available:
+            out.append("vmaf")
+        if "ssim" in axes and caps is not None and caps.ssim_available:
+            out.append("ssim")
+        if "psnr" in axes and caps is not None and caps.psnr_available:
+            out.append("psnr")
+        if "phash" in axes and caps is not None and caps.phash_available:
+            out.append("phash")
+        # Last-resort fallback: pHash never needs ffmpeg filters.
+        if not out and caps is not None and caps.phash_available:
+            out.append("phash")
+        return out
+
+    def _spawn_score_worker(
+        self,
+        task_index: int,
+        reference: Path,
+        distorted: Path,
+        axes: list,
+        tree_item=None,
+    ) -> None:
+        """Spawn a ScoreWorker on its own dedicated QThread.
+
+        Concurrency-capped via `_scoring_max_parallel`. When the cap
+        is full, the request is silently dropped (the user can
+        retry once a slot frees). UI feedback is via the row's
+        score cell ("…" while running, value on finish).
+        """
+        if not self._scoring_enabled():
+            return
+        if not axes:
+            return
+        # Drop stale finished entries before counting active slots.
+        self._prune_finished_score_threads()
+        if len(self._score_threads) >= self._scoring_max_parallel():
+            print(
+                f"scoring: max-parallel ({self._scoring_max_parallel()}) reached; "
+                f"task {task_index} request dropped"
+            )
+            return
+        if tree_item is not None:
+            # Set cells to in-progress placeholder so the user sees
+            # immediate feedback.
+            self._render_score_cells(tree_item, None, running=True)
+        thread = QThread()
+        worker = ScoreWorker(
+            task_index=task_index,
+            ffmpeg_path=self.FFMPEG_PATH,
+            reference=reference,
+            distorted=distorted,
+            axes=list(axes),
+            n_phash_frames=int(self.config.get("scoring_phash_frames", 20)),
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.process)
+        worker.score_ready.connect(
+            lambda idx, result, ti=tree_item: self._on_score_ready(idx, result, ti)
+        )
+        worker.score_error.connect(
+            lambda idx, msg, ti=tree_item: self._on_score_error(idx, msg, ti)
+        )
+        # v3.9 H2 fix: wire the thread-lifecycle cleanup so the QThread
+        # actually exits after the worker emits a result. Without these
+        # four connections, every ScoreWorker leaks its QThread —
+        # `_prune_finished_score_threads` sees `thread.isRunning() ==
+        # True` forever and the concurrency cap saturates after
+        # max_parallel renders. Mirrors the URLDownloadWorker lifecycle
+        # pattern used elsewhere in this file.
+        worker.score_ready.connect(thread.quit)
+        worker.score_error.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        # Bookkeeping — track so cancel + cleanup can reach them.
+        self._score_threads.append((thread, worker, task_index))
+        thread.start()
+
+    def _prune_finished_score_threads(self) -> None:
+        """Drop already-finished score threads from the active list."""
+        live = []
+        for entry in self._score_threads:
+            thread, _worker, _idx = entry
+            try:
+                if thread.isRunning():
+                    live.append(entry)
+                else:
+                    try:
+                        thread.quit()
+                        thread.wait(500)
+                    except Exception:
+                        pass
+            except RuntimeError:
+                # Underlying C++ QThread already deleted; drop.
+                pass
+        self._score_threads = live
+
+    def _on_score_ready(self, task_index: int, result, tree_item) -> None:
+        """Slot — runs on the Qt main thread. Caches + paints cells."""
+        if self.score_cache is not None:
+            try:
+                self.score_cache.put(result)
+            except Exception as exc:
+                print(f"scoring: cache write failed: {exc}")
+        if tree_item is not None:
+            try:
+                self._score_rows_by_tree_item[id(tree_item)] = result
+                self._render_score_cells(tree_item, result, running=False)
+            except RuntimeError:
+                # Tree item was deleted (rare — user cleared tree).
+                pass
+        self._prune_finished_score_threads()
+
+    def _on_score_error(self, task_index: int, message: str, tree_item) -> None:
+        """Slot — runs on the Qt main thread. Marks cells as ERR."""
+        print(f"scoring: task {task_index} error: {message}")
+        if tree_item is not None:
+            try:
+                self._render_score_cells(tree_item, None, running=False, error=message)
+            except RuntimeError:
+                pass
+        self._prune_finished_score_threads()
+
+    def _render_score_cells(
+        self, tree_item, result, *, running: bool = False, error: str = ""
+    ) -> None:
+        """Paint columns 6/7/8 (VMAF / pHash / SSIM) for one row.
+
+        Cell rendering rules (per design doc §5):
+            running=True       -> "…" in all three
+            error != ""        -> "ERR" with tooltip
+            result is None     -> "—" placeholder
+            result populated   -> per-axis value / "—" if axis missing
+        """
+        from core.scoring import ScoreAxisStatus  # local import — safe
+
+        # Defensive: only paint if scoring columns exist on the tree.
+        try:
+            col_count = self.tree_output.columnCount()
+        except RuntimeError:
+            return
+        if col_count < 9:
+            return  # scoring columns not built yet; nothing to paint
+
+        def _set(col: int, text: str, tooltip: str = "") -> None:
+            tree_item.setText(col, text)
+            tree_item.setToolTip(col, tooltip)
+
+        if running:
+            _set(6, "…")
+            _set(7, "…")
+            _set(8, "…")
+            return
+        if error:
+            tip = f"Scoring failed: {error}"
+            _set(6, "ERR", tip)
+            _set(7, "ERR", tip)
+            _set(8, "ERR", tip)
+            return
+        if result is None:
+            _set(6, "—")
+            _set(7, "—")
+            _set(8, "—")
+            return
+
+        # VMAF cell.
+        if result.vmaf_status == ScoreAxisStatus.OK and result.vmaf_mean is not None:
+            mean_s = (
+                f"{result.vmaf_mean:.1f}"
+                if isinstance(result.vmaf_mean, (int, float))
+                else "—"
+            )
+            p5_s = (
+                f"{result.vmaf_p5:.1f}"
+                if isinstance(result.vmaf_p5, (int, float))
+                else "—"
+            )
+            _set(6, f"{mean_s} / {p5_s}", "VMAF mean / p5 (higher = closer to source)")
+        elif result.vmaf_status == ScoreAxisStatus.ERROR:
+            _set(6, "ERR", result.vmaf_error or "VMAF failed")
+        elif result.vmaf_status == ScoreAxisStatus.CANCELLED:
+            _set(6, "—", "VMAF cancelled")
+        elif result.vmaf_status == ScoreAxisStatus.UNSUPPORTED:
+            _set(6, "—", "libvmaf unavailable in bundled ffmpeg")
+        else:
+            _set(6, "—")
+
+        # pHash cell.
+        if (
+            result.phash_status == ScoreAxisStatus.OK
+            and result.phash_avg_distance is not None
+        ):
+            _set(
+                7,
+                f"{result.phash_avg_distance:.1f}",
+                f"Avg dHash Hamming distance across "
+                f"{result.phash_frames_compared} sampled frame pairs "
+                f"(higher = more different from source)",
+            )
+        elif result.phash_status == ScoreAxisStatus.ERROR:
+            _set(7, "ERR", result.phash_error or "pHash failed")
+        elif result.phash_status == ScoreAxisStatus.CANCELLED:
+            _set(7, "—", "pHash cancelled")
+        else:
+            _set(7, "—")
+
+        # SSIM cell.
+        if result.ssim_status == ScoreAxisStatus.OK and result.ssim_mean is not None:
+            _set(8, f"{result.ssim_mean:.3f}", "SSIM (1.0 = identical)")
+        elif result.ssim_status == ScoreAxisStatus.ERROR:
+            _set(8, "ERR", result.ssim_error or "SSIM failed")
+        elif result.ssim_status == ScoreAxisStatus.CANCELLED:
+            _set(8, "—", "SSIM cancelled")
+        else:
+            _set(8, "—")
+
+    def _maybe_auto_score(
+        self, task_index: int, video_path: str, output_filename: str, tree_item
+    ) -> None:
+        """If auto-scoring is enabled, spawn a worker post-render.
+
+        Called once at the end of on_render_completed for each
+        successful task. Looks up the cache first (so an in-place
+        re-render reuses a fresh score) and falls back to a worker.
+        """
+        if not self._scoring_enabled() or not self._auto_scoring_enabled():
+            return
+        axes = self._scoring_default_axes()
+        if not axes:
+            return
+        reference = Path(video_path)
+        distorted = Path(self.output_directory) / output_filename
+        # Cache hit short-circuit.
+        try:
+            ref_m = reference.stat().st_mtime if reference.is_file() else None
+            dist_m = distorted.stat().st_mtime if distorted.is_file() else None
+        except OSError:
+            ref_m = dist_m = None
+        cached = (
+            self.score_cache.get(
+                str(reference),
+                str(distorted),
+                reference_mtime=ref_m,
+                distorted_mtime=dist_m,
+            )
+            if self.score_cache is not None
+            else None
+        )
+        if cached is not None and tree_item is not None:
+            self._score_rows_by_tree_item[id(tree_item)] = cached
+            self._render_score_cells(tree_item, cached, running=False)
+            return
+        self._spawn_score_worker(task_index, reference, distorted, axes, tree_item)
+
+    def _show_output_context_menu(self, pos) -> None:
+        """Phase 3.2 — right-click menu on tree_output for manual scoring.
+
+        Provides 'Score this render' / 'Score selected' / 'Score all'
+        (only when scoring is initialized + ffmpeg supports at least
+        one axis). Existing tree_output behavior (default selection,
+        keyboard navigation) is untouched.
+        """
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QMenu
+
+        if not self._scoring_enabled():
+            return
+        item_at_pos = self.tree_output.itemAt(pos)
+        selected = self.tree_output.selectedItems()
+        # If user right-clicked outside any item, show no menu.
+        if item_at_pos is None and not selected:
+            return
+        menu = QMenu(self.tree_output)
+        # The list of axes we'll request — filtered by capability.
+        axes = self._scoring_default_axes()
+        if not axes:
+            menu.addAction("(no scoring axes available)").setEnabled(False)
+            menu.exec(self.tree_output.viewport().mapToGlobal(pos))
+            return
+
+        def _row_ref_distorted(it) -> tuple:
+            # We stored the (input video_path, output basename) inside
+            # the row via column text 1 / 2. But filenames may have
+            # been mangled by clip_to_limit; the safer source is the
+            # mapping kept in output_mapping. Fall back to tree text.
+            try:
+                in_name = it.text(1)
+                out_name = it.text(2)
+            except RuntimeError:
+                return (None, None)
+            if not in_name or not out_name:
+                return (None, None)
+            ref_candidate = None
+            for v in self.videos:
+                if os.path.basename(v) == in_name:
+                    ref_candidate = v
+                    break
+            if ref_candidate is None:
+                return (None, None)
+            dist_candidate = os.path.join(self.output_directory, out_name)
+            return (ref_candidate, dist_candidate)
+
+        action_one = menu.addAction("Score this render")
+        action_selected = menu.addAction(f"Score selected ({len(selected)})")
+        action_all = menu.addAction("Score all rendered rows")
+        # Disable irrelevant actions.
+        if item_at_pos is None:
+            action_one.setEnabled(False)
+        if not selected:
+            action_selected.setEnabled(False)
+
+        chosen = menu.exec(self.tree_output.viewport().mapToGlobal(pos))
+        if chosen is None:
+            return
+        targets: list = []
+        if chosen is action_one and item_at_pos is not None:
+            targets = [item_at_pos]
+        elif chosen is action_selected:
+            targets = list(selected)
+        elif chosen is action_all:
+            targets = []
+            for i in range(self.tree_output.topLevelItemCount()):
+                it = self.tree_output.topLevelItem(i)
+                # Skip non-completed rows.
+                try:
+                    status_text = it.text(5)
+                except RuntimeError:
+                    continue
+                if status_text and "Completed" in status_text:
+                    targets.append(it)
+        if not targets:
+            return
+        for idx, ti in enumerate(targets):
+            ref, dist = _row_ref_distorted(ti)
+            if not ref or not dist:
+                continue
+            # Cache hit? Just paint, don't re-score.
+            cached = None
+            if self.score_cache is not None:
+                try:
+                    ref_m = os.path.getmtime(ref) if os.path.isfile(ref) else None
+                    dist_m = os.path.getmtime(dist) if os.path.isfile(dist) else None
+                    cached = self.score_cache.get(
+                        str(ref),
+                        str(dist),
+                        reference_mtime=ref_m,
+                        distorted_mtime=dist_m,
+                    )
+                except Exception:
+                    cached = None
+            if cached is not None:
+                self._render_score_cells(ti, cached, running=False)
+                continue
+            self._spawn_score_worker(
+                task_index=idx,
+                reference=Path(ref),
+                distorted=Path(dist),
+                axes=axes,
+                tree_item=ti,
+            )
+        # Suppress unused-import warning at static analysis time.
+        _ = Qt
+
+    # ------------------------------------------------------------------
+    # Phase 3.4 — orchestration / performance helpers
+    # ------------------------------------------------------------------
+
+    def _toggle_pause(self) -> None:
+        """Toggle the queue pause flag. Persisted to queue_state.json.
+
+        Currently-running tasks NEVER get interrupted; pause only
+        gates future _start_next_task dispatches. Cancel still
+        works as before.
+        """
+        try:
+            from core.orchestration.queue_state import (
+                QueueState,
+                load_queue_state,
+                save_queue_state,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Pause", f"Pause unavailable: {exc}")
+            return
+        state = load_queue_state(self.USER_DATA_DIR) or QueueState()
+        state.paused = not state.paused
+        state.paused_at = time.time() if state.paused else None
+        try:
+            save_queue_state(self.USER_DATA_DIR, state)
+        except OSError as exc:
+            QMessageBox.warning(self, "Pause", f"Could not persist: {exc}")
+            return
+        self.is_paused = bool(state.paused)
+        if hasattr(self, "pause_btn"):
+            self.pause_btn.setText("▶ Resume" if self.is_paused else "⏸️ Pause")
+        if self.is_paused:
+            self.output_text.append(
+                "[INFO] Queue paused. Current task finishes; next dispatch waits."
+            )
+        else:
+            self.output_text.append("[INFO] Queue resumed.")
+            # Wake the dispatcher if we have capacity + tasks.
+            if self.is_rendering:
+                try:
+                    self._start_next_task()
+                except Exception:
+                    pass
+
+    def _encoder_intel_preflight(self) -> bool:
+        """Phase 3.5 pre-flight: classify selected presets vs gpu_caps.
+
+        Returns True to continue the render, False to abort.
+        Soft-fails on any internal error → returns True so a defective
+        intelligence module cannot block rendering.
+        """
+        try:
+            from core.encoder_intel import (
+                Severity,
+                classify_preset,
+                compatibility_check,
+            )
+        except Exception:
+            return True  # module unavailable → silent pass-through
+
+        # Determine the preset id chain in play this batch.
+        try:
+            if self.sequential_mode:
+                preset_ids = [
+                    c.currentData() for c in self.sequential_combos if c.currentData()
+                ]
+            else:
+                preset_ids = [
+                    item.data(0, Qt.UserRole + 1) or ""
+                    for item in self.tree_encoders.selectedItems()
+                ]
+                preset_ids = [p for p in preset_ids if p]
+        except Exception:
+            return True
+
+        if not preset_ids:
+            return True
+
+        # Map id → params via the existing encoder_options registry.
+        blockers: list[str] = []
+        warns: list[str] = []
+        gpu_caps = getattr(self, "gpu_caps", None)
+        for pid in preset_ids:
+            try:
+                idx = self.get_encoder_index_by_id(pid)
+                params = (
+                    list(self.encoder_options[idx].params) if idx is not None else []
+                )
+                classification = classify_preset(pid, params)
+                verdict = compatibility_check(
+                    classification,
+                    gpu_caps,
+                    gpu_enabled=bool(self.gpu_enabled),
+                )
+            except Exception:
+                continue
+            if verdict.severity is Severity.BLOCK:
+                fallback = (
+                    f" → suggested fallback: {verdict.suggested_fallback_codec}"
+                    if verdict.suggested_fallback_codec
+                    else ""
+                )
+                blockers.append(f"{pid}: {verdict.reason}{fallback}")
+            elif verdict.severity is Severity.WARN:
+                warns.append(f"{pid}: {verdict.reason}")
+
+        # WARNs are informational — surface in the output panel only.
+        if warns:
+            try:
+                self.output_text.append(
+                    "[INFO] Encoder compatibility warnings:\n  - "
+                    + "\n  - ".join(warns)
+                )
+            except Exception:
+                pass
+
+        if not blockers:
+            return True
+
+        # BLOCKs require explicit user choice. Offer Cancel / Proceed.
+        body = (
+            "The following preset(s) may not encode successfully on this "
+            "hardware:\n\n  - "
+            + "\n  - ".join(blockers)
+            + "\n\nYou can change the codec in Settings → GPU Pipeline, "
+            "swap to a CPU preset, or proceed anyway."
+        )
+        choice = QMessageBox.warning(
+            self,
+            "Encoder compatibility check",
+            body,
+            QMessageBox.Cancel | QMessageBox.Ignore,
+            QMessageBox.Cancel,
+        )
+        if choice == QMessageBox.Ignore:
+            try:
+                self.output_text.append(
+                    "[INFO] Proceeding past encoder compatibility BLOCK "
+                    "at user request."
+                )
+            except Exception:
+                pass
+            return True
+        return False
+
+    def _open_diagnostics_export(self) -> None:
+        """Export a local diagnostic bundle zip to a user-chosen path."""
+        try:
+            from core.orchestration import export_diagnostic_zip
+        except Exception as exc:
+            QMessageBox.warning(self, "Diagnostics", f"Diagnostics unavailable: {exc}")
+            return
+        from PySide6.QtWidgets import QFileDialog
+
+        default_name = f"1vmo-diagnostic-{int(time.time())}.zip"
+        path_str, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Save diagnostic bundle",
+            default_name,
+            "Zip archive (*.zip)",
+        )
+        if not path_str:
+            return
+        try:
+            out = export_diagnostic_zip(self.USER_DATA_DIR, Path(path_str))
+        except OSError as exc:
+            QMessageBox.warning(self, "Diagnostics", f"Export failed: {exc}")
+            return
+        QMessageBox.information(self, "Diagnostics", f"Bundle written to:\n{out}")
+
+    # ------------------------------------------------------------------
+    # Phase 3.3 — optimization / recommendation surface
+    # ------------------------------------------------------------------
+
+    def _open_render_health_dialog(self) -> None:
+        """Open RenderHealthDialog with current batch + score history.
+
+        Pulls Phase 3.2 ScoreCache rows + the on-disk Phase 3.1
+        queue to assemble a per-row health table. The dialog is
+        read-only; clicking "Apply..." on any row hands off to
+        _apply_recommendation which queues a re-render with a _v2
+        suffix (never overwrites the original).
+        """
+        try:
+            from core.optimization import (
+                analyze_batch,
+                classify_health,
+                recommend_for_render,
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Render Health",
+                f"Optimization module unavailable: {exc}",
+            )
+            return
+
+        # Gather rows from the current tree_output. The tree
+        # already holds (basename, status). We pair them with any
+        # cached score row by filename match.
+        rows: list[dict] = []
+        try:
+            for i in range(self.tree_output.topLevelItemCount()):
+                ti = self.tree_output.topLevelItem(i)
+                in_name = ti.text(1)
+                out_name = ti.text(2)
+                status_txt = ti.text(5) or ""
+                ref = None
+                for v in self.videos:
+                    if os.path.basename(v) == in_name:
+                        ref = v
+                        break
+                vmaf_mean = None
+                vmaf_p5 = None
+                phash = None
+                if self.score_cache is not None and ref is not None and out_name:
+                    dist = os.path.join(self.output_directory, out_name)
+                    try:
+                        cached = self.score_cache.get(str(ref), str(dist))
+                    except Exception:
+                        cached = None
+                    if cached is not None:
+                        vmaf_mean = cached.vmaf_mean
+                        vmaf_p5 = cached.vmaf_p5
+                        phash = cached.phash_avg_distance
+                rows.append(
+                    {
+                        "row_index": i,
+                        "in_name": in_name,
+                        "out_name": out_name,
+                        "status": "failed" if "Error" in status_txt else "completed",
+                        "vmaf_mean": vmaf_mean,
+                        "vmaf_p5": vmaf_p5,
+                        "phash_avg_distance": phash,
+                        "duration_s": None,
+                        "error_message": None,
+                    }
+                )
+        except RuntimeError:
+            pass
+
+        summary = analyze_batch(rows=rows)
+
+        # Build recommendations per row (cheap).
+        recs_per_row: dict[int, list] = {}
+        median_dur = summary.median_duration_s
+        for row in rows:
+            if row["status"] == "failed":
+                continue
+            recs = recommend_for_render(
+                vmaf_mean=row["vmaf_mean"],
+                vmaf_p5=row["vmaf_p5"],
+                phash_avg_distance=row["phash_avg_distance"],
+                render_duration_s=row["duration_s"],
+                batch_median_duration_s=median_dur,
+                settings_snapshot={"gpu_enabled": bool(self.gpu_enabled)},
+            )
+            if recs:
+                recs_per_row[row["row_index"]] = recs
+
+        # Build the dialog inline (avoids growing the module with
+        # another big class; this dialog is small enough).
+        from PySide6.QtWidgets import (
+            QDialog,
+            QDialogButtonBox,
+            QLabel,
+            QTreeWidget,
+            QTreeWidgetItem,
+            QVBoxLayout,
+        )
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Render Health")
+        dlg.resize(900, 500)
+        layout = QVBoxLayout(dlg)
+
+        header_lines = [
+            f"Batch summary: {summary.total} task(s) — "
+            f"{summary.green} OK · {summary.yellow} review · "
+            f"{summary.red} broken · {summary.failed} failed",
+        ]
+        if summary.avg_vmaf_mean is not None:
+            header_lines.append(f"Average VMAF mean: {summary.avg_vmaf_mean:.1f}")
+        if summary.avg_phash_distance is not None:
+            header_lines.append(
+                f"Average pHash distance: {summary.avg_phash_distance:.1f}"
+            )
+        for note in summary.notes:
+            header_lines.append("- " + note)
+        layout.addWidget(QLabel("\n".join(header_lines)))
+
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["Filename", "VMAF", "pHash", "Health", "Suggestion"])
+        for row in rows:
+            it = QTreeWidgetItem(tree)
+            it.setText(0, row["out_name"] or row["in_name"] or "")
+            v = row["vmaf_mean"]
+            it.setText(1, f"{v:.1f}" if isinstance(v, (int, float)) else "—")
+            p = row["phash_avg_distance"]
+            it.setText(2, f"{p:.1f}" if isinstance(p, (int, float)) else "—")
+            health = classify_health(
+                vmaf_mean=row["vmaf_mean"],
+                vmaf_p5=row["vmaf_p5"],
+                phash_avg_distance=row["phash_avg_distance"],
+                render_duration_s=row["duration_s"],
+                batch_median_duration_s=median_dur,
+            )
+            it.setText(3, health.value.replace("_", " "))
+            recs = recs_per_row.get(row["row_index"], [])
+            if recs:
+                it.setText(4, recs[0].reason)
+                it.setData(0, Qt.UserRole, row["row_index"])
+            else:
+                it.setText(4, "—")
+        for col in range(5):
+            tree.resizeColumnToContents(col)
+        layout.addWidget(tree)
+
+        btns = QDialogButtonBox(QDialogButtonBox.Close)
+        btns.rejected.connect(dlg.reject)
+        btns.accepted.connect(dlg.accept)
+        layout.addWidget(btns)
+
+        def _on_double_click(item, _col):
+            idx = item.data(0, Qt.UserRole)
+            if idx is None:
+                return
+            recs = recs_per_row.get(idx, [])
+            if not recs:
+                return
+            self._show_recommendation_dialog(rows[idx], recs)
+
+        tree.itemDoubleClicked.connect(_on_double_click)
+        dlg.exec()
+
+    def _show_recommendation_dialog(self, row: dict, recs: list) -> None:
+        """Show one recommendation with Confirm/Cancel. NEVER auto-applies."""
+        if not recs:
+            return
+        from PySide6.QtWidgets import (
+            QDialog,
+            QDialogButtonBox,
+            QLabel,
+            QPushButton,
+            QVBoxLayout,
+        )
+
+        first = recs[0]
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Suggested re-render")
+        dlg.resize(520, 360)
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(f"File: {row.get('out_name') or row.get('in_name')}"))
+        layout.addWidget(
+            QLabel(
+                f"Kind: {first.kind.value}\n"
+                f"Confidence: {first.confidence.value}\n"
+                f"\nWhy: {first.reason}\n\n"
+                f"Proposed delta: {first.delta_summary or '—'}"
+            )
+        )
+        layout.addWidget(
+            QLabel(
+                "Re-render output will use a _v2 suffix; original is preserved.\n"
+                "Nothing is auto-applied — confirm below to queue."
+            )
+        )
+        btns = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Ok)
+        ok = btns.button(QDialogButtonBox.Ok)
+        if isinstance(ok, QPushButton):
+            ok.setText("Re-render once")
+        btns.rejected.connect(dlg.reject)
+        btns.accepted.connect(dlg.accept)
+        layout.addWidget(btns)
+        if dlg.exec() == QDialog.Accepted:
+            self._apply_recommendation(row, first)
+
+    def _apply_recommendation(self, row: dict, recommendation) -> None:
+        """Queue a SINGLE re-render with the proposed params + _v2 suffix.
+
+        Goes through the EXISTING start_render path — RenderWorker
+        is unchanged. We pre-populate self.videos with just the
+        one input and reuse the user's current preset chain (the
+        recommender's proposed_params is advisory; a thorough
+        wiring of preset_translator hooks belongs in Phase 3.5).
+        """
+        ref_name = row.get("in_name") or ""
+        ref = None
+        for v in self.videos:
+            if os.path.basename(v) == ref_name:
+                ref = v
+                break
+        if ref is None:
+            QMessageBox.information(
+                self,
+                "Re-render",
+                "Original input file not found in this session. "
+                "Add it again to re-render.",
+            )
+            return
+        if self.is_rendering:
+            QMessageBox.information(
+                self,
+                "Re-render",
+                "A batch is already running. Cancel or finish it first.",
+            )
+            return
+        # Honor the proposed_params hints at the dispatcher level
+        # (advisory only — preset_translator is untouched).
+        prop = recommendation.proposed_params or {}
+        if "gpu_enabled" in prop:
+            self.gpu_enabled = bool(prop["gpu_enabled"])
+        # Restrict the next batch to JUST the target input.
+        self.videos = [ref]
+        try:
+            self.update_video_list()
+        except Exception:
+            pass
+        # Kick off via the normal Start path; user sees the same
+        # progress UI they always see.
+        try:
+            self.start_render()
+        except Exception as exc:
+            QMessageBox.warning(self, "Re-render", f"Could not start: {exc}")
+
+    def _cancel_all_score_workers(self) -> None:
+        """Tell every active ScoreWorker to bail. Bounded wait per Phase 2d Item 7."""
+        for entry in list(self._score_threads):
+            thread, worker, _idx = entry
+            try:
+                worker.cancel()
+            except Exception:
+                pass
+            try:
+                thread.quit()
+                thread.wait(5000)
+            except Exception:
+                pass
+        self._score_threads.clear()
 
 
 class EncoderDialog(QDialog):

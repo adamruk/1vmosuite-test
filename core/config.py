@@ -77,6 +77,16 @@ def save(path: Path, data: dict[str, Any], indent: int = 4) -> None:
         TypeError: If data contains non-JSON-serializable values.
 
     Callers should wrap in try/except and show UI error if appropriate.
+
+    v3.9 F-004 fix: route through core.atomic_write.save_json_atomic so
+    a crash mid-write cannot corrupt config_video_renderer.json. Same
+    on-disk contract used by Phase 3.1 queue_store + Phase 3.2
+    score_store (tempfile write -> os.replace, with single-generation
+    .bak rotation). The `indent` arg is honoured by atomic_write per
+    its existing API; ensure_ascii=False is also preserved.
     """
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=indent, ensure_ascii=False)
+    from core.atomic_write import save_json_atomic
+
+    # save_json_atomic always uses ensure_ascii=False internally; we just
+    # forward the indent kwarg.
+    save_json_atomic(path, data, indent=indent)

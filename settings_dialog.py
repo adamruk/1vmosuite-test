@@ -52,6 +52,20 @@ DEFAULTS = {
     "gpu_max_concurrent": APP_DEFAULTS.gpu_max_concurrent,
     "gpu_container_override": None,
     "gpu_max_quality_mode": False,
+    # Phase 3.1 — local persistent queue. True means the in-progress
+    # batch is saved to user_data_dir and offered for resume on the
+    # next launch (if the app exits during a render). False disables
+    # the feature; no queue.json is written. Default True preserves
+    # the safer behavior for users who don't visit Settings.
+    "queue_persistence_enabled": True,
+    # Phase 3.2 — local-only originality / quality scoring. Default
+    # OFF so a user who has not opted in never pays the VMAF cost.
+    # Axes default to vmaf + phash; SSIM is opt-in. Max parallel
+    # capped at 1 because libvmaf is internally multi-core already.
+    "scoring_auto_enabled": False,
+    "scoring_default_axes": ["vmaf", "phash"],
+    "scoring_max_parallel": 1,
+    "scoring_phash_frames": 20,
 }
 
 
@@ -80,6 +94,29 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(self._build_rendering_tab(), "Rendering")
         self.tabs.addTab(self._build_advanced_tab(), "Advanced")
         self.tabs.addTab(self._build_gpu_pipeline_tab(), "GPU Pipeline")
+        # v3.9 F-003 fix: wire bidirectional sync between the Rendering-tab
+        # legacy `use_gpu_check` and the canonical GPU-Pipeline-tab
+        # `gpu_enabled_check`. Without this, toggling one tab's checkbox
+        # would silently lose its value on OK because _on_ok writes from
+        # only one source. blockSignals() prevents the connections from
+        # recursing infinitely.
+
+        def _sync_from_use_gpu(state):
+            self.gpu_enabled_check.blockSignals(True)
+            self.gpu_enabled_check.setChecked(self.use_gpu_check.isChecked())
+            self.gpu_enabled_check.blockSignals(False)
+
+        def _sync_from_gpu_enabled(state):
+            self.use_gpu_check.blockSignals(True)
+            self.use_gpu_check.setChecked(self.gpu_enabled_check.isChecked())
+            self.use_gpu_check.blockSignals(False)
+
+        self.use_gpu_check.stateChanged.connect(_sync_from_use_gpu)
+        self.gpu_enabled_check.stateChanged.connect(_sync_from_gpu_enabled)
+        # Phase 3.2 — local scoring tab (5th, last). All controls
+        # default-OFF / safe values so a user who doesn't open it
+        # sees zero behavior change vs Phase 3.1.
+        self.tabs.addTab(self._build_scoring_tab(), "Scoring")
         layout.addWidget(self.tabs)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -134,10 +171,18 @@ class SettingsDialog(QDialog):
         form = QFormLayout(page)
 
         self.use_gpu_check = QCheckBox("Use GPU when available")
-        self.use_gpu_check.setChecked(bool(self._get("use_gpu")))
+        # v3.9 F-003: prefer the canonical `gpu_enabled` key for the
+        # initial value; fall back to the legacy `use_gpu` alias if
+        # only the old key is present. This makes the Rendering-tab
+        # checkbox reflect the same state the GPU Pipeline tab will
+        # show, regardless of which key the config file used.
+        initial_gpu = self._get("gpu_enabled")
+        if initial_gpu is None:
+            initial_gpu = self._get("use_gpu")
+        self.use_gpu_check.setChecked(bool(initial_gpu))
         self.use_gpu_check.setToolTip(
-            "Mirrors the toolbar 'Use GPU (NVENC)' checkbox. "
-            "Effective only if a supported NVIDIA GPU is detected."
+            "Mirrors the GPU Pipeline tab's 'Enable GPU encoding' toggle. "
+            "Changes here propagate to that tab automatically on OK."
         )
         form.addRow("", self.use_gpu_check)
 
@@ -166,6 +211,19 @@ class SettingsDialog(QDialog):
         self.open_done_check = QCheckBox("Open output folder when batch finishes")
         self.open_done_check.setChecked(bool(self._get("open_output_when_done")))
         form.addRow("", self.open_done_check)
+
+        # Phase 3.1 — local persistent queue toggle.
+        self.queue_persist_check = QCheckBox("Save queue for resume on next launch")
+        self.queue_persist_check.setChecked(
+            bool(self._get("queue_persistence_enabled"))
+        )
+        self.queue_persist_check.setToolTip(
+            "When enabled, an interrupted render batch is saved locally and "
+            "you'll be offered the option to resume it the next time you "
+            "open the app. The queue file lives next to your config and is "
+            "never sent anywhere — everything stays on this computer."
+        )
+        form.addRow("", self.queue_persist_check)
 
         reset_btn = QPushButton("Reset all settings to defaults")
         reset_btn.clicked.connect(self._reset_to_defaults)
@@ -215,6 +273,15 @@ class SettingsDialog(QDialog):
         self._set_combo_data(self.collision_combo, DEFAULTS["output_collision"])
         self.show_cmd_check.setChecked(DEFAULTS["show_ffmpeg_command"])
         self.open_done_check.setChecked(DEFAULTS["open_output_when_done"])
+        self.queue_persist_check.setChecked(DEFAULTS["queue_persistence_enabled"])
+        # Phase 3.2 — restore scoring defaults.
+        self.scoring_auto_check.setChecked(DEFAULTS["scoring_auto_enabled"])
+        default_axes = DEFAULTS["scoring_default_axes"]
+        self.scoring_axis_vmaf_check.setChecked("vmaf" in default_axes)
+        self.scoring_axis_phash_check.setChecked("phash" in default_axes)
+        self.scoring_axis_ssim_check.setChecked("ssim" in default_axes)
+        self.scoring_max_parallel_spin.setValue(DEFAULTS["scoring_max_parallel"])
+        self.scoring_phash_frames_spin.setValue(DEFAULTS["scoring_phash_frames"])
 
     def _build_gpu_pipeline_tab(self):
         """Build the GPU Pipeline tab with NVENC controls per ADR-0007 D2/D3/D4/D6/D7/D8."""
@@ -296,12 +363,109 @@ class SettingsDialog(QDialog):
 
         return page
 
+    def _build_scoring_tab(self):
+        """Phase 3.2 — local-only originality / quality scoring tab.
+
+        All defaults preserve current behavior: auto-scoring OFF,
+        VMAF + pHash selected (only fired when auto-score is ON),
+        max parallel 1.
+        """
+        page = QWidget()
+        form = QFormLayout(page)
+
+        # Master toggle — DEFAULT OFF.
+        self.scoring_auto_check = QCheckBox(
+            "Score every render automatically when it finishes"
+        )
+        self.scoring_auto_check.setChecked(bool(self._get("scoring_auto_enabled")))
+        self.scoring_auto_check.setToolTip(
+            "When ON, after each successful render the app spawns a "
+            "background scoring pass for the configured axes. Cost "
+            "varies by axis — VMAF can add ~30-60s of CPU per "
+            "1-minute 1080p clip; pHash adds ~3-8s; SSIM ~5-10s. "
+            "Scoring runs on its own thread pool and never blocks "
+            "or slows the render itself. Off by default."
+        )
+        form.addRow("", self.scoring_auto_check)
+
+        # Axes selection. pHash + VMAF default on (per design doc);
+        # SSIM opt-in.
+        axes = self._get("scoring_default_axes") or ["vmaf", "phash"]
+        axes_lower = [str(a).lower() for a in axes]
+
+        self.scoring_axis_vmaf_check = QCheckBox(
+            "VMAF (visual fidelity; needs libvmaf in bundled ffmpeg)"
+        )
+        self.scoring_axis_vmaf_check.setChecked("vmaf" in axes_lower)
+
+        self.scoring_axis_phash_check = QCheckBox(
+            "pHash distance (originality — higher = more different from source)"
+        )
+        self.scoring_axis_phash_check.setChecked("phash" in axes_lower)
+
+        self.scoring_axis_ssim_check = QCheckBox(
+            "SSIM (structural similarity — fast, ffmpeg-native)"
+        )
+        self.scoring_axis_ssim_check.setChecked("ssim" in axes_lower)
+
+        # Layout: vertical column of axis checkboxes under one label.
+        axes_col = QVBoxLayout()
+        axes_col.setContentsMargins(0, 0, 0, 0)
+        axes_col.addWidget(self.scoring_axis_vmaf_check)
+        axes_col.addWidget(self.scoring_axis_phash_check)
+        axes_col.addWidget(self.scoring_axis_ssim_check)
+        axes_holder = QWidget()
+        axes_holder.setLayout(axes_col)
+        form.addRow("Axes:", axes_holder)
+
+        # Max parallel scoring (1-4, default 1).
+        self.scoring_max_parallel_spin = QSpinBox()
+        self.scoring_max_parallel_spin.setRange(1, 4)
+        try:
+            self.scoring_max_parallel_spin.setValue(
+                int(self._get("scoring_max_parallel") or 1)
+            )
+        except (TypeError, ValueError):
+            self.scoring_max_parallel_spin.setValue(1)
+        self.scoring_max_parallel_spin.setToolTip(
+            "How many scoring jobs may run at the same time. "
+            "Default 1. libvmaf is already multi-core internally; "
+            "raising this above 1 mostly thrashes cache."
+        )
+        form.addRow("Max parallel scoring jobs:", self.scoring_max_parallel_spin)
+
+        # pHash sampling density (10-60 frames).
+        self.scoring_phash_frames_spin = QSpinBox()
+        self.scoring_phash_frames_spin.setRange(5, 120)
+        try:
+            self.scoring_phash_frames_spin.setValue(
+                int(self._get("scoring_phash_frames") or 20)
+            )
+        except (TypeError, ValueError):
+            self.scoring_phash_frames_spin.setValue(20)
+        self.scoring_phash_frames_spin.setToolTip(
+            "How many equally-spaced frame pairs are sampled for "
+            "the pHash distance. 20 is enough for short clips; "
+            "raise to 40-60 for long-form content."
+        )
+        form.addRow("pHash sample frames:", self.scoring_phash_frames_spin)
+
+        return page
+
     # --- save --------------------------------------------------------------
 
     def _on_ok(self):
         self.config["output_dir"] = self.output_dir_edit.text().strip()
         self.config["num_threads"] = self.threads_spin.value()
-        self.config["use_gpu"] = self.use_gpu_check.isChecked()
+        # v3.9 F-003 fix: the canonical GPU master is `gpu_enabled_check`
+        # (GPU Pipeline tab, ADR-0007 D8). The Rendering-tab
+        # `use_gpu_check` is a legacy mirror only — DO NOT write from
+        # it here. Previously this line ran before the GPU-Pipeline
+        # write below, which meant a user toggling the Rendering-tab
+        # checkbox while the GPU-Pipeline checkbox stayed at its load-
+        # time value would have their change silently reverted. Both
+        # `gpu_enabled` and the `use_gpu` legacy alias are now written
+        # from a single source below.
         self.config["gpu_error_action"] = self.gpu_error_combo.currentData()
         self.config["output_collision"] = self.collision_combo.currentData()
         self.config["show_ffmpeg_command"] = self.show_cmd_check.isChecked()
@@ -314,11 +478,34 @@ class SettingsDialog(QDialog):
         self.config["gpu_max_concurrent"] = self.gpu_max_concurrent_spin.value()
         self.config["gpu_container_override"] = self.gpu_container_combo.currentData()
         self.config["gpu_max_quality_mode"] = self.gpu_max_quality_check.isChecked()
+        # Phase 3.1 — persist queue-save toggle
+        self.config["queue_persistence_enabled"] = self.queue_persist_check.isChecked()
+        # Phase 3.2 — persist scoring settings.
+        self.config["scoring_auto_enabled"] = self.scoring_auto_check.isChecked()
+        chosen_axes = []
+        if self.scoring_axis_vmaf_check.isChecked():
+            chosen_axes.append("vmaf")
+        if self.scoring_axis_phash_check.isChecked():
+            chosen_axes.append("phash")
+        if self.scoring_axis_ssim_check.isChecked():
+            chosen_axes.append("ssim")
+        self.config["scoring_default_axes"] = chosen_axes
+        self.config["scoring_max_parallel"] = self.scoring_max_parallel_spin.value()
+        self.config["scoring_phash_frames"] = self.scoring_phash_frames_spin.value()
         if self._tour_reset_flag:
             self.config["tour_seen"] = False
+        # v3.9 F-004 fix: route through core.atomic_write.save_json_atomic
+        # so a crash mid-write cannot corrupt config_video_renderer.json.
+        # The old raw `open().write()` left a half-written file on
+        # power loss / disk-full; the user lost ALL settings on the
+        # next launch when json.load() returned a parse error. The
+        # atomic-write helper writes to <path>.tmp then os.replace()s
+        # over the canonical file and rotates the previous version to
+        # <path>.bak — same contract used by queue_store + score_store.
         try:
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, indent=4)
+            from core.atomic_write import save_json_atomic
+
+            save_json_atomic(Path(self.config_path), self.config)
         except OSError as exc:
             QMessageBox.critical(self, "Save failed", f"Could not save settings: {exc}")
             return

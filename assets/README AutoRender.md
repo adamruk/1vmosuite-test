@@ -1,51 +1,47 @@
 # 🎭 1vmo Auto Render v3
 
-## 🎯 Hướng dẫn sử dụng
+## 🎯 User Guide
 
 ### Input Controls
-- 📥 Select: Thêm video vào danh sách xử lý
-- 🗑️ Delete: Xóa video đã chọn khỏi danh sách
-- ❓ Help: Hiển thị hướng dẫn sử dụng
+- 📥 Select: Add videos to the processing list
+- 🗑️ Delete: Remove selected videos from the list
+- ❓ Help: Show this user guide
+- 🔄 Updates: Check for new versions on GitHub
 
 ### Config Management
-- 🔍 Filter: Lọc encoder theo nhóm
-  - 🕹️ Ultimate: Chất lượng cao nhất
-  - 🎮 Gaming: Tối ưu cho game
-  - 🎬 Movie: Tối ưu cho phim
-  - 🎵 Music: Tối ưu cho nhạc
-  - 🎥 Social: Tối ưu cho mạng xã hội
+- Filter: Use the dropdown to filter encoders by group (Resolution, 1vmo Ultimate, Sound, Color & Effect, Image, Blur, Quality, Zoom, Metadata & Text, Frame, Text)
 - Encoder Controls:
-  - ♻️ Add: Thêm encoder mới
-  - 🛠️ Edit: Sửa encoder hiện tại
-  - 🗑️ Delete: Xóa encoder đã chọn
-  - 🔄 Refresh: Tải lại danh sách encoder
-- Di chuột vào ℹ️ để xem tooltip chi tiết về encoder.
+  - ♻️ Add: Add a new encoder
+  - 🛠️ Edit: Edit the current encoder
+  - 🗑️ Delete: Delete the selected encoder
+  - 🔄 Refresh: Reload the encoder list
+- Hover over ℹ️ to see detailed encoder tooltips.
 
 ### Render Modes
 - Single Render:
-  - Chọn nhiều encoder từ danh sách
-  - Mỗi video sẽ được xử lý với từng encoder riêng biệt
-  - Tạo ra nhiều file output tương ứng với số encoder đã chọn
+  - Choose multiple encoders from the list
+  - Each video is processed with each encoder independently
+  - Produces one output file per encoder selected
 - X Render:
-  - Chọn tối đa 5 encoder theo thứ tự xử lý
-  - Video sẽ được xử lý tuần tự qua các encoder đã chọn
-  - Kết quả là một file output duy nhất đã qua tất cả các bước xử lý
-  - Hiển thị tiến trình chi tiết cho từng bước xử lý
+  - Choose up to 5 encoders in processing order
+  - Video is processed sequentially through the chain
+  - Result is a single output file that has passed through every step
+  - Shows detailed progress for each stage
 
 ### Output Controls
-- 📍 Directory: Chọn thư mục lưu video output
-- 📂 Open: Mở thư mục đầu ra
-- 🚀 Start: Bắt đầu quá trình render
-- 🛑 Stop: Dừng quá trình render
+- 📍 Directory: Choose the folder for output videos
+- 📂 Open: Open the output folder
+- 🚀 Start: Begin rendering
+- 🛑 Stop: Stop rendering
 
 ### Output List
-Hiển thị thông tin của các file đã xử lý:
-- Số thứ tự
-- Tên file gốc
-- Tên file output
-- Thời lượng (Loading... khi đang xử lý)
-- Độ phân giải (Loading... khi đang xử lý)
-- Trạng thái xử lý:
-  - 🟡 Processing: Đang xử lý
-  - 🟢 Completed: Hoàn thành
-  - 🔴 Error: Lỗi (kèm thông tin lỗi)
+Shows information about processed files:
+- Index number
+- Source filename
+- Output filename
+- Duration (Loading… while processing)
+- Resolution (Loading… while processing)
+- Status:
+  - 🟡 Processing: In progress
+  - 🟢 Completed: Done
+  - 🔴 Error: Failed (with error details)
