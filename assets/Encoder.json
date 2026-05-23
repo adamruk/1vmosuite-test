@@ -1388,7 +1388,7 @@
       "details": "📑 Details,Chuyển đổi sang tỉ lệ khung hình 9:16, Điều chỉnh kích thước thành 720x1280, Đặt bitrate 1400k, Sử dụng mã hóa H.264 với preset superfast",
       "params": [
         "-filter_complex",
-        "[v]scale=720x1280,setdar=9/16",
+        "[0:v]scale=720x1280,setdar=9/16",
         "-vcodec",
         "libx264",
         "-crf",
