@@ -426,6 +426,18 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution sketch:** rework the HEVC gate to honor the ffmpeg `codecs.hevc` probe for the HEVC-capable pre-Turing range (mirroring A4's H.264 decoupling), add a repro test (Maxwell/Pascal-class fixture + `hevc=True` → `hevc_available=True`), and correct the two A4 wording sites above in the same commit.
 - **Trigger for pickup:** a user on a Maxwell/Pascal card reports HEVC GPU encoding unavailable, OR a focused `gpu_detect` generation-gate pass.
 
+## B-041: "5s Cycle Zoom" preset has stray shell double-quotes that reach ffmpeg literally
+
+- **Status:** Open, backlog. Surfaced during the #6 tokenizer investigation (2026-05-24). Adam to decide whether to fix this session. **Not fixed by #6** (tokenizer scope; see below).
+- **Priority:** MEDIUM (the preset fails to render — ffmpeg rejects the filtergraph).
+- **Locations:**
+  - `assets/Encoder.txt` L43 ("5s Cycle Zoom")
+  - `assets/Encoder.json` (generated from Encoder.txt; the same token is embedded in its `params` list)
+- **Context:** L43's command is `-vf "scale=iw*1.5:ih*1.5,zoompan=z='…':…:s='iw*1.5:ih*1.5'" -c:a copy …` — the whole `-vf` value is wrapped in shell-style **double** quotes. The app tokenizes via `code.split()` and invokes ffmpeg via `subprocess` **list** form (no shell), so the literal `"` characters are never stripped by a shell — they reach ffmpeg as part of the argv token. ffmpeg's filtergraph parser does not treat `"` as a quote char (it uses `'` and `\`), so it sees a filter named `"scale…` → "No such filter" → the preset fails. The inner single quotes (`zoompan=z='…'`) are correct ffmpeg quoting and must stay. (Broken by inspection; a live render would confirm the exact error.)
+- **Why #6 does NOT fix it:** #6 is a tokenizer change. Per the #6 investigation, neither `code.split()` nor `shlex.split(posix=False)` removes these outer double-quotes; `shlex.split(posix=True)` would remove them but regresses other presets by stripping ffmpeg's own single-quotes (e.g. the `enable='lt(mod(t,10),1)*gte(t,0)'` in "Cut & Overlay 1s per 10s"). The correct fix is a **content** fix, not a tokenizer fix.
+- **Resolution sketch:** In `assets/Encoder.txt` L43, drop only the outer double-quotes — `-vf "scale=…s='iw*1.5:ih*1.5'"` → `-vf scale=…s='iw*1.5:ih*1.5'` — keeping the inner zoompan single-quotes. Regenerate `assets/Encoder.json` via `tools/generate_encoder_json.py`. Verify with a live render that the filtergraph is accepted. The #6 tokenizer sweep found only L43 with this outer-double-quote pattern; re-confirm none others before/after.
+- **Trigger for pickup:** a user reports "5s Cycle Zoom" fails to render, OR Adam authorizes the content fix.
+
 ## Resolved
 
 - **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.
