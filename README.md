@@ -1,6 +1,6 @@
 # 1vmo Video Suite
 
-Four PyQt5 desktop apps for batch video processing — backed by FFmpeg.
+Four PySide6 desktop apps for batch video processing — backed by FFmpeg.
 
 | App | Purpose |
 |---|---|
