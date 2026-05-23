@@ -410,6 +410,22 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - Local-only by construction: queue file lives in the user's local `user_data_dir`, no network code, no auth, no remote endpoint.
   - Test coverage: `tests/smoke/test_queue_store.py` (16 cases) covers all 11 scenarios from the design doc §6.1 — ADR-0003 narrow-pytest exception (pure-IO unit, no Qt/ffmpeg/GPU, <2s, deterministic).
 
+## B-040: gpu_detect HEVC gen-gate under-reports HEVC NVENC on Maxwell/Pascal (A4-class)
+
+- **Status:** Open, backlog. **Do NOT fix in the current GPU fix-pass** — filed for a later, dedicated NVENC-gate pass.
+- **Priority:** LOW–MEDIUM (HEVC GPU path silently hidden on Maxwell/Pascal cards that actually support it; same bug class as A4, one codec over).
+- **Surfaced:** B-015 VERIFY review (2026-05-24), while confirming the A4 fix (`d438fb0`).
+- **Locations:**
+  - `gpu_detect.py` — `GPUGeneration.supports_hevc` (returns True only for Turing/Ampere/Ada/Blackwell, i.e. CC 7.5+)
+  - `gpu_detect.py::detect()` — `caps.hevc_available = hw_supports_hevc and codecs.hevc`
+- **Context:** `supports_hevc` gates HEVC to Turing-and-newer. But ADR-0007 D5 (line 149) states "NVENC works on any NVIDIA GPU from Maxwell (2014) forward; h264_nvenc and hevc_nvenc are universal across that range." NVIDIA hardware sides with the ADR: 2nd-gen Maxwell (GM206, GTX 950/960) and all Pascal (GTX 10xx) ship HEVC NVENC encoders. So a Maxwell/Pascal card with `hevc_nvenc` present in ffmpeg is wrongly reported `hevc_available=False`, hiding the HEVC GPU path. This is the exact A4 bug class (hardware gate too strict relative to the real ffmpeg-probe signal), shifted from H.264 to HEVC.
+- **Nuance (why this is not a trivial one-liner):** the floor is not simply "all PRE_TURING". 1st-gen Maxwell (GM107) and Kepler lack HEVC NVENC, so blindly enabling HEVC for the whole `PRE_TURING` bucket would over-report. The robust fix likely mirrors A4 by leaning on the ffmpeg `codecs.hevc` probe as the real capability signal (the probe already reflects what THIS build/GPU exposes), rather than widening the hardware-generation gate alone. NVENC is high-risk per CLAUDE.md §13 — needs a repro test and care.
+- **Wrong assumption to correct WHEN B-040 is fixed:** the A4 fix embedded the inaccurate premise that Maxwell/Pascal have "no HEVC". When fixing B-040, correct that wording in two places so the repo stops shipping the wrong premise:
+  - the A4 CHANGELOG entry under `[Unreleased]` ### Fixed ("Pascal/Maxwell — H.264-capable, no HEVC"),
+  - the A4 test docstrings/comments in `tests/smoke/test_gpu_detect.py` (`test_h264_decoupled_from_hevc_on_pre_turing` says "no HEVC hardware support" / "Pascal genuinely lacks HEVC NVENC"). The A4 *test assertions* stay valid (the PRE_TURING fixture uses CC 6.1 with `hevc=False` in the mocked ffmpeg probe, so `hevc_available=False` is correct for that fixture); only the prose rationale is wrong.
+- **Resolution sketch:** rework the HEVC gate to honor the ffmpeg `codecs.hevc` probe for the HEVC-capable pre-Turing range (mirroring A4's H.264 decoupling), add a repro test (Maxwell/Pascal-class fixture + `hevc=True` → `hevc_available=True`), and correct the two A4 wording sites above in the same commit.
+- **Trigger for pickup:** a user on a Maxwell/Pascal card reports HEVC GPU encoding unavailable, OR a focused `gpu_detect` generation-gate pass.
+
 ## Resolved
 
 - **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.
