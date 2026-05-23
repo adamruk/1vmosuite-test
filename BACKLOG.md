@@ -438,6 +438,19 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution sketch:** In `assets/Encoder.txt` L43, drop only the outer double-quotes — `-vf "scale=…s='iw*1.5:ih*1.5'"` → `-vf scale=…s='iw*1.5:ih*1.5'` — keeping the inner zoompan single-quotes. Regenerate `assets/Encoder.json` via `tools/generate_encoder_json.py`. Verify with a live render that the filtergraph is accepted. The #6 tokenizer sweep found only L43 with this outer-double-quote pattern; re-confirm none others before/after.
 - **Trigger for pickup:** a user reports "5s Cycle Zoom" fails to render, OR Adam authorizes the content fix.
 
+## B-042: preset_loader tokenizer code.split() vs shlex (fix-pass item #6) — CLOSED (won't-fix)
+
+- **Status:** CLOSED — won't-fix (2026-05-24). No code change to `core/preset_loader.py`.
+- **Origin:** Phase-3 fix-pass item #6 ("preset_loader.py:161 uses `tuple(code.split())`, which breaks presets with quoted args; switch to `shlex.split`").
+- **Investigation (all 106 Encoder.txt presets tokenized both ways):**
+  - `code.split()` mis-splits a preset ONLY when a quoted value contains a literal space (e.g. `text='hello world'`). NO shipping preset has that, so `split()` mis-tokenizes nothing today — the bug is **latent**, not active.
+  - `shlex.split(code)` (posix=True) **strips** quote characters. ffmpeg filtergraph quoting (`enable='lt(mod(t,10),1)*gte(t,0)'`, `zoompan=z='…'`, drawtext `text='…'`) is parsed BY ffmpeg, so those quotes must remain in the argv token (the app invokes ffmpeg via `subprocess` list form — no shell strips them). posix=True would therefore **regress** such presets (e.g. "Cut & Overlay 1s per 10s": the commas in the `enable` expression get exposed → filtergraph breaks).
+  - `shlex.split(code, posix=False)` keeps quotes but only groups across spaces for token-**boundary** quotes (`'a b'`). ffmpeg presets use **embedded** quotes (`key='a b'`), for which posix=False tokenizes IDENTICALLY to `split()` — verified equal on all 106 presets and on the embedded-quote latent case. So posix=False is a **no-op**.
+- **Decision (rationale):** `code.split()` is the correct model for ffmpeg's quoting — the quote characters belong IN the argv token and ffmpeg parses them itself. `shlex` models SHELL quoting, the wrong layer: it either strips the quotes ffmpeg needs (posix=True regression) or does nothing useful (posix=False no-op). Switching is inappropriate. The latent "space inside a quoted value" risk is real but theoretical (no preset triggers it).
+- **Future work (out of scope):** if first-class arbitrary-quoted-arg support is ever needed, write an ffmpeg-**aware** tokenizer that splits on whitespace while respecting `'…'` and `\` escaping AND retains the quote characters. That is a new component with its own design + tests, not a one-line `code.split()` swap.
+- **Preset-authoring guideline (interim mitigation):** when authoring Encoder.txt preset commands, do NOT place a literal space inside a quoted ffmpeg value, and do NOT wrap a whole value in shell-style double-quotes (see B-041). Keep ffmpeg's own `'…'` quoting for expressions containing `:` or `,`.
+- **Surfaced/closed by:** Phase-3 fix-pass #6 investigation, 2026-05-24.
+
 ## Resolved
 
 - **B-017** -- 11 Encoder.txt presets with stale Code/assets/data/ paths (10 Layer Overlay + 1 Line). Rewrote to assets/data/ in Encoder.txt; regenerated Encoder.json. Smoke-tested both Line + Layer Overlay (Bottom-Left) -- both render successfully on 5 input videos. Resolved [c60baf5] 2026-04-28.
