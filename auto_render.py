@@ -212,6 +212,24 @@ def _cleanup_zero_byte_placeholder(path: str) -> bool:
         return False
 
 
+def _acquire_gpu_slot(semaphore, should_cancel, poll_ms: int = 100) -> bool:
+    """Acquire one NVENC slot from ``semaphore``, honoring cancellation (B-032).
+
+    A bare ``QSemaphore.acquire()`` blocks indefinitely under contention and
+    cannot observe a cancel request, so a queued render could not be cancelled
+    while waiting for a free NVENC session. This polls ``should_cancel()``
+    between bounded ``tryAcquire`` attempts instead.
+
+    Returns True if a slot was acquired (the caller owns it and must release
+    it), or False if ``should_cancel()`` became true first (nothing acquired,
+    nothing to release).
+    """
+    while not should_cancel():
+        if semaphore.tryAcquire(1, poll_ms):
+            return True
+    return False
+
+
 class RenderWorker(QObject):
     progress_updated = Signal(int, int)
     status_updated = Signal(int, str)
@@ -410,22 +428,42 @@ class RenderWorker(QObject):
                 )
                 # QSemaphore gate per ADR-0007 D6: limit concurrent NVENC sessions.
                 _gpu_path_taken = self.gpu_enabled and not is_image_encoder
+                _gpu_slot_held = False
                 if _gpu_path_taken and self.gpu_semaphore is not None:
-                    self.gpu_semaphore.acquire()
-                try:
-                    rc = core_ffmpeg_runner.run_ffmpeg(
-                        command,
-                        dialect="legacy_stderr",
-                        on_progress=lambda pct: self.progress_updated.emit(
-                            self.thread_index, pct
-                        ),
-                        on_output_line=lambda line: self.output_updated.emit(
-                            line + "\n"
-                        ),
-                        should_cancel=lambda: self.is_cancelled,
+                    # B-032: bounded, cancellable acquire. A bare acquire()
+                    # blocks forever under contention and ignores a cancel
+                    # request, so a queued render could not be cancelled while
+                    # waiting for a free NVENC slot. Poll is_cancelled between
+                    # bounded tryAcquire attempts instead.
+                    _gpu_slot_held = _acquire_gpu_slot(
+                        self.gpu_semaphore, lambda: self.is_cancelled
                     )
+                try:
+                    if (
+                        _gpu_path_taken
+                        and self.gpu_semaphore is not None
+                        and not _gpu_slot_held
+                    ):
+                        # B-032: cancelled while waiting for a free NVENC slot —
+                        # ffmpeg never ran and no slot is held. rc=0 routes past
+                        # the GPU-fail-retry branch straight to the shared
+                        # `if self.is_cancelled` handler below, which emits
+                        # "Cancelled" and cleans up the placeholder/partial.
+                        rc = 0
+                    else:
+                        rc = core_ffmpeg_runner.run_ffmpeg(
+                            command,
+                            dialect="legacy_stderr",
+                            on_progress=lambda pct: self.progress_updated.emit(
+                                self.thread_index, pct
+                            ),
+                            on_output_line=lambda line: self.output_updated.emit(
+                                line + "\n"
+                            ),
+                            should_cancel=lambda: self.is_cancelled,
+                        )
                 finally:
-                    if _gpu_path_taken and self.gpu_semaphore is not None:
+                    if _gpu_slot_held:
                         self.gpu_semaphore.release()
                 # CPU fallback per ADR-0007 D5: GPU encode failed, honor gpu_error_action.
                 # Bug 2 closure: skip_file branch emits error_occurred so existing handler advances batch.
