@@ -60,6 +60,10 @@ What makes it a good entry: one concrete user-visible change, a measurable claim
 
 First release of the revived codebase. Covers the decompile-and-restore effort and Phase 1 modernization work in progress.
 
+### Changed
+
+- **B-015 — NVENC codec routing codified as single-knob (no behavior change).** `core/preset_translator.py::translate_to_nvenc` has always emitted the user's `gpu_codec` setting for recognized CPU codecs (libx264/libx265) while ignoring a computed per-preset `mapped` value. The dead `mapped` variable is removed and the behavior is now documented in [ADR-0015](docs/decisions/ADR-0015-nvenc-codec-routing.md). The prior `_CODEC_MAP` "per ADR-0007 D4" comment was a mis-citation (ADR-0007 D4 governs the Settings codec _dropdown_, not routing) and is corrected. Output is byte-identical — pinned by characterization tests in `tests/smoke/test_preset_translator_routing.py`. A libx265 preset on the default `gpu_codec` still yields h264_nvenc; set `gpu_codec=hevc_nvenc` for HEVC.
+
 ### Fixed
 
 - **A4 — H.264 NVENC wrongly hidden on pre-Turing GPUs.** `gpu_detect.detect()` gated H.264 availability on the HEVC hardware signal (`h264_available = hw_supports_hevc and codecs.h264`), so a pre-Turing NVENC GPU (Pascal/Maxwell — H.264-capable, no HEVC) with `h264_nvenc` present in ffmpeg reported H.264 as unavailable and consequently lost the entire NVENC path (`nvenc_available=False`). H.264 now unlocks from its own ffmpeg-encoder probe (`codecs.h264`), independent of the HEVC/AV1 gates, which still correctly use the hardware generation. No B-NNN: A4 is an audit-issue id (see `f4cf89a` baseline). Repro + regression coverage in `tests/smoke/test_gpu_detect.py`.
