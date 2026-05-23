@@ -227,3 +227,29 @@ These are codified rules, not optional advice. Violating any of them produces
 a broken build that may pass smoke tests on the developer's machine but fail
 on teammate machines or after a clean rebuild.
 
+---
+
+## 13. Phase-3 fix-pass rules (MAIN + VERIFY)
+
+This section governs the Phase-3 fix pass. It does not supersede §0-§12.
+
+- **Branch.** Cut `phase3-fixes` off `phase3-adam-v39-merge`. All fix-pass work
+  lands on `phase3-fixes`; `phase3-adam-v39-merge` stays the integration mainline.
+- **One issue per commit.** Each commit fixes exactly one BACKLOG item. Commit
+  subject format: `fix(<area>): B-NNN <summary>`. No drive-by edits (§6 still applies).
+- **ADRs are source of truth.** The ADRs in `docs/decisions/` are authoritative.
+  A fix may only contradict an ADR if the same commit adds a new/superseding ADR
+  documenting the change. Silent ADR violations are not allowed.
+- **Read before you fix.** Before touching code, read @BACKLOG.md for the B-NNN
+  entry and the relevant @docs/decisions/ ADR. Do not start from the commit subject alone.
+- **NVENC is high-risk.** NVENC logic lives in `gpu_detect.py`,
+  `core/preset_translator.py`, and `core/`. Edits there are high-risk and require
+  extra care, a repro test, and exercise of the actual NVENC path — not just an import.
+- **Single RTX 4080.** Never run two NVENC renders at once. Before any GPU render,
+  write/check `.agent-status/` so MAIN and VERIFY never contend for the GPU (B-032).
+- **Every fix needs a test.** Each fix ships a repro test plus a green
+  `pytest -k <name>` run pasted into chat. Hardware-dependent NVENC behavior also
+  gets a manual run marked `MANUAL-VERIFIED` at phase close.
+- **VERIFY is read-only.** The VERIFY session never edits app code. Its only writes
+  are `RESULTS.md` and `.agent-status/verify.json`.
+

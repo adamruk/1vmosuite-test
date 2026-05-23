@@ -1,0 +1,64 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash(pytest:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(ruff:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git worktree:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Edit(gpu_detect.py)",
+      "Edit(core/preset_translator.py)",
+      "Edit(core/**)",
+      "Edit(docs/decisions/**)",
+      "Edit(.claude/**)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Bash(git push --force:*)",
+      "Bash(git push:* --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push:* -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -fd:*)",
+      "Bash(git clean -f:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:/Program Files/Git/usr/bin/bash.exe\" .claude/hooks/block-dangerous.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"C:/Program Files/Git/usr/bin/bash.exe\" .claude/hooks/format-python.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

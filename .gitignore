@@ -39,6 +39,10 @@ config_video_*.json.bak
 .claude/settings.local.json
 .claude/cache/
 
+# Claude Code worktrees + MAIN<->VERIFY GPU-coordination state (per-machine, transient)
+.claude/worktrees/
+.agent-status/
+
 # VMAF validation working files — large binaries regenerable via the orchestrator script.
 # JSON outputs (results.json + per-pairing vmaf logs) ARE committed for machine inspection.
 benchmarks/_vmaf_work/*.mp4
