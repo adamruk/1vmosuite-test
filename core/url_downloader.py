@@ -246,6 +246,7 @@ def _build_ydl_opts(
     quality: str,
     work_dir: Path,
     download_subtitles: bool,
+    subtitle_langs: list[str],
     cookies_browser: Optional[str],
     progress_hook: Callable[[dict], None],
 ) -> dict:
@@ -289,7 +290,7 @@ def _build_ydl_opts(
             {
                 "writesubtitles": True,
                 "writeautomaticsub": True,
-                "subtitleslangs": ["en", "orig"],
+                "subtitleslangs": list(subtitle_langs),
                 "subtitlesformat": "srt/vtt/best",
                 "postprocessors": [
                     {
@@ -310,6 +311,7 @@ def _download_one(
     work_dir: Path,
     quality: str,
     download_subtitles: bool,
+    subtitle_langs: list[str],
     cookies_browser: Optional[str],
     progress_callback: Optional[Callable[[int, str, float, str], None]],
     cancel_event: Optional[threading.Event],
@@ -338,6 +340,11 @@ def _download_one(
         return DownloadResult(url=url, success=False, error=exc, error_type="unknown")
 
     def _hook(d: dict) -> None:
+        # #5957 hardening: yt-dlp fires this hook on a tight loop from the
+        # download thread, so the hot path stays trivial — dict key reads
+        # plus a single division, then hand off to the caller's callback.
+        # No formatting, logging, or allocation here. (The except branch
+        # below only runs if the *caller's* callback raises — not hot path.)
         if cancel_event is not None and cancel_event.is_set():
             raise _CancelledMarker("cancelled")
         if progress_callback is None:
@@ -357,7 +364,7 @@ def _download_one(
             logger.exception("progress_callback raised; continuing")
 
     opts = _build_ydl_opts(
-        quality, work_dir, download_subtitles, cookies_browser, _hook
+        quality, work_dir, download_subtitles, subtitle_langs, cookies_browser, _hook
     )
     logger.info("Starting download: %s", url)
 
@@ -430,6 +437,7 @@ def download_videos(
     work_dir: Path,
     quality: Literal["best", "1080p", "720p", "480p", "360p", "smallest"] = "best",
     download_subtitles: bool = False,
+    subtitle_langs: Optional[list[str]] = None,
     max_concurrent: int = 3,
     progress_callback: Optional[Callable[[int, str, float, str], None]] = None,
     cookies_browser: Optional[str] = None,
@@ -451,6 +459,10 @@ def download_videos(
         raise ValueError(
             f"invalid quality {quality!r}; must be one of {sorted(QUALITY_FORMATS)}"
         )
+    # Default to English captions only; normalised here (not as a mutable
+    # default arg) so callers and threads never share one list instance.
+    if subtitle_langs is None:
+        subtitle_langs = ["en"]
     if (
         not isinstance(max_concurrent, int)
         or isinstance(max_concurrent, bool)
@@ -493,6 +505,7 @@ def download_videos(
                 work_dir,
                 quality,
                 download_subtitles,
+                subtitle_langs,
                 cookies_browser,
                 progress_callback,
                 cancel_event,

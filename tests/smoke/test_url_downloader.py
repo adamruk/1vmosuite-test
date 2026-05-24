@@ -235,6 +235,34 @@ def test_subtitles_for_video_with_english_subs(tmp_path: Path) -> None:
 
 @_skip_online
 @pytest.mark.online
+def test_subtitles_and_progress_reach_completion(tmp_path: Path) -> None:
+    """#5957 regression guard: subtitles + a live progress_callback must
+    coexist — complete video, a .srt on disk, AND progress reaching 100."""
+    seen: list[float] = []
+
+    def on_progress(idx: int, url: str, pct: float, status: str) -> None:
+        seen.append(pct)
+
+    results = download_videos(
+        ["https://www.youtube.com/watch?v=jNQXAC9IVRw"],  # 'Me at the zoo'
+        tmp_path,
+        quality="480p",
+        download_subtitles=True,
+        subtitle_langs=["en"],
+        progress_callback=on_progress,
+    )
+    assert len(results) == 1
+    assert results[0].success is True, f"error={results[0].error}"
+    assert results[0].path is not None and results[0].path.exists()
+    assert results[0].subtitle_path is not None
+    assert results[0].subtitle_path.exists()
+    assert results[0].subtitle_path.suffix.lower() == ".srt"
+    assert seen, "progress_callback was never invoked"
+    assert max(seen) >= 100.0, f"progress never reached 100: max={max(seen)}"
+
+
+@_skip_online
+@pytest.mark.online
 def test_mixed_batch_returns_correct_per_url_outcomes(tmp_path: Path) -> None:
     urls = [
         "https://www.youtube.com/shorts/aqz-KE-bpKQ",
