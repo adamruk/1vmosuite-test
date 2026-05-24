@@ -2763,10 +2763,18 @@ class VideoRendererTool(QMainWindow):
                 # complete (success or with failures) and must no longer
                 # appear in the resume prompt at next launch.
                 self._clear_queue_snapshot()
+                # B-019: this terminal-cleanup branch also runs when the
+                # final task failed (on_render_error -> _start_next_task ->
+                # cleanup), so a success-toned "Completed processing N
+                # video(s)!" / "Success" fired even on an all-fail batch with
+                # every progress box red. Neutral wording is accurate in all
+                # cases; per-task outcomes are already shown in the status
+                # column. (on_render_completed keeps its success wording for
+                # the genuinely-successful terminal path.)
                 QMessageBox.information(
                     self,
-                    "Success",
-                    f"Completed processing {self.total_tasks} video(s)!",
+                    "Batch Finished",
+                    "Batch finished — see status column for results.",
                 )
                 self.save_config()
                 return None

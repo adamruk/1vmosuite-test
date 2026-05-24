@@ -402,6 +402,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- **B-019 — success-toned batch-completion message fired on an all-fail batch.** When the final dispatched task errored, `on_render_error` recursed into `_start_next_task`'s terminal-cleanup branch, which showed `QMessageBox.information(... "Success", "Completed processing N video(s)!")` — success wording even when every progress box was red. Reworded that branch to a neutral title/body ("Batch Finished" / "Batch finished — see status column for results."), accurate whether the batch succeeded or failed; per-task outcomes are already in the status column. The genuinely-successful path (`on_render_completed`, "Successfully rendered N video(s)!") is unchanged. UI-only; the live dialog is MANUAL-VERIFIED. [HASH-B019]
+
 - **B-046 — `scripts/check_adr_references.py` self-exclusion failed on Windows.** The script excluded itself and the `docs/decisions/ADR-*` tree by substring-matching forward-slash paths against `str(p)`; on Windows a resolved `Path` stringifies with backslashes, so the exclusion never matched and the checker scanned — and falsely flagged — its own regex range comment (a fabricated four-digit ADR token), exiting 1 on every clean Windows run. Normalized the match to forward slashes via `Path.as_posix()` so it is separator-agnostic. Repro + regression coverage in `tests/smoke/test_check_adr_references.py` (exits 0 on a clean tree; self/ADR-tree exclusion holds; synthetic Windows-path normalization). [HASH-B046]
 
 - **Phase A — URL downloader hardening (C2/C3/C6c/C6d).** `core/url_downloader.py`.
