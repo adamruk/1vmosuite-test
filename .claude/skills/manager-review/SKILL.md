@@ -9,7 +9,7 @@ allowed-tools: Read Grep Glob Bash Write
 
 You are running as the **VERIFY** session. You are not the agent being reviewed — you are its supervisor and gatekeeper. Catch every shortcut and every pattern that works today but breaks at scale. Be direct, be specific, show the exact line. Do not soften findings.
 
-**You are READ-ONLY against the code under review.** The ONLY files you may write are `RESULTS.md`, `.agent-status/verify.json`, `.agent-status/BLOCKERS.json`, and the `## Agent Warnings` section of `CLAUDE.md`. You NEVER edit any source, test, or config file. You report fixes — MAIN implements them.
+**You are READ-ONLY against the code under review.** The ONLY files you may write are `RESULTS.md` (APPEND-ONLY — grown via the Step 6 helper, NEVER overwritten; see B-050), `.agent-status/verify.json`, `.agent-status/BLOCKERS.json`, the throwaway `.agent-status/_verdict_block.md` scratch file, and the `## Agent Warnings` section of `CLAUDE.md`. You NEVER edit any source, test, or config file. You report fixes — MAIN implements them.
 
 **Standard of judgment:** Would this code still work correctly under real 1vmo conditions — a large batch with mid-run cancellation, the UI staying responsive, FFmpeg/NVENC and other child processes cleaned up on every path, on the frozen PyInstaller build, against pinned tool versions? If not, it is a problem. This skill audits any module (URL downloader, NVENC/preset translation, the Qt UI, build/packaging) — derive what is under review from the diff, not from assumption.
 
@@ -56,9 +56,28 @@ A durable rule that is genuinely inapplicable to this diff (e.g. QT-THREADSAFE w
 Status: any critical FAIL → **BLOCKED**; else any warning → **PASSED_WITH_WARNINGS**; else **PASSED**.
 
 ### Step 6 — Write the verdict (governance files only)
-`RESULTS.md` — a table `rule id | name | severity | result | evidence`, then score, grade, status, and the phase key used.
 
-`.agent-status/verify.json`:
+**RESULTS.md is an APPEND-ONLY cumulative audit log — never overwrite it (B-050).**
+Do NOT call the Write tool on RESULTS.md: Write replaces the whole file and silently
+destroys every prior verdict (this clobbered 672 lines in commit `7318ae4`). Instead:
+
+1. Compose the new verdict as a markdown block that STARTS with a dated, uniquely
+   identifiable header, e.g.
+   `## VERDICT — <branch> @ <audited_sha> — <YYYY-MM-DD HH:MM UTC>`,
+   followed by the result table (`rule id | name | severity | result | evidence`),
+   then score, grade, status, and the phase key used.
+2. Write ONLY that block to a throwaway scratch file with the Write tool:
+   `.agent-status/_verdict_block.md` (the scratch file, NOT the log).
+3. Prepend it to the cumulative log by running the helper via Bash:
+   `python .claude/skills/manager-review/append_results.py .agent-status/_verdict_block.md RESULTS.md`
+   The helper reads the existing RESULTS.md, prepends your block (newest-first,
+   `---`-separated) and writes the combined content back atomically — prior verdicts
+   survive verbatim. Confirm its printed line count is **>=** the previous file's
+   line count; RESULTS.md must never shrink. (Regression guard:
+   `tests/smoke/test_results_append.py`.)
+
+`.agent-status/verify.json` (per-run machine state — overwrite this one normally
+with the Write tool):
 ```json
 {
   "session": "verify",
