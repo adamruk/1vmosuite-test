@@ -227,6 +227,34 @@ def test_categorize_cookies_invalid_message() -> None:
     )
 
 
+def test_proxy_bad_scheme_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        download_videos(
+            ["https://example.com/v.mp4"],
+            tmp_path,
+            proxy="ftp://1.2.3.4:8080",
+        )
+
+
+def test_proxy_empty_string_means_direct(tmp_path: Path) -> None:
+    # "" is allowed (= direct connection); validation must accept it.
+    results = download_videos(["not a url"], tmp_path, proxy="")
+    assert results[0].error_type == "invalid_url"
+
+
+def test_proxy_valid_socks5h_passes_validation(tmp_path: Path) -> None:
+    results = download_videos(["not a url"], tmp_path, proxy="socks5h://127.0.0.1:9050")
+    assert results[0].error_type == "invalid_url"
+
+
+def test_categorize_socks_refused_is_proxy_error() -> None:
+    assert (
+        _categorize_error(Exception("Unable to connect to proxy: connection refused"))
+        == "proxy_error"
+    )
+    assert _categorize_error(Exception("SOCKS handshake failed")) == "proxy_error"
+
+
 def test_missing_work_dir_raises(tmp_path: Path) -> None:
     missing = tmp_path / "does_not_exist"
     with pytest.raises(FileNotFoundError):

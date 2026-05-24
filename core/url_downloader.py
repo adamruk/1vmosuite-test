@@ -270,6 +270,25 @@ def _categorize_error(exc: BaseException) -> str:
         or "cloudflare" in msg
     ):
         return "rate_limited"
+    # Proxy failures must be checked before the generic network bucket
+    # below — a proxy error message often also contains "connection
+    # refused"/"unable to connect", which would otherwise be miscategorised
+    # as a plain network_error.
+    if (
+        "proxyerror" in msg
+        or "socks" in msg
+        or (
+            "proxy" in msg
+            and (
+                "refus" in msg
+                or "unable to connect" in msg
+                or "cannot connect" in msg
+                or "handshake" in msg
+                or "failed" in msg
+            )
+        )
+    ):
+        return "proxy_error"
     if any(
         s in msg
         for s in (
@@ -300,6 +319,7 @@ def _build_ydl_opts(
     download_subtitles: bool,
     subtitle_langs: list[str],
     cookies_file: Optional[Path],
+    proxy: Optional[str],
     progress_hook: Callable[[dict], None],
 ) -> dict:
     """Build the yt-dlp options dict for a single download."""
@@ -368,6 +388,12 @@ def _build_ydl_opts(
         )
     if cookies_file is not None:
         opts["cookiefile"] = str(cookies_file)
+    # Empty string == direct connection (no proxy); only set the option for
+    # a real proxy URL. yt-dlp handles http/https/socks4/socks5/socks5h
+    # natively — we deliberately do NOT set geo_bypass (that spoofs an
+    # X-Forwarded-For header, a different layer that doesn't route traffic).
+    if proxy:
+        opts["proxy"] = proxy
     return opts
 
 
@@ -379,6 +405,7 @@ def _download_one(
     download_subtitles: bool,
     subtitle_langs: list[str],
     cookies_file: Optional[Path],
+    proxy: Optional[str],
     progress_callback: Optional[Callable[[int, str, float, str], None]],
     cancel_event: Optional[threading.Event],
 ) -> DownloadResult:
@@ -439,6 +466,7 @@ def _download_one(
         download_subtitles,
         subtitle_langs,
         cookies_file,
+        proxy,
         _hook,
     )
     logger.info("Starting download: %s", url)
@@ -545,6 +573,7 @@ def download_videos(
     max_concurrent: int = 3,
     progress_callback: Optional[Callable[[int, str, float, str], None]] = None,
     cookies_file: Optional[Path] = None,
+    proxy: Optional[str] = None,
     cancel_event: Optional[threading.Event] = None,
 ) -> list[DownloadResult]:
     """Download a batch of video URLs concurrently.
@@ -560,6 +589,14 @@ def download_videos(
     downloading auth-walled media may violate a platform's Terms of
     Service and can put the account whose cookies are used at risk.
     Consent UI is out of scope for this module.
+
+    proxy, when given, routes ALL downloads in this call through one proxy
+    (it is a per-instance yt-dlp option, not per-URL); callers needing
+    per-platform routing must issue separate calls. Accepts http(s),
+    socks4, socks5, and socks5h URLs; "" means a direct connection. On a
+    censored network a remote-DNS proxy — HTTP CONNECT or socks5h, which
+    resolve hostnames proxy-side — is required, since a plain socks5 proxy
+    leaks/uses local DNS.
     """
     if not isinstance(urls, list) or len(urls) == 0:
         raise ValueError("urls must be a non-empty list")
@@ -589,6 +626,15 @@ def download_videos(
             raise FileNotFoundError(f"cookies_file does not exist: {cookies_file}")
         if not os.access(cookies_file, os.R_OK):
             raise PermissionError(f"cookies_file is not readable: {cookies_file}")
+    if proxy is not None:
+        if not isinstance(proxy, str):
+            raise ValueError(f"proxy must be a str or None, got {type(proxy).__name__}")
+        # "" is allowed (direct); a non-empty value must be a supported scheme.
+        if proxy != "" and not re.match(r"^(https?|socks5h?|socks4)://", proxy):
+            raise ValueError(
+                f"unsupported proxy URL {proxy!r}; scheme must be one of "
+                "http, https, socks4, socks5, socks5h"
+            )
 
     if not isinstance(work_dir, Path):
         work_dir = Path(work_dir)
@@ -622,6 +668,7 @@ def download_videos(
                 download_subtitles,
                 subtitle_langs,
                 cookies_file,
+                proxy,
                 progress_callback,
                 cancel_event,
             ): idx
