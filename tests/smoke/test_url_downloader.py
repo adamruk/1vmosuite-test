@@ -220,6 +220,22 @@ def test_non_string_url_raises(tmp_path: Path) -> None:
         download_videos([12345], tmp_path)  # type: ignore[list-item]
 
 
+def test_lost_future_filled_so_len_matches_urls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C6d: even if every future is 'lost' (as_completed yields nothing),
+    download_videos must still return one result per URL, in order."""
+    import core.url_downloader as ud
+
+    monkeypatch.setattr(ud, "as_completed", lambda futures: iter(()))
+    urls = ["not a url", "also not a url", ""]
+    results = download_videos(urls, tmp_path)
+    assert len(results) == len(urls)
+    assert [r.url for r in results] == urls
+    assert all(r.success is False for r in results)
+    assert all(r.error_type == "unknown" for r in results)
+
+
 def test_is_live_post_extract_returns_invalid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

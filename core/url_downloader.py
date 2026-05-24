@@ -630,7 +630,23 @@ def download_videos(
                     error_type=_categorize_error(exc),
                 )
 
-    succeeded = sum(1 for r in results if r and r.success)
+    # One-result-per-URL contract: a future that neither returned nor
+    # raised (e.g. pool shutdown lost it) would leave a None slot. Fill any
+    # such slot with a synthetic failure so len(out) == len(urls) ALWAYS
+    # and positional order is preserved.
+    out: list[DownloadResult] = []
+    for idx, r in enumerate(results):
+        if r is None:
+            logger.error("No result produced for %r; synthesising failure", urls[idx])
+            r = DownloadResult(
+                url=urls[idx],
+                success=False,
+                error=URLDownloadError("worker produced no result"),
+                error_type="unknown",
+            )
+        out.append(r)
+
+    succeeded = sum(1 for r in out if r.success)
     logger.info("Batch complete: %d/%d succeeded", succeeded, n)
 
-    return [r for r in results if r is not None]
+    return out
