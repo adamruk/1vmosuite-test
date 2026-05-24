@@ -31,6 +31,8 @@ import pytest
 from core.url_downloader import (
     QUALITY_FORMATS,
     DownloadResult,
+    _categorize_error,
+    _resolve_bundled_js_runtime,
     download_videos,
 )
 
@@ -174,6 +176,23 @@ def test_quality_formats_cover_all_documented_levels() -> None:
 def test_non_string_url_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         download_videos([12345], tmp_path)  # type: ignore[list-item]
+
+
+def test_js_runtime_resolver_returns_none_when_absent() -> None:
+    # No Deno binary is bundled in the source tree / test env, so the
+    # resolver must return None cleanly (never raise).
+    result = _resolve_bundled_js_runtime()
+    assert result is None or isinstance(result, str)
+
+
+def test_categorize_js_runtime_missing_message() -> None:
+    assert (
+        _categorize_error(Exception("ERROR: No supported JavaScript runtime found"))
+        == "js_runtime_missing"
+    )
+    assert _categorize_error(Exception("install a JS runtime such as Deno")) == (
+        "js_runtime_missing"
+    )
 
 
 def test_live_stream_url_returns_invalid(tmp_path: Path) -> None:

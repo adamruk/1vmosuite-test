@@ -71,6 +71,39 @@ _BUNDLED_FFMPEG_DIR = _resolve_bundled_ffmpeg_dir()
 logger = logging.getLogger("core.url_downloader")
 
 
+def _resolve_bundled_js_runtime() -> Optional[str]:
+    """Return the directory containing a bundled Deno binary, or None.
+
+    Modern yt-dlp needs a JavaScript runtime (Deno) to solve the JS
+    "n-sig"/PO-token challenges some extractors (notably YouTube) now
+    require; without one those downloads degrade or fail. Mirrors
+    _resolve_bundled_ffmpeg_dir: look in the PyInstaller bundle first,
+    then the repo root. yt-dlp discovers the runtime via shutil.which,
+    so the caller prepends this dir to PATH at import time.
+    """
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass))
+    # Source-mode: repo root is this file's parent's parent.
+    candidates.append(Path(__file__).resolve().parent.parent)
+    suffix = ".exe" if os.name == "nt" else ""
+    for cand in candidates:
+        if (cand / f"deno{suffix}").is_file():
+            return str(cand)
+    return None
+
+
+_BUNDLED_JS_RUNTIME_DIR = _resolve_bundled_js_runtime()
+if _BUNDLED_JS_RUNTIME_DIR:
+    # Prepend so yt-dlp's shutil.which finds the bundled Deno ahead of any
+    # system install. Import-time so it is set before the first download.
+    os.environ["PATH"] = (
+        _BUNDLED_JS_RUNTIME_DIR + os.pathsep + os.environ.get("PATH", "")
+    )
+    logger.info("Bundled JS runtime (Deno) added to PATH: %s", _BUNDLED_JS_RUNTIME_DIR)
+
+
 # ========== Quality format mapping ==========
 
 # The download is a transient intermediate: it is ALWAYS re-encoded
@@ -195,6 +228,8 @@ def _categorize_error(exc: BaseException) -> str:
 
     msg = str(exc).lower()
 
+    if "no supported javascript runtime" in msg or "js runtime" in msg:
+        return "js_runtime_missing"
     if "unsupported url" in msg or "no suitable extractor" in msg:
         return "unsupported_site"
     if (
@@ -273,7 +308,12 @@ def _build_ydl_opts(
         # progress is duplicative and pollutes the console + terminal
         # output panel.
         "noprogress": True,
-        "no_warnings": True,
+        # Route yt-dlp's own log/warning/error output through our logger
+        # (instead of suppressing it) so signals like "No supported JS
+        # runtime" — see _resolve_bundled_js_runtime / "js_runtime_missing"
+        # — are visible in logs rather than silently swallowed. We do NOT
+        # set no_warnings (it would re-hide exactly those warnings).
+        "logger": logger,
         "retries": 3,
         # macOS stabilization (Step 5): pin yt-dlp's muxer to the
         # bundled ffmpeg. On macOS source-mode the user may have
