@@ -991,7 +991,7 @@ class VideoMergerTool(QMainWindow):
                 on_error=self.on_merge_error,
             )
             self._merge_coordinator.per_video_started.connect(
-                self.on_video_merge_started
+                self.on_video_mixer_started
             )
             self._merge_coordinator.finished.connect(self.on_merge_finished)
             self._merge_coordinator.error_occurred.connect(
@@ -1114,7 +1114,7 @@ class VideoMergerTool(QMainWindow):
                 break
 
     @Slot(int, str, str)
-    def on_video_merge_started(
+    def on_video_mixer_started(
         self, index: int, input_names: str, output_filename: str
     ):
         item = QTreeWidgetItem(self.tree_output)

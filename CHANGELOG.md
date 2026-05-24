@@ -233,6 +233,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- **B-023 — renamed mixer's `on_video_merge_started` slot to `on_video_mixer_started`.** Copy-paste residue from when `mixer.py` was scaffolded off `merge.py`; the slot worked (the signal-to-slot connection still resolved) but the `merge_` name was misleading inside mixer's own module. Renamed at both the definition (`mixer.py:1117`) and the `per_video_started.connect(...)` site (`mixer.py:994`). Internal only — no UI string, no log output, no external consumer. [HASH-B023]
+
 - **Phase A — URL downloader hardening (C1/C5/C6a/C6b/C7).** `core/url_downloader.py` + the yt-dlp pin.
   - URL downloader downloads to a maximum-quality MKV intermediate (dropped the mp4/m4a format pins); the render pipeline still outputs MP4/H.264. (C1) [c66fd20]
   - Auth-walled downloads take a user-supplied `cookies_file` path instead of reading a browser cookie store; caller is responsible for consent. (C5) [4c2eaa9]
