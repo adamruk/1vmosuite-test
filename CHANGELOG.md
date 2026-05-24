@@ -58,7 +58,7 @@ What makes it a good entry: one concrete user-visible change, a measurable claim
 
 ## [Unreleased] — v2.0.0
 
-First release of the revived codebase. Covers the decompile-and-restore effort and Phase 1 modernization work in progress.
+First release of the revived codebase. Covers the decompile-and-restore effort and the modernization work accumulated since — Phase 2 / 2.5 governance and core extraction, the GPU (NVENC) pipeline, Phase 3.1–3.7 local features, and the Phase A URL-downloader integration.
 
 ### Added
 

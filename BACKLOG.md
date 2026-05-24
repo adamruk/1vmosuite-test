@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable MD013 -->
 
-Deferred audit-fix items, surfaced during the toolchain install (commits 5e7e8c9 + dc0747c) on 2026-04-26. Strategy: defer-with-tracking. End-of-Phase-2 cleanup phase resolves all items below before Phase 2 ships.
+Deferred audit-fix items, surfaced during the toolchain install (commits 5e7e8c9 + dc0747c) on 2026-04-26. Strategy: defer-with-tracking. This is an ongoing cross-phase tracker — Phase 2, 2.5, and 3 have shipped, and items are resolved or explicitly carried forward to a named future phase as the project advances.
 
 Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG entries.
 
@@ -47,12 +47,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Implication:** Starting batch 2 in same session → labels reset to "Ready" (good) but QProgressBar visual stays at batch 1's final percent (often 100%) for ~100ms until the first new progress event. Cosmetic flicker only.
 - **Resolution:** Add `self.thread_bars[idx].setValue(0)` inside the anchor #8 loop in start_render. Symmetry with cancel_render. ~1 LoC change.
 - **Trigger for pickup:** Phase 2d touches the worker UI OR opportunistic during any future `start_render` edit.
-
-## B-017: 11 Encoder.txt presets had stale Code/assets/data/ paths — RESOLVED
-
-- **Status:** RESOLVED (closed by v2.5.1 fix-3, commit c60baf5, 2026-04-28)
-- **Resolution evidence:** all 11 affected preset variants (10 Layer Overlay + 1 Line) verified rendering successfully via smoke test on 5 input videos; output filenames written; ffmpeg console clean. CHANGELOG entry under [Unreleased] ### Fixed documents BEFORE/AFTER/WHY with PATH-SEMANTICS-NOTE caveat.
-- **Note for future:** moved here pre-emptively to keep B-NNN numbering monotonic. See "Resolved" section for canonical resolved-items list per BACKLOG.md resolution policy.
 
 ## B-018: Edit/Delete buttons grayed for ALL presets in fresh install (UX gap, not a bug)
 
@@ -222,9 +216,9 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ## Resolution policy
 
-- Items resolved: move to a "Resolved" section at bottom with commit hash and date.
-- New deferrals during Phase 2 work: append here with new B-NNN ID.
-- End-of-Phase-2 cleanup phase: every B-NNN must be resolved or explicitly downgraded to a future phase before Phase 2 ships.
+- Items resolved: move to the "Resolved" section at bottom with commit hash and date. Routine closures collapse to one line; entries whose reasoning is the only surviving record (postmortems / won't-fix rationale) relocate in full.
+- New deferrals: append here with a new B-NNN ID. B-NNN IDs are never reused or renumbered.
+- Ongoing cross-phase hygiene: every B-NNN is resolved or explicitly carried forward to a named future phase. No B-NNN is silently dropped.
 
 ---
 
@@ -278,11 +272,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution:** Either (a) make translate_to_nvenc default kwargs read from module constants, or (b) remove the unused constants and rely on the kwarg-default mechanism alone. Decision deferred to post-tag review.
 - **Trigger for pickup:** v2.5-complete tag landed.
 
-## B-029: empty_videos_hint label promises drag-drop that doesn't exist — RESOLVED
-
-- **Status:** Resolved in Phase 2d production-hardening batch (Issue 4).
-- **Resolution:** Implemented option (b) — `VideoRendererTool` now sets `setAcceptDrops(True)` and overrides `dragEnterEvent` / `dragMoveEvent` / `dropEvent` to accept local video file URLs (12-extension allowlist). Dropped paths flow through the same `self.videos` mutation as `select_videos`. Placeholder text also updated. Multi-file, unicode, spaces, and Windows backslash paths handled by `QUrl.toLocalFile`.
-
 ## B-030: self.output_mapping dict is dead state (write-only, never read)
 
 - **Status:** Open, Low
@@ -303,104 +292,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Fix sketch:** Either (a) ask the render question FIRST so a No there aborts the close before any URL cleanup happens, or (b) consolidate both into a single combined modal "URL download + render are in progress; cancel both and exit?". Option (a) is ~3 lines (reorder branches); (b) is ~10 lines plus a smoke test.
 - **Trigger for pickup:** If users actually hit this in practice. Speculative until then.
 
-## B-032: GPU semaphore acquire is unbounded under contention + cancel
-
-- **Status:** RESOLVED [b8f3cb1] 2026-05-24 — bounded cancellable acquire via module-level `_acquire_gpu_slot()` (tryAcquire+cancel-poll); `finally` releases only a held slot. Headless test `tests/smoke/test_gpu_semaphore_cancel.py`; live cancel-mid-NVENC is MANUAL-VERIFIED.
-- **Status (original):** Open, Low
-- **Priority:** Low (technical debt; bounded externally by Phase 2d Item 7 thread.wait(5000))
-- **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-6)
-- **Context:** `auto_render.py::RenderWorker.process` acquires `self.gpu_semaphore` at L359 with bare `acquire()` (no timeout). If two workers contend for a `gpu_max_concurrent=1` semaphore and the holder is hung waiting on ffmpeg, the second waiter blocks. Cancel sets `is_cancelled=True` on both workers, but the second one is inside the blocking `acquire()` call and cannot poll the cancel flag until the holder finally releases. The 5s `thread.wait(5000)` cap in `cancel_render` (Phase 2d Item 7) prevents UI-thread freeze; worst case is a brief zombie worker that exits after the holder eventually releases.
-- **Implication:** UI never freezes (existing Item 7 cap). The semaphore-blocked worker can outlive its parent thread by seconds in rare contention + cancel scenarios. Not observed in practice with the default `gpu_max_concurrent=2`.
-- **Fix sketch:** Replace `acquire()` with a `tryAcquire(timeout_ms)` polling loop that also checks `self.is_cancelled` between attempts. ~10 lines + a smoke test for the cancel-during-acquire path.
-- **Trigger for pickup:** A user report of a stuck worker on cancel, or a deliberate teardown of low-`gpu_max_concurrent` configurations.
-
-## B-039: Phase 3 closure + handoff readiness — RESOLVED (Phase 3.7)
-
-- **Status:** RESOLVED in Phase 3.7 (2026-05-22).
-- **Resolution:** Verification-only milestone documented in [ADR-0014](docs/decisions/ADR-0014-phase-3-closure.md). Handoff doc set published under `docs/PHASE_3_*.md` + RELEASE_NOTES_PHASE_3.md + PHASE_4_READINESS_NOTES.md. Source gates captured in `tests/evidence/phase3-validation-2026-05-22.log`. Hardware-dependent QA rows honestly marked `[N]` in the RC checklist for Adam's host runs.
-
-## B-038: Production packaging + local release readiness — RESOLVED (Phase 3.6)
-
-- **Status:** RESOLVED in Phase 3.6 (2026-05-22) — partial. Build scripts + integrity checker shipped; PyInstaller spec edits + updater hardening deferred to follow-up patches.
-- **Resolution (Phase 3.6):**
-  - 4 new scripts under `tools/build/` (~700 LOC total): `generate_version_file.py`, `check_release_integrity.py`, `build_windows.py`, `build_macos.py`.
-  - VERSION.txt flow: generator → `dist_version.txt` → build script copies → bundle's `VERSION.txt` → integrity check + future About dialog.
-  - SHA256 checksums.txt: build_windows.py appends one line per artifact; teammate verification via `python3 tools/build/check_release_integrity.py <bundle>`.
-  - Portable-first: zip is the primary artifact (CLAUDE.md §12 rule 5 honoured — extras re-copied after PyInstaller wipe).
-  - macOS .app+.dmg authored with optional code-signing branch.
-  - Documented in [ADR-0013](docs/decisions/ADR-0013-release-packaging.md).
-- **Deferred items (Phase 3.6.x or Phase 4):**
-  - `1vmo-suite.spec` edits for VERSION.txt embed + assets/* datas (currently the build script copies VERSION.txt post-build; in-spec datas is a future cleanup).
-  - `1vmo-suite-macos.spec` sibling spec authoring (build_macos.py expects it; documented in RELEASE_MACOS.md when promoted).
-  - `updater.py` hardening: SHA256 verify, `_pending/` extract, backup-before-swap, queue-running guard. Designed in ADR-0013 D5; wiring deferred.
-  - `inno_setup_compile.py` for optional Windows installer.
-
-## B-037: Local encoder intelligence layer — RESOLVED (Phase 3.5)
-
-- **Status:** RESOLVED in Phase 3.5 (2026-05-22).
-- **Priority:** MEDIUM (product feature; users had no in-app advisory for codec compatibility / NVENC session limits / fallback chains).
-- **Resolution (Phase 3.5):**
-  - New `core/encoder_intel/` package (4 modules, ~650 LOC). Pure-Python heuristics; no ML; no remote model.
-  - Advisory-only — every codec switch goes through Phase 3.3's RecommendationDialog Confirm click. No forced switching.
-  - 17 new smoke tests under `tests/smoke/test_encoder_intel.py`. ADR-0003 narrow exception extended per [ADR-0012](docs/decisions/ADR-0012-encoder-intelligence.md).
-  - RenderWorker, ffmpeg invocation, gpu_detect (extended via duck-typed attribute access; not modified), preset_translator: all unchanged.
-  - Deferred: runtime 1-frame probe-encode (needs real NVIDIA hardware in CI to validate) and Start-time pre-flight gate (kept additive this pass).
-
-## B-036: Local orchestration / performance layer — RESOLVED (Phase 3.4)
-
-- **Status:** RESOLVED in Phase 3.4 (2026-05-22).
-- **Priority:** MEDIUM (product feature; users had no pause control, no per-task log persistence, no support-bundle export).
-- **Resolution (Phase 3.4):**
-  - New `core/orchestration/` package (8 modules, ~1100 LOC). Side-state file `queue_state.json` with its own `schema_version=1`; Phase 3.1 queue schema FROZEN.
-  - Pause/Resume toolbar button. Current task never interrupted; only next-dispatch waits. Persisted across crashes.
-  - Strict-opt-in retry policy (default OFF). Allow-list of retry-eligible Kinds is small; per-batch ceiling caps loops.
-  - Per-task ffmpeg log persistence with 8 MB cap + last-N-batch rotation.
-  - Cross-platform sleep inhibitor (Windows / macOS / Linux), degrades silently on missing-tool platforms.
-  - psutil-optional system monitor sampler.
-  - Diagnostic bundle exporter with config sanitization (strips `output_dir`, basenames-only `input_files`).
-  - 33 new smoke tests. ADR-0003 narrow exception extended per [ADR-0011](docs/decisions/ADR-0011-orchestration.md).
-  - RenderWorker, ffmpeg command construction, Phase 3.1 queue schema, scoring (Phase 3.2), optimization (Phase 3.3) all unchanged.
-
-## B-035: Local optimization / recommendation layer — RESOLVED (Phase 3.3)
-
-- **Status:** RESOLVED in Phase 3.3 (2026-05-22).
-- **Priority:** MEDIUM (product feature; users had scores from Phase 3.2 but no in-app way to convert them into next-step guidance).
-- **Surfaced:** Phase 3.3 design doc + Adam's no-destructive-automation rule (2026-05-22).
-- **Resolution (Phase 3.3):**
-  - New `core/optimization/` package (6 modules, ~700 LOC). Heuristic-only, no ML.
-  - Recommendations are advisory; the user clicks Confirm in `_show_recommendation_dialog` before any re-render fires.
-  - Re-renders go through the EXISTING `start_render` path; output filenames use the existing `naming_utils._v2` rotation so originals are preserved.
-  - 39 smoke tests under `tests/smoke/test_quality_classifier.py`, `test_failure_classifier.py`, `test_recommender.py`, `test_batch_analyzer.py`. ADR-0003 narrow-pytest exception extended per [ADR-0010](docs/decisions/ADR-0010-render-optimization.md).
-  - Single new toolbar button (🩺 Health) between Help and Updates. No auto-popups.
-
-## B-034: Local originality / quality scoring system — RESOLVED (Phase 3.2)
-
-- **Status:** RESOLVED in Phase 3.2 (2026-05-22).
-- **Priority:** MEDIUM (product feature; previously the user had no in-app way to measure how close a render was to its source or how visually different it was for derivative-content use).
-- **Surfaced:** Phase 3.2 design doc + Adam's local-only clarification (2026-05-22).
-- **Context (pre-Phase-3.2):** Quality / originality measurement existed only in `bench.py` (a standalone CLI tool used by the team for VMAF validation rounds). End users had no way to score their own renders from inside the app. The product domain — making derivative video content that needs to be "different enough" while still acceptable quality — has no in-app diagnostic for either axis.
-- **Resolution (Phase 3.2):**
-  - New `core/scoring/` package — capability probe, four scoring axes (VMAF / SSIM / PSNR / dHash), pydantic v2 on-disk schema, and a local-only persistent cache (`scores.json` next to Phase 3.1's `queue.json` in `user_data_dir`).
-  - Additive UI: three appended columns on `tree_output` (VMAF / pHash / SSIM), right-click context menu ("Score this render" / "Score selected" / "Score all rendered rows"), and a new "Scoring" tab in Settings with auto-score (default OFF), axis selection, max-parallel spinbox, and pHash-frames spinbox.
-  - Local-only by construction: no network code in any scoring module, no remote upload, no remote model download, no account, no login. Mirrors Phase 3.1's local-first invariant verbatim.
-  - RenderWorker, ffmpeg command generation, the Phase 3.1 queue store, the GPU semaphore, and `output_collision` semantics are all unchanged. Scoring lives on its own QThread pool and never contends with render threads.
-  - 6 new smoke tests under `tests/smoke/` (34 cases) — ADR-0003 narrow-pytest exception extended per ADR-0009.
-  - Documented in [ADR-0009](docs/decisions/ADR-0009-scoring-architecture.md).
-
-## B-033: Persistent local queue + resume-from-interrupted-render — RESOLVED (Phase 3.1)
-
-- **Status:** RESOLVED in Phase 3.1 (2026-05-22).
-- **Priority:** MEDIUM (functional gap — prior to Phase 3.1 an unclean shutdown lost the entire in-progress batch with no recovery path).
-- **Surfaced:** Phase 3.1 design doc + Adam's local-first clarification (2026-05-19).
-- **Context (pre-Phase-3.1):** `auto_render.py` held batch state entirely in process memory (`self.all_tasks`, `self.completed_tasks`, `self.videos`, `self.selected_encoders`). Any of {app crash, OS panic, power loss, user-confirmed exit mid-render} discarded the entire batch with no path to resume the unrendered tasks. Users had to re-pick videos + presets + output dir + re-click Start.
-- **Resolution (Phase 3.1):**
-  - New `core/queue_models.py` (~95 LOC) — pydantic v2 schema for the on-disk batch, with `QUEUE_SCHEMA_VERSION = 1`, a 7-state `TaskStatus` enum, and `UNFINISHED_STATUSES` for the resume-decision predicate.
-  - New `core/queue_store.py` (~260 LOC) — local-only JSON store with O_CREAT|O_EXCL file lock + 60s stale-lock reclaim + atomic write (reuses `core.atomic_write.save_json_atomic`) + schema-version rejection. `load()` never raises.
-  - `auto_render.py` wiring is additive: a snapshot is persisted at `start_render`, transitions are recorded at `_start_next_task` (DISPATCHED), `on_render_completed` (COMPLETED + clear at batch terminal), `on_render_error` (FAILED), and `cancel_render` (CANCELLED + clear). `closeEvent` render-Yes branch keeps the file intact and demotes in-flight tasks to PENDING so the resume prompt at next launch sees them as outstanding work. RenderWorker contract / ffmpeg pipeline / GPU semaphore / output_collision semantics are unchanged.
-  - Settings dialog: new Advanced-tab checkbox "Save queue for resume on next launch" persists `queue_persistence_enabled` (default True). Disabling it is reversible — all wiring is no-op when the flag is False.
-  - Local-only by construction: queue file lives in the user's local `user_data_dir`, no network code, no auth, no remote endpoint.
-  - Test coverage: `tests/smoke/test_queue_store.py` (16 cases) covers all 11 scenarios from the design doc §6.1 — ADR-0003 narrow-pytest exception (pure-IO unit, no Qt/ffmpeg/GPU, <2s, deterministic).
-
 ## B-040: gpu_detect HEVC gen-gate under-reports HEVC NVENC on Maxwell/Pascal (A4-class)
 
 - **Status:** Open, backlog. **Do NOT fix in the current GPU fix-pass** — filed for a later, dedicated NVENC-gate pass.
@@ -417,48 +308,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution sketch:** rework the HEVC gate to honor the ffmpeg `codecs.hevc` probe for the HEVC-capable pre-Turing range (mirroring A4's H.264 decoupling), add a repro test (Maxwell/Pascal-class fixture + `hevc=True` → `hevc_available=True`), and correct the two A4 wording sites above in the same commit.
 - **Trigger for pickup:** a user on a Maxwell/Pascal card reports HEVC GPU encoding unavailable, OR a focused `gpu_detect` generation-gate pass.
 
-## B-041: "5s Cycle Zoom" preset has stray shell double-quotes that reach ffmpeg literally
-
-- **Status:** **RESOLVED [ccd6b36]** 2026-05-24 — live RTX 4080 render verified (zoom cycles correctly: 3s normal → 1s 1.25× → 1s 1.5×, centered; audio/output valid, A/V in sync). The double-quote removal in `ea7a67d` was correct but **INCOMPLETE**: a live render on the RTX 4080 (VERIFY session) showed the preset still failed — `ffmpeg rc=-22`, `[AVFilterGraph] No option name near 'ih*1.5'`, filterchain parse error, no output. `ea7a67d` only peeled the outer shell-double-quote layer (changed the error from "No such filter" to a deeper filtergraph error); it did not make the preset renderable. The earlier "RESOLVED [ea7a67d] … Live render is MANUAL-VERIFIED" status was premature (render correctness had NOT actually been verified at that point).
-  - **Root cause 1 (parse):** `zoompan=…:s='iw*1.5:ih*1.5'` — zoompan's `s=` (output size) is parsed by `av_parse_video_size` and accepts only a literal `WxH`, never `iw`/`ih` expressions; additionally the `:` inside the single-quoted value is not honored, so the option string splits on it → "No option name near 'ih*1.5'".
-  - **Root cause 2 (runtime):** the `z`/`x`/`y` expressions use `mod(t,5)`, but **`t` is not a zoompan variable** — the timestamp variable in zoompan is `time`. With `t`, even after fixing `s=`, the filter fails at runtime (`Invalid argument` / "Nothing was written"). Verified by isolation: `…mod(time,5)…` renders, `…mod(t,5)…` fails.
-  - **Root cause 3 (A/V desync):** `zoompan` defaults to **25 fps**, so a 30 fps source rendered at 25 fps → video 7.2 s vs copied audio 6.0 s (1.2 s desync, ~20% slow-motion). Surfaced once the preset actually rendered.
-  - **Fix applied (3 edits + fps), headless render-validated:** `mod(t,5)` → `mod(time,5)` (×2 in `z`); `s='iw*1.5:ih*1.5'` → literal `s=576x1024` (matching sibling Zoom presets 1.1x/1.2x CRF); appended `:fps=30` to `zoompan` (restores 30 fps, video duration == audio duration, A/V delta 0.000s). `time` was verified on the bundled ffmpeg to drive the cycle correctly (zoom area ratios match z² within ~2%, transitions at 3s/4s; `it` lagged, `t` failed). Pre-scale `scale=iw*1.5:ih*1.5` kept (smoothness guard). `assets/Encoder.txt` L43 + regenerated `assets/Encoder.json`. Accepted trade-off: fixed 30 fps normalizes all outputs (a 60 fps source is halved; `zoompan` has no match-source-fps token).
-  - **Closed:** Adam's live RTX 4080 render (2026-05-24) confirmed the zoom looks right and the output (incl. copied audio) is valid. Resolved in `ccd6b36`.
-- **Priority:** MEDIUM (the preset fails to render — ffmpeg rejects the filtergraph).
-- **Locations:**
-  - `assets/Encoder.txt` L43 ("5s Cycle Zoom")
-  - `assets/Encoder.json` (generated from Encoder.txt; the same token is embedded in its `params` list)
-- **Context:** L43's command is `-vf "scale=iw*1.5:ih*1.5,zoompan=z='…':…:s='iw*1.5:ih*1.5'" -c:a copy …` — the whole `-vf` value is wrapped in shell-style **double** quotes. The app tokenizes via `code.split()` and invokes ffmpeg via `subprocess` **list** form (no shell), so the literal `"` characters are never stripped by a shell — they reach ffmpeg as part of the argv token. ffmpeg's filtergraph parser does not treat `"` as a quote char (it uses `'` and `\`), so it sees a filter named `"scale…` → "No such filter" → the preset fails. The inner single quotes (`zoompan=z='…'`) are correct ffmpeg quoting and must stay. (Broken by inspection; a live render would confirm the exact error.)
-- **Why #6 does NOT fix it:** #6 is a tokenizer change. Per the #6 investigation, neither `code.split()` nor `shlex.split(posix=False)` removes these outer double-quotes; `shlex.split(posix=True)` would remove them but regresses other presets by stripping ffmpeg's own single-quotes (e.g. the `enable='lt(mod(t,10),1)*gte(t,0)'` in "Cut & Overlay 1s per 10s"). The correct fix is a **content** fix, not a tokenizer fix.
-- **Resolution sketch:** In `assets/Encoder.txt` L43, drop only the outer double-quotes — `-vf "scale=…s='iw*1.5:ih*1.5'"` → `-vf scale=…s='iw*1.5:ih*1.5'` — keeping the inner zoompan single-quotes. Regenerate `assets/Encoder.json` via `tools/generate_encoder_json.py`. Verify with a live render that the filtergraph is accepted. The #6 tokenizer sweep found only L43 with this outer-double-quote pattern; re-confirm none others before/after.
-- **Trigger for pickup:** a user reports "5s Cycle Zoom" fails to render, OR Adam authorizes the content fix.
-
-## B-042: preset_loader tokenizer code.split() vs shlex (fix-pass item #6) — CLOSED (won't-fix)
-
-- **Status:** CLOSED — won't-fix (2026-05-24). No code change to `core/preset_loader.py`.
-- **Origin:** Phase-3 fix-pass item #6 ("preset_loader.py:161 uses `tuple(code.split())`, which breaks presets with quoted args; switch to `shlex.split`").
-- **Investigation (all 106 Encoder.txt presets tokenized both ways):**
-  - `code.split()` mis-splits a preset ONLY when a quoted value contains a literal space (e.g. `text='hello world'`). NO shipping preset has that, so `split()` mis-tokenizes nothing today — the bug is **latent**, not active.
-  - `shlex.split(code)` (posix=True) **strips** quote characters. ffmpeg filtergraph quoting (`enable='lt(mod(t,10),1)*gte(t,0)'`, `zoompan=z='…'`, drawtext `text='…'`) is parsed BY ffmpeg, so those quotes must remain in the argv token (the app invokes ffmpeg via `subprocess` list form — no shell strips them). posix=True would therefore **regress** such presets (e.g. "Cut & Overlay 1s per 10s": the commas in the `enable` expression get exposed → filtergraph breaks).
-  - `shlex.split(code, posix=False)` keeps quotes but only groups across spaces for token-**boundary** quotes (`'a b'`). ffmpeg presets use **embedded** quotes (`key='a b'`), for which posix=False tokenizes IDENTICALLY to `split()` — verified equal on all 106 presets and on the embedded-quote latent case. So posix=False is a **no-op**.
-- **Decision (rationale):** `code.split()` is the correct model for ffmpeg's quoting — the quote characters belong IN the argv token and ffmpeg parses them itself. `shlex` models SHELL quoting, the wrong layer: it either strips the quotes ffmpeg needs (posix=True regression) or does nothing useful (posix=False no-op). Switching is inappropriate. The latent "space inside a quoted value" risk is real but theoretical (no preset triggers it).
-- **Future work (out of scope):** if first-class arbitrary-quoted-arg support is ever needed, write an ffmpeg-**aware** tokenizer that splits on whitespace while respecting `'…'` and `\` escaping AND retains the quote characters. That is a new component with its own design + tests, not a one-line `code.split()` swap.
-- **Preset-authoring guideline (interim mitigation):** when authoring Encoder.txt preset commands, do NOT place a literal space inside a quoted ffmpeg value, and do NOT wrap a whole value in shell-style double-quotes (see B-041). Keep ffmpeg's own `'…'` quoting for expressions containing `:` or `,`.
-- **Surfaced/closed by:** Phase-3 fix-pass #6 investigation, 2026-05-24.
-
-## B-043: cycle presets (#5) "video loops, audio plays once" — CLOSED (won't-fix)
-
-- **Status:** CLOSED — won't-fix (2026-05-24). No code change.
-- **Origin:** Phase-3 fix-pass item #5 ("Cycle-loop presets: video loops 300x but audio plays once; add -stream_loop so audio matches").
-- **Affected presets (investigated):** `assets/Encoder.txt` L4–L10, group "🕹️ 1vmo Ultimate" — "Cycle Ns (a-b-c) Nx Zoom" and "… Flip + Zoom" (split=300 for the 100x variants, split=18 for the 6x).
-- **What they actually do (decoded):** each preset runs `[0:v]split=N`, trims N **sequential, non-overlapping windows of the SOURCE timeline** (6x example: trim 0:4, 4:7, 7:10, … 57:60 = 6×(4-3-3) = 60s), applies the zoom pattern per segment, and `concat=n=N:v=1[v]`. Audio is `-map 0:a -c:a copy` (the **full** source audio). So the presets **slice / re-zoom a ≥60s source** — they do NOT loop a short clip. Output video ≈ min(source, cycle_total); audio = full source.
-- **Why the backlog premise was wrong:** "video loops 300x / audio plays once" misread the filtergraph. Nothing loops — `split → trim → concat` is a pre-calculated reassembly of source segments. The audio is already full-length (`-map 0:a`), not truncated to one cycle. The only realistic mismatch is the **opposite** (audio overruns the capped video when source > cycle_total), not audio underrun.
-- **Why -stream_loop / aloop are inappropriate:** `-stream_loop` is an **input** option (must precede `-i`); a preset's code field only contributes post-`-i` params, so `-stream_loop` in a preset is a **no-op**. Placing it before `-i` (a code change) would loop **both** streams and double-loop the already-assembled video. An audio-side `aloop` would lengthen an audio track that is, if anything, already too long, and introduces audio seams. There is no clean filtergraph way to loop a short clip; the standard approach is a pre-calculated concat — which is exactly what `split=N` already encodes at authoring time.
-- **Decision:** the presets work as designed for their intended ≥60s footage. Close won't-fix.
-- **Future work (separate feature, NOT a preset edit):** if short-clip looping is ever wanted, it belongs in `auto_render.py` command construction — `-stream_loop <n>` before `-i` plus `-shortest` (or explicit duration math) to bound the output — as an opt-in feature with its own design, not in Encoder.txt.
-- **Surfaced/closed by:** Phase-3 fix-pass #5 discovery, 2026-05-24.
-
 ## B-044: Bundle Deno + yt-dlp-ejs for the frozen .exe build
 
 - **Status:** Open, deferred to the packaging phase. **Blocks the `.exe` release, NOT source-mode use** — source/dev runs resolve a system Deno via PATH (or degrade gracefully), so this is only required to make the frozen build self-contained.
@@ -472,7 +321,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - `.spec`: `collect_all('yt_dlp_ejs')` — without the EJS `.js` in `dist/`, YouTube fails in the `.exe` even with Deno present; verify the `.js` actually land in `dist/`.
   - Wire the Deno fetch to run **before** PyInstaller in the build pipeline.
   - **Verify by frozen-`.exe` YouTube extraction** — the only thing that proves the bundled `_MEIPASS` path works end-to-end (a source-mode pass does not).
-- **ADR:** an ADR documenting the bundle-a-JS-runtime decision is warranted (size cost, Deno pinning policy, why full `deno` over `denort`).
+- **ADR:** [ADR-0016](docs/decisions/ADR-0016-bundle-deno-js-runtime.md) records the bundle-a-JS-runtime decision (size cost, Deno pinning policy, why full `deno` over `denort`); the checklist above is that ADR's implementation checklist.
 - **Trigger for pickup:** the packaging / frozen-build phase, OR a teammate reports YouTube extraction failing in the `.exe`.
 - **Note — ffmpeg is the template, not new work.** ffmpeg is already bundled into the build (ADR-0013 D4 integrity check + `_resolve_bundled_ffmpeg_dir` in core/url_downloader.py). Deno bundling copies that exact pattern: same staging location, same `_MEIPASS` dest. At packaging time, ONE frozen-build verification confirms BOTH ship inside the `.exe` — a real YouTube extraction (proves Deno + yt_dlp_ejs) AND a real NVENC render (proves ffmpeg). Don't re-invent ffmpeg's bundling; mirror it.
 
@@ -499,3 +348,64 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **B-002** — ADR-0002 status/date mismatch. Resolved [df1125a] 2026-04-27 (canonical date: 2026-04-22).
 - **B-003** — ADR-0004 missing Date + Decision makers fields. Resolved [df1125a] 2026-04-27.
 - **B-005** — ruff debt in auto_render.py (E722 bare except + F841 unused current_output). BACKLOG entry stated "7 errors"; 4 were live at fix time (5 silently fixed in earlier 2c-c-* commits; 2 additional F841 unused `original_filename` errors at lines 1160 + 1219 surfaced post-audit and were also fixed as minimum-fix scope expansion to satisfy `ruff check` exit 0). Resolved [df1125a] 2026-04-27.
+- **B-029** — empty_videos_hint label promised drag-drop that didn't exist; added `setAcceptDrops` + drag/drop handlers (12-extension allowlist). Resolved in Phase 2d production-hardening (Issue 4).
+- **B-033** — Persistent local queue + resume-from-interrupted-render (`core/queue_models.py` + `core/queue_store.py`; 16 smoke cases). Resolved in Phase 3.1 (2026-05-22).
+- **B-034** — Local originality / quality scoring system (`core/scoring/`; VMAF / SSIM / PSNR / dHash). Resolved in Phase 3.2 (2026-05-22). See [ADR-0009](docs/decisions/ADR-0009-scoring-architecture.md).
+- **B-035** — Local optimization / recommendation layer (`core/optimization/`; advisory-only, Confirm-gated). Resolved in Phase 3.3 (2026-05-22). See [ADR-0010](docs/decisions/ADR-0010-render-optimization.md).
+- **B-036** — Local orchestration / performance layer (`core/orchestration/`; pause/resume, retry, diagnostics). Resolved in Phase 3.4 (2026-05-22). See [ADR-0011](docs/decisions/ADR-0011-orchestration.md).
+- **B-037** — Local encoder intelligence layer (`core/encoder_intel/`; pure-Python advisories). Resolved in Phase 3.5 (2026-05-22). See [ADR-0012](docs/decisions/ADR-0012-encoder-intelligence.md).
+- **B-038** — Production packaging + local release readiness (build scripts + integrity checker under `tools/build/`; partial — spec/updater hardening deferred). Resolved in Phase 3.6 (2026-05-22). See [ADR-0013](docs/decisions/ADR-0013-release-packaging.md).
+- **B-039** — Phase 3 closure + handoff readiness (verification-only milestone; `docs/PHASE_3_*` handoff set). Resolved in Phase 3.7 (2026-05-22). See [ADR-0014](docs/decisions/ADR-0014-phase-3-closure.md).
+
+### B-032: GPU semaphore acquire is unbounded under contention + cancel
+
+- **Status:** RESOLVED [b8f3cb1] 2026-05-24 — bounded cancellable acquire via module-level `_acquire_gpu_slot()` (tryAcquire+cancel-poll); `finally` releases only a held slot. Headless test `tests/smoke/test_gpu_semaphore_cancel.py`; live cancel-mid-NVENC is MANUAL-VERIFIED.
+- **Status (original):** Open, Low
+- **Priority:** Low (technical debt; bounded externally by Phase 2d Item 7 thread.wait(5000))
+- **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-6)
+- **Context:** `auto_render.py::RenderWorker.process` acquires `self.gpu_semaphore` at L359 with bare `acquire()` (no timeout). If two workers contend for a `gpu_max_concurrent=1` semaphore and the holder is hung waiting on ffmpeg, the second waiter blocks. Cancel sets `is_cancelled=True` on both workers, but the second one is inside the blocking `acquire()` call and cannot poll the cancel flag until the holder finally releases. The 5s `thread.wait(5000)` cap in `cancel_render` (Phase 2d Item 7) prevents UI-thread freeze; worst case is a brief zombie worker that exits after the holder eventually releases.
+- **Implication:** UI never freezes (existing Item 7 cap). The semaphore-blocked worker can outlive its parent thread by seconds in rare contention + cancel scenarios. Not observed in practice with the default `gpu_max_concurrent=2`.
+- **Fix sketch:** Replace `acquire()` with a `tryAcquire(timeout_ms)` polling loop that also checks `self.is_cancelled` between attempts. ~10 lines + a smoke test for the cancel-during-acquire path.
+- **Trigger for pickup:** A user report of a stuck worker on cancel, or a deliberate teardown of low-`gpu_max_concurrent` configurations.
+
+### B-041: "5s Cycle Zoom" preset has stray shell double-quotes that reach ffmpeg literally
+
+- **Status:** **RESOLVED [ccd6b36]** 2026-05-24 — live RTX 4080 render verified (zoom cycles correctly: 3s normal → 1s 1.25× → 1s 1.5×, centered; audio/output valid, A/V in sync). The double-quote removal in `ea7a67d` was correct but **INCOMPLETE**: a live render on the RTX 4080 (VERIFY session) showed the preset still failed — `ffmpeg rc=-22`, `[AVFilterGraph] No option name near 'ih*1.5'`, filterchain parse error, no output. `ea7a67d` only peeled the outer shell-double-quote layer (changed the error from "No such filter" to a deeper filtergraph error); it did not make the preset renderable. The earlier "RESOLVED [ea7a67d] … Live render is MANUAL-VERIFIED" status was premature (render correctness had NOT actually been verified at that point).
+  - **Root cause 1 (parse):** `zoompan=…:s='iw*1.5:ih*1.5'` — zoompan's `s=` (output size) is parsed by `av_parse_video_size` and accepts only a literal `WxH`, never `iw`/`ih` expressions; additionally the `:` inside the single-quoted value is not honored, so the option string splits on it → "No option name near 'ih*1.5'".
+  - **Root cause 2 (runtime):** the `z`/`x`/`y` expressions use `mod(t,5)`, but **`t` is not a zoompan variable** — the timestamp variable in zoompan is `time`. With `t`, even after fixing `s=`, the filter fails at runtime (`Invalid argument` / "Nothing was written"). Verified by isolation: `…mod(time,5)…` renders, `…mod(t,5)…` fails.
+  - **Root cause 3 (A/V desync):** `zoompan` defaults to **25 fps**, so a 30 fps source rendered at 25 fps → video 7.2 s vs copied audio 6.0 s (1.2 s desync, ~20% slow-motion). Surfaced once the preset actually rendered.
+  - **Fix applied (3 edits + fps), headless render-validated:** `mod(t,5)` → `mod(time,5)` (×2 in `z`); `s='iw*1.5:ih*1.5'` → literal `s=576x1024` (matching sibling Zoom presets 1.1x/1.2x CRF); appended `:fps=30` to `zoompan` (restores 30 fps, video duration == audio duration, A/V delta 0.000s). `time` was verified on the bundled ffmpeg to drive the cycle correctly (zoom area ratios match z² within ~2%, transitions at 3s/4s; `it` lagged, `t` failed). Pre-scale `scale=iw*1.5:ih*1.5` kept (smoothness guard). `assets/Encoder.txt` L43 + regenerated `assets/Encoder.json`. Accepted trade-off: fixed 30 fps normalizes all outputs (a 60 fps source is halved; `zoompan` has no match-source-fps token).
+  - **Closed:** Adam's live RTX 4080 render (2026-05-24) confirmed the zoom looks right and the output (incl. copied audio) is valid. Resolved in `ccd6b36`.
+- **Priority:** MEDIUM (the preset fails to render — ffmpeg rejects the filtergraph).
+- **Locations:**
+  - `assets/Encoder.txt` L43 ("5s Cycle Zoom")
+  - `assets/Encoder.json` (generated from Encoder.txt; the same token is embedded in its `params` list)
+- **Context:** L43's command is `-vf "scale=iw*1.5:ih*1.5,zoompan=z='…':…:s='iw*1.5:ih*1.5'" -c:a copy …` — the whole `-vf` value is wrapped in shell-style **double** quotes. The app tokenizes via `code.split()` and invokes ffmpeg via `subprocess` **list** form (no shell), so the literal `"` characters are never stripped by a shell — they reach ffmpeg as part of the argv token. ffmpeg's filtergraph parser does not treat `"` as a quote char (it uses `'` and `\`), so it sees a filter named `"scale…` → "No such filter" → the preset fails. The inner single quotes (`zoompan=z='…'`) are correct ffmpeg quoting and must stay. (Broken by inspection; a live render would confirm the exact error.)
+- **Why #6 does NOT fix it:** #6 is a tokenizer change. Per the #6 investigation, neither `code.split()` nor `shlex.split(posix=False)` removes these outer double-quotes; `shlex.split(posix=True)` would remove them but regresses other presets by stripping ffmpeg's own single-quotes (e.g. the `enable='lt(mod(t,10),1)*gte(t,0)'` in "Cut & Overlay 1s per 10s"). The correct fix is a **content** fix, not a tokenizer fix.
+- **Resolution sketch:** In `assets/Encoder.txt` L43, drop only the outer double-quotes — `-vf "scale=…s='iw*1.5:ih*1.5'"` → `-vf scale=…s='iw*1.5:ih*1.5'` — keeping the inner zoompan single-quotes. Regenerate `assets/Encoder.json` via `tools/generate_encoder_json.py`. Verify with a live render that the filtergraph is accepted. The #6 tokenizer sweep found only L43 with this outer-double-quote pattern; re-confirm none others before/after.
+- **Trigger for pickup:** a user reports "5s Cycle Zoom" fails to render, OR Adam authorizes the content fix.
+
+### B-042: preset_loader tokenizer code.split() vs shlex (fix-pass item #6) — CLOSED (won't-fix)
+
+- **Status:** CLOSED — won't-fix (2026-05-24). No code change to `core/preset_loader.py`.
+- **Origin:** Phase-3 fix-pass item #6 ("preset_loader.py:161 uses `tuple(code.split())`, which breaks presets with quoted args; switch to `shlex.split`").
+- **Investigation (all 106 Encoder.txt presets tokenized both ways):**
+  - `code.split()` mis-splits a preset ONLY when a quoted value contains a literal space (e.g. `text='hello world'`). NO shipping preset has that, so `split()` mis-tokenizes nothing today — the bug is **latent**, not active.
+  - `shlex.split(code)` (posix=True) **strips** quote characters. ffmpeg filtergraph quoting (`enable='lt(mod(t,10),1)*gte(t,0)'`, `zoompan=z='…'`, drawtext `text='…'`) is parsed BY ffmpeg, so those quotes must remain in the argv token (the app invokes ffmpeg via `subprocess` list form — no shell strips them). posix=True would therefore **regress** such presets (e.g. "Cut & Overlay 1s per 10s": the commas in the `enable` expression get exposed → filtergraph breaks).
+  - `shlex.split(code, posix=False)` keeps quotes but only groups across spaces for token-**boundary** quotes (`'a b'`). ffmpeg presets use **embedded** quotes (`key='a b'`), for which posix=False tokenizes IDENTICALLY to `split()` — verified equal on all 106 presets and on the embedded-quote latent case. So posix=False is a **no-op**.
+- **Decision (rationale):** `code.split()` is the correct model for ffmpeg's quoting — the quote characters belong IN the argv token and ffmpeg parses them itself. `shlex` models SHELL quoting, the wrong layer: it either strips the quotes ffmpeg needs (posix=True regression) or does nothing useful (posix=False no-op). Switching is inappropriate. The latent "space inside a quoted value" risk is real but theoretical (no preset triggers it).
+- **Future work (out of scope):** if first-class arbitrary-quoted-arg support is ever needed, write an ffmpeg-**aware** tokenizer that splits on whitespace while respecting `'…'` and `\` escaping AND retains the quote characters. That is a new component with its own design + tests, not a one-line `code.split()` swap.
+- **Preset-authoring guideline (interim mitigation):** when authoring Encoder.txt preset commands, do NOT place a literal space inside a quoted ffmpeg value, and do NOT wrap a whole value in shell-style double-quotes (see B-041). Keep ffmpeg's own `'…'` quoting for expressions containing `:` or `,`.
+- **Surfaced/closed by:** Phase-3 fix-pass #6 investigation, 2026-05-24.
+
+### B-043: cycle presets (#5) "video loops, audio plays once" — CLOSED (won't-fix)
+
+- **Status:** CLOSED — won't-fix (2026-05-24). No code change.
+- **Origin:** Phase-3 fix-pass item #5 ("Cycle-loop presets: video loops 300x but audio plays once; add -stream_loop so audio matches").
+- **Affected presets (investigated):** `assets/Encoder.txt` L4–L10, group "🕹️ 1vmo Ultimate" — "Cycle Ns (a-b-c) Nx Zoom" and "… Flip + Zoom" (split=300 for the 100x variants, split=18 for the 6x).
+- **What they actually do (decoded):** each preset runs `[0:v]split=N`, trims N **sequential, non-overlapping windows of the SOURCE timeline** (6x example: trim 0:4, 4:7, 7:10, … 57:60 = 6×(4-3-3) = 60s), applies the zoom pattern per segment, and `concat=n=N:v=1[v]`. Audio is `-map 0:a -c:a copy` (the **full** source audio). So the presets **slice / re-zoom a ≥60s source** — they do NOT loop a short clip. Output video ≈ min(source, cycle_total); audio = full source.
+- **Why the backlog premise was wrong:** "video loops 300x / audio plays once" misread the filtergraph. Nothing loops — `split → trim → concat` is a pre-calculated reassembly of source segments. The audio is already full-length (`-map 0:a`), not truncated to one cycle. The only realistic mismatch is the **opposite** (audio overruns the capped video when source > cycle_total), not audio underrun.
+- **Why -stream_loop / aloop are inappropriate:** `-stream_loop` is an **input** option (must precede `-i`); a preset's code field only contributes post-`-i` params, so `-stream_loop` in a preset is a **no-op**. Placing it before `-i` (a code change) would loop **both** streams and double-loop the already-assembled video. An audio-side `aloop` would lengthen an audio track that is, if anything, already too long, and introduces audio seams. There is no clean filtergraph way to loop a short clip; the standard approach is a pre-calculated concat — which is exactly what `split=N` already encodes at authoring time.
+- **Decision:** the presets work as designed for their intended ≥60s footage. Close won't-fix.
+- **Future work (separate feature, NOT a preset edit):** if short-clip looping is ever wanted, it belongs in `auto_render.py` command construction — `-stream_loop <n>` before `-i` plus `-shortest` (or explicit duration math) to bound the output — as an opt-in feature with its own design, not in Encoder.txt.
+- **Surfaced/closed by:** Phase-3 fix-pass #5 discovery, 2026-05-24.
