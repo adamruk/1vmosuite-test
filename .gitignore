@@ -32,10 +32,13 @@ ffmpeg/*.dll
 !tests/smoke-*.log
 
 # Runtime config files (written by apps on every close)
+# Filenames match each app's CONFIG_FILE: auto_render -> renderer, cutter,
+# merge, mixer. (mixer.py:305 writes config_video_mixer.json; the old
+# config_video_merger.json was never written by any app and is dropped.)
 config_video_renderer.json
 config_video_cutter.json
 config_video_merge.json
-config_video_merger.json
+config_video_mixer.json
 config_video_*.json.bak
 
 # Claude Code local prefs (personal, not project)
