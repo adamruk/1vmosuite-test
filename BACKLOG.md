@@ -459,6 +459,35 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Future work (separate feature, NOT a preset edit):** if short-clip looping is ever wanted, it belongs in `auto_render.py` command construction — `-stream_loop <n>` before `-i` plus `-shortest` (or explicit duration math) to bound the output — as an opt-in feature with its own design, not in Encoder.txt.
 - **Surfaced/closed by:** Phase-3 fix-pass #5 discovery, 2026-05-24.
 
+## B-044: Bundle Deno + yt-dlp-ejs for the frozen .exe build
+
+- **Status:** Open, deferred to the packaging phase. **Blocks the `.exe` release, NOT source-mode use** — source/dev runs resolve a system Deno via PATH (or degrade gracefully), so this is only required to make the frozen build self-contained.
+- **Priority:** MEDIUM (YouTube extraction fails in the frozen `.exe` without it; no impact on source-mode runs or non-YouTube sites).
+- **Surfaced:** Phase A url_downloader hardening, C4 (`_resolve_bundled_js_runtime`), merged in [124ea1d] (2026-05-24).
+- **Depends on:** C4 resolver `_resolve_bundled_js_runtime` in `core/url_downloader.py` (mirrors `_resolve_bundled_ffmpeg_dir`: checks `sys._MEIPASS` then repo root for `deno(.exe)`, prepends its dir to PATH at import). The resolver is already merged; this item is the build-side work that puts a Deno binary + the EJS scripts where the resolver and yt-dlp can find them in a frozen bundle.
+- **Context:** Modern yt-dlp needs a JavaScript runtime (Deno) to solve the JS "n-sig"/PO-token challenges YouTube now requires; the C4 resolver finds a bundled Deno at runtime but nothing yet bundles one for the frozen build. Without BOTH the Deno binary AND the `yt_dlp_ejs` challenge scripts present in `dist/`, YouTube downloads degrade or fail in the `.exe` even when Deno is present.
+- **Checklist:**
+  - Pinned Deno fetch-at-build: pull a pinned Deno 2.x — the **full `deno`**, NOT `denort`; gitignore the ~40MB+ binary; stage it the same way the bundled ffmpeg is staged.
+  - `.spec`: add `deno.exe` to `binaries=` at the **same `_MEIPASS` destination as ffmpeg** so the resolver's `_MEIPASS` lookup finds it.
+  - `.spec`: `collect_all('yt_dlp_ejs')` — without the EJS `.js` in `dist/`, YouTube fails in the `.exe` even with Deno present; verify the `.js` actually land in `dist/`.
+  - Wire the Deno fetch to run **before** PyInstaller in the build pipeline.
+  - **Verify by frozen-`.exe` YouTube extraction** — the only thing that proves the bundled `_MEIPASS` path works end-to-end (a source-mode pass does not).
+- **ADR:** an ADR documenting the bundle-a-JS-runtime decision is warranted (size cost, Deno pinning policy, why full `deno` over `denort`).
+- **Trigger for pickup:** the packaging / frozen-build phase, OR a teammate reports YouTube extraction failing in the `.exe`.
+
+## B-045: curl-cffi needed for TikTok impersonation in online tests
+
+- **Status:** Open, environmental — NOT a code defect in C1–C8 or the C4 Deno work.
+- **Priority:** LOW (affects only the online TikTok test legs in environments without `curl-cffi`; shipped per-URL download behavior is unaffected — a missing impersonation target surfaces as a normal failed `DownloadResult`, not a crash).
+- **Surfaced:** Phase A online tests, [124ea1d] (2026-05-24).
+- **Locations:**
+  - `tests/smoke/test_url_downloader.py` — `test_tiktok_downloads_watermark_free`, and the TikTok leg of `test_mixed_batch_returns_correct_per_url_outcomes`.
+- **Context:** Both TikTok online tests fail with yt-dlp "attempting impersonation, but no impersonate target available" — yt-dlp's TikTok extractor needs `curl-cffi` to impersonate a browser TLS fingerprint. This is an environment/dependency gap, unrelated to the C1–C8 hardening or C4 Deno bundling.
+- **Resolution (pick one):**
+  - Add `curl-cffi` to `requirements.txt` (provides the impersonation target the TikTok extractor wants), OR
+  - Mark those two test legs as requiring impersonation deps (skip/xfail when `curl-cffi` is absent) so the suite is honest about the prerequisite.
+- **Trigger for pickup:** when TikTok online coverage needs to pass in CI / a fresh env, OR alongside the next `requirements.txt` dependency review.
+
 ## Resolved
 
 - **B-015** — translate_to_nvenc codec routing: codified single-knob routing (user's gpu_codec wins over per-preset map) and removed the dead `mapped` variable; corrected the `_CODEC_MAP` "per ADR-0007 D4" mis-citation (D4 is the codec dropdown, not routing). Resolved [c051473], documented in [ADR-0015](docs/decisions/ADR-0015-nvenc-codec-routing.md). 2026-05-24.
