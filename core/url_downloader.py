@@ -248,6 +248,10 @@ def _categorize_error(exc: BaseException) -> str:
         or "private video" in msg
         or "this video is private" in msg
         or ("cookies" in msg and "auth" in msg)
+        or "join this channel" in msg
+        or "members-only" in msg
+        or "members only" in msg
+        or "available to this channel's members" in msg
     ):
         return "auth_required"
     if (
@@ -255,6 +259,8 @@ def _categorize_error(exc: BaseException) -> str:
         or "geo restrict" in msg
         or ("geo" in msg and "block" in msg)
         or ("region" in msg and "restrict" in msg)
+        or "blocked it in your country" in msg
+        or ("blocked" in msg and "country" in msg)
     ):
         return "region_locked"
     if (

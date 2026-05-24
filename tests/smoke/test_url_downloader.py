@@ -186,6 +186,28 @@ def test_valid_cookies_file_passes_validation(tmp_path: Path) -> None:
     assert results[0].error_type == "invalid_url"
 
 
+def test_categorize_members_only_is_auth_required() -> None:
+    assert _categorize_error(Exception("Join this channel to get access")) == (
+        "auth_required"
+    )
+    assert (
+        _categorize_error(
+            Exception("This video is available to this channel's members")
+        )
+        == "auth_required"
+    )
+
+
+def test_categorize_country_block_is_region_locked() -> None:
+    assert (
+        _categorize_error(Exception("The uploader has blocked it in your country"))
+        == "region_locked"
+    )
+    assert _categorize_error(Exception("This content is blocked in your country")) == (
+        "region_locked"
+    )
+
+
 def test_categorize_importerror_is_dependency_missing() -> None:
     assert _categorize_error(ImportError("No module named 'yt_dlp'")) == (
         "dependency_missing"
