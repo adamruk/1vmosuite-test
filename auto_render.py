@@ -230,6 +230,42 @@ def _acquire_gpu_slot(semaphore, should_cancel, poll_ms: int = 100) -> bool:
     return False
 
 
+def _split_group_name(full_name: str) -> tuple[str, str]:
+    """Split an EncoderDialog "Group|Name" field into ``(group, name)``.
+
+    B-020: ``.strip()`` each half so that input like ``"Test | My Preset"``
+    yields ``("Test", "My Preset")`` rather than ``("Test ", " My Preset")``.
+    Group lookups elsewhere use exact string match and silently miss on
+    whitespace adjacent to the pipe. With no pipe, group is ``""`` and the
+    full name (already stripped by ``EncoderDialog.accept``) is returned
+    unchanged. Used by both the Add/Clone helper and the Edit handler.
+    """
+    parts = full_name.split("|", 1)
+    if len(parts) > 1:
+        return parts[0].strip(), parts[1].strip()
+    return "", full_name
+
+
+def _allocate_user_preset_id(name: str, existing_user_ids) -> str:
+    """Derive a collision-free ``user:<slug>`` id for a new user preset.
+
+    Mirrors the 2c-c-4 disambiguation used by Add (B-018 shares it with
+    Clone): the ADR-0006 slug of ``name``, prefixed ``user:`` (the flat
+    user namespace — never group-prefixed), with a ``-N`` suffix (N starts
+    at 2) appended only when the bare id already exists in
+    ``existing_user_ids``. ``existing_user_ids`` is any container
+    supporting ``in`` (typically a set of the current ``user:`` ids).
+    """
+    base_slug = derive_slug(name) or "preset"
+    base_id = f"user:{base_slug}"
+    if base_id not in existing_user_ids:
+        return base_id
+    n = 2
+    while f"{base_id}-{n}" in existing_user_ids:
+        n += 1
+    return f"{base_id}-{n}"
+
+
 class RenderWorker(QObject):
     progress_updated = Signal(int, int)
     status_updated = Signal(int, str)
@@ -1024,7 +1060,6 @@ class VideoRendererTool(QMainWindow):
         self.encoder_options = []
         self.selected_encoders = []
         self.encoder_params = {}
-        self.output_mapping = {}
         self.is_rendering = False
         self.num_threads = 3
         self.sequential_mode = False
@@ -1368,6 +1403,15 @@ class VideoRendererTool(QMainWindow):
         self.btn_delete_encoder.setToolTip(
             "Delete the selected preset (built-in presets are read-only)"
         )
+        # B-018: Clone is the supported way to start customizing a built-in
+        # (read-only) preset. Always enabled — _update_encoder_buttons_enabled
+        # only toggles Edit/Delete, so Clone stays clickable for built-ins.
+        self.btn_clone_encoder = self.create_video_button(
+            "📄 Clone", self.clone_encoder, "#ede7f6", "#5e35b1", "#d1c4e9"
+        )
+        self.btn_clone_encoder.setToolTip(
+            "Copy the selected preset into a new, editable user preset"
+        )
         update_btn = self.create_video_button(
             "🔄 Refresh", self.reload_all, "#e8f5e9", "#2e7d32", "#c8e6c9"
         )
@@ -1381,6 +1425,7 @@ class VideoRendererTool(QMainWindow):
         encoder_controls.addWidget(self.btn_add_encoder)
         encoder_controls.addWidget(self.btn_edit_encoder)
         encoder_controls.addWidget(self.btn_delete_encoder)
+        encoder_controls.addWidget(self.btn_clone_encoder)
         encoder_controls.addWidget(update_btn)
         encoder_controls.addStretch()
         encoder_controls.addWidget(QLabel("Filter"))
@@ -2668,7 +2713,6 @@ class VideoRendererTool(QMainWindow):
             )
             self.current_label.setText("Currently Rendering: None")
             self.tree_output.clear()
-            self.output_mapping.clear()
             self.clear_progress_boxes()
 
             # Reset every worker label back to Ready before a new batch begins.
@@ -2763,10 +2807,18 @@ class VideoRendererTool(QMainWindow):
                 # complete (success or with failures) and must no longer
                 # appear in the resume prompt at next launch.
                 self._clear_queue_snapshot()
+                # B-019: this terminal-cleanup branch also runs when the
+                # final task failed (on_render_error -> _start_next_task ->
+                # cleanup), so a success-toned "Completed processing N
+                # video(s)!" / "Success" fired even on an all-fail batch with
+                # every progress box red. Neutral wording is accurate in all
+                # cases; per-task outcomes are already shown in the status
+                # column. (on_render_completed keeps its success wording for
+                # the genuinely-successful terminal path.)
                 QMessageBox.information(
                     self,
-                    "Success",
-                    f"Completed processing {self.total_tasks} video(s)!",
+                    "Batch Finished",
+                    "Batch finished — see status column for results.",
                 )
                 self.save_config()
                 return None
@@ -2809,9 +2861,6 @@ class VideoRendererTool(QMainWindow):
                     item.setText(3, "Loading...")
                     item.setText(4, "Loading...")
                     item.setText(5, "🟡 Processing")
-                    self.output_mapping[
-                        f"Processing - {os.path.basename(video_path)}"
-                    ] = item
                     encoder_params_list = []
                     for encoder_id in encoder_ids:
                         if not encoder_id:
@@ -3551,40 +3600,72 @@ class VideoRendererTool(QMainWindow):
         """Thêm encoder mới"""
         dialog = EncoderDialog(self)
         if dialog.exec() == QDialog.Accepted and dialog.result:
-            item = QTreeWidgetItem(self.tree_encoders)
-            item.setText(0, str(len(self.encoder_options) + 1))
-            name_parts = dialog.result["name"].split("|", 1)
-            group = name_parts[0] if len(name_parts) > 1 else ""
-            name = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
-            # 2c-c-4: derive user-namespace id with disambiguation suffix
-            base_slug = derive_slug(name) or "preset"
-            base_id = f"user:{base_slug}"
-            existing_user_ids = {
-                p.id for p in self.encoder_options if p.id.startswith("user:")
-            }
-            if base_id in existing_user_ids:
-                n = 2
-                while f"{base_id}-{n}" in existing_user_ids:
-                    n += 1
-                preset_id = f"{base_id}-{n}"
-            else:
-                preset_id = base_id
-            item.setText(1, group)
-            item.setText(2, name)
-            item.setText(3, dialog.result["description"])
-            item.setData(0, Qt.UserRole, " ".join(dialog.result["params"]))
-            item.setData(0, Qt.UserRole + 1, preset_id)
-            self.encoder_options.append(
-                core_preset_loader.Preset(
-                    id=preset_id,
-                    group=group,
-                    name=name,
-                    description=dialog.result["description"],
-                    details=dialog.result.get("details", ""),
-                    params=tuple(dialog.result["params"]),
-                )
+            self._create_user_preset_from_result(dialog.result)
+
+    def clone_encoder(self) -> None:
+        """B-018: clone the selected preset into an editable user copy.
+
+        Built-in presets are read-only (ADR-0006), so on a fresh install
+        every preset's Edit/Delete is disabled and there is no in-app way
+        to start customizing. Clone is that path: it seeds an EncoderDialog
+        with the selected preset's group / name / params / description, and
+        on OK creates a NEW preset with a ``user:<slug>`` id (the flat user
+        namespace), which lands where Edit/Delete are enabled. The source
+        preset is never modified. The button is always enabled and works on
+        both built-in and user presets (cloning a user preset is a plain
+        copy). Does not weaken the built-in read-only guard.
+        """
+        selection = self.tree_encoders.selectedItems()
+        if not selection:
+            QMessageBox.warning(self, "Warning", "Please select a preset to clone")
+            return
+        item = selection[0]
+        group = item.text(1)
+        name = item.text(2)
+        description = item.text(3)
+        params = (item.data(0, Qt.UserRole) or "").split()
+        initial_values = {
+            "name": f"{group}|{name}" if group else name,
+            "description": description,
+            "params": params,
+        }
+        dialog = EncoderDialog(self, "Clone Preset", initial_values)
+        if dialog.exec() == QDialog.Accepted and dialog.result:
+            self._create_user_preset_from_result(dialog.result)
+
+    def _create_user_preset_from_result(self, result) -> None:
+        """Append a user-namespace preset built from an EncoderDialog result.
+
+        Shared by Add and Clone (B-018). Splits the dialog's "Group|Name"
+        field, derives a collision-free ``user:<slug>`` id via
+        ``_allocate_user_preset_id``, adds the tree row, registers the
+        Preset, and persists. Built-in presets are never produced here —
+        every id minted is in the editable user namespace.
+        """
+        item = QTreeWidgetItem(self.tree_encoders)
+        item.setText(0, str(len(self.encoder_options) + 1))
+        group, name = _split_group_name(result["name"])  # B-020
+        # 2c-c-4: derive user-namespace id with disambiguation suffix.
+        existing_user_ids = {
+            p.id for p in self.encoder_options if p.id.startswith("user:")
+        }
+        preset_id = _allocate_user_preset_id(name, existing_user_ids)
+        item.setText(1, group)
+        item.setText(2, name)
+        item.setText(3, result["description"])
+        item.setData(0, Qt.UserRole, " ".join(result["params"]))
+        item.setData(0, Qt.UserRole + 1, preset_id)
+        self.encoder_options.append(
+            core_preset_loader.Preset(
+                id=preset_id,
+                group=group,
+                name=name,
+                description=result["description"],
+                details=result.get("details", ""),
+                params=tuple(result["params"]),
             )
-            self.save_encoder_changes()
+        )
+        self.save_encoder_changes()
 
     def edit_encoder(self) -> None:
         """Chỉnh sửa encoder đã chọn
@@ -3623,9 +3704,7 @@ class VideoRendererTool(QMainWindow):
         }
         dialog = EncoderDialog(self, "Edit Encoder", initial_values)
         if dialog.exec() == QDialog.Accepted and dialog.result:
-            name_parts = dialog.result["name"].split("|", 1)
-            group = name_parts[0] if len(name_parts) > 1 else ""
-            name = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
+            group, name = _split_group_name(dialog.result["name"])  # B-020
             item.setText(1, group)
             item.setText(2, name)
             item.setText(3, dialog.result["description"])
@@ -3749,7 +3828,6 @@ class VideoRendererTool(QMainWindow):
         try:
             self.tree_output.clear()
             self.output_text.clear()
-            self.output_mapping.clear()
             self.encoder_options = self.load_encoder_options()
             self.load_encoders_to_tree()
             if self.videos:
@@ -4457,9 +4535,10 @@ class VideoRendererTool(QMainWindow):
 
         def _row_ref_distorted(it) -> tuple:
             # We stored the (input video_path, output basename) inside
-            # the row via column text 1 / 2. But filenames may have
-            # been mangled by clip_to_limit; the safer source is the
-            # mapping kept in output_mapping. Fall back to tree text.
+            # the row via column text 1 / 2. Re-derive the reference
+            # input from self.videos by basename match (filenames may
+            # have been mangled by clip_to_limit) and fall back to
+            # (None, None) when the row has no usable text.
             try:
                 in_name = it.text(1)
                 out_name = it.text(2)

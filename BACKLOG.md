@@ -26,80 +26,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ---
 
-## B-014: _reload_config_settings refreshes only 2 of ~10 Settings keys
-
-- **Status:** Open — partial fix landed in commit `ffcf529` (Phase 1; the 5 GPU Pipeline keys are now rewired). The remaining ~3 keys (`num_threads`, `show_ffmpeg_command`, `open_output_when_done`) are still not re-read by `_reload_config_settings`.
-- **Priority:** HIGH (functional gap surfaces if user changes GPU keys live)
-- **Surfaced:** v2.5.1 PARALLEL audit on origin/main (2026-04-28)
-- **Context:** auto_render.py `_reload_config_settings` (called after Settings dialog OK) historically only re-read `output_collision` + `gpu_error_action`. Stale comment said "Other Settings keys (use_gpu, nvenc_quality_offset, show_ffmpeg_command, open_output_when_done) reserved for Step 4c+ when GPU pipeline lands" — but Step 4c-4d-ii had shipped (GPU pipeline wired per CHANGELOG `[442d2eb]`). The comment never caught up.
-- **Implication (original):** User toggles `gpu_enabled` in Settings → clicks OK → Settings dialog persists to disk → `_reload_config_settings` runs but does NOT update `self.gpu_enabled` → next render uses OLD (app-startup) value. Settings change for GPU/num_threads/output_dir keys requires app restart to take effect. PORT_NOTES line 99-101 says `_reload_config_settings` should "apply output dir, GPU toggle (gated by capability), all five runtime keys" — current impl honors 2 of those.
-- **Resolution (post-partial-fix):** The 5 GPU Pipeline keys (`gpu_enabled`, `gpu_codec`, `gpu_preset`, `gpu_max_quality_mode`, `gpu_max_concurrent`) are now wired through `core.config.APP_DEFAULTS` and re-applied on Settings OK; `_gpu_semaphore` is rebuilt when `gpu_max_concurrent` changes. The remaining functional gap covers `num_threads` + `show_ffmpeg_command` + `open_output_when_done` — still requires an app restart to take effect. Extend `_reload_config_settings` for these three keys to fully close B-014.
-- **Trigger for pickup:** user reports any of the remaining 3 keys "not taking effect" without an app restart, OR Phase 2.5 touches Settings dialog code path again.
-- **Partial cleanup (2026-04-29, v2.5.3):** The stale `nvenc_quality_offset` reference in the `_reload_config_settings` comment block (`auto_render.py` L885) was removed.
-- **Partial fix (2026-05-11, Phase 1 / `ffcf529`):** The 5 GPU Pipeline keys (`gpu_enabled`, `gpu_codec`, `gpu_preset`, `gpu_max_quality_mode`, `gpu_max_concurrent`) are now refreshed on Settings dialog OK without an app restart, sourced from `core.config.APP_DEFAULTS` for default values. `QSemaphore` is rebuilt only when `gpu_max_concurrent` actually changes; in-flight workers retain their existing semaphore reference. Pre-existing wiring for `output_collision` / `gpu_error_action` preserved. B-014 stays Open for the remaining 3 keys above.
-
-## B-016: anchor #8 missing thread_bars[idx].setValue(0)
-
-- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; cosmetic)
-- **Priority:** LOW (cosmetic flicker for ~100ms across batch boundary)
-- **Surfaced:** v2.5.1 PARALLEL audit (2026-04-28)
-- **Context:** anchor #8 (commit 701bf53) resets `_worker_state[idx]['percent']=0` in start_render but does NOT reset the visible QProgressBar via `self.thread_bars[idx].setValue(0)`. cancel_render does both; start_render does only the data side.
-- **Implication:** Starting batch 2 in same session → labels reset to "Ready" (good) but QProgressBar visual stays at batch 1's final percent (often 100%) for ~100ms until the first new progress event. Cosmetic flicker only.
-- **Resolution:** Add `self.thread_bars[idx].setValue(0)` inside the anchor #8 loop in start_render. Symmetry with cancel_render. ~1 LoC change.
-- **Trigger for pickup:** Phase 2d touches the worker UI OR opportunistic during any future `start_render` edit.
-
-## B-018: Edit/Delete buttons grayed for ALL presets in fresh install (UX gap, not a bug)
-
-- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; UX polish)
-- **Priority:** MEDIUM (user-facing confusion — looks broken)
-- **Surfaced:** v2.5.1 user smoke test + PARALLEL audit (2026-04-28)
-- **Context:** Per ADR-0006, built-in presets (id starts with "builtin:") are intentionally non-editable to prevent the silent-data-loss class fixed in 2c-c-4. Implementation conforms exactly to ADR-0006 spec: button-disable wired via tree_encoders.itemSelectionChanged at L553-554 + model-layer guard in edit_encoder L1838 + delete_encoder L1883 + italic visual cue at L1765-1768.
-- **The bootstrap problem:** ALL 111 presets shipped in fresh install are built-in (109 from Encoder.txt + 2 hardcoded Text defaults). User-namespace empty until user explicitly clicks Add. So 100% of selections trigger the disable logic. From user POV: "Edit/Delete don't work on any preset, must be broken." From codebase POV: documented invariant working correctly.
-- **Why italic isn't enough:** italic styling on column 2 only registers as "different" if there's a non-italic reference for comparison. Fresh install has zero non-italic presets. ADR-0006 acknowledged italic as "visible read-only" but didn't anticipate the bootstrap problem.
-- **Tooltip lies:** Edit/Delete tooltips say "Edit the selected preset" / "Delete the selected preset" but the button is disabled — misleading.
-- **No clone path:** zero matches for clone/duplicate/copy.preset/save_as/new.from in auto_render.py. User cannot start customizing without Add-from-scratch + manual re-typing of name + params + description.
-- **Resolution options (ranked by UX value, all LOW risk additive — none break ADR-0006):**
-  - Option 1 (~4 LoC): tooltip enrichment — append "(built-in presets are read-only)" to Edit/Delete button tooltips at L512+L521 OR install dynamic tooltip swap inside `_update_encoder_buttons_enabled`.
-  - Option 2 (~30 LoC): Add "Clone" button next to Edit/Delete. When built-in selected, Clone copies preset with id="user:<slug>" and opens EncoderDialog for renaming. Solves bootstrap problem.
-  - Option 3 (~5 LoC): visual cue strengthening — 🔒 prefix or gray text color in addition to italic.
-  - Option 4 (~40 LoC): Combined — tooltip + Clone. Resolves both "why disabled?" (tooltip) and "what do I do instead?" (Clone) at once.
-- **PARALLEL recommendation:** Option 1 first (cheap, immediately resolves "is this broken?" confusion). Option 4 is the long-term answer if user-customization is to be a first-class feature.
-- **Trigger for pickup:** post-tag UX polish phase OR first explicit user request to edit a preset.
-
-## B-019: "Completed processing N video(s)!" success-toned message fires on all-fail batch
-
-- **Status:** scheduled (deferred per v2.5.1 audit 2026-04-28; cosmetic)
-- **Priority:** LOW (misleading wording in all-fail edge case)
-- **Surfaced:** v2.5.1 user smoke test (Line preset failed batch, 2026-04-28)
-- **Context:** `_start_next_task` terminal cleanup branch shows "Completed processing N video(s)!" QMessageBox when called after the final task. on_render_completed shows different wording: "Successfully rendered N video(s)!". When all tasks fail, last on_render_error -> _start_next_task -> cleanup -> "Completed processing" message. User sees success-toned wording even though every progress box is red.
-- **Implication:** Mild user confusion in catastrophic-failure case. Progress boxes are red but message wording sounds successful.
-- **Resolution:** Either (a) detect all-fail case in cleanup branch and show error-toned wording, OR (b) reword to neutral "Batch finished — see status column for results." Option (b) is simpler and accurate in all cases.
-- **Trigger for pickup:** post-tag UX polish OR opportunistic during any future _start_next_task edit.
-
-## B-020: EncoderDialog "Group|Name" pipe-split doesn't .strip() halves [N51]
-
-- **Status:** Open, backlog
-- **Priority:** LOW (silent — affects only users who type whitespace adjacent to the pipe character)
-- **Surfaced:** v2.5.3 audit (2026-04-30)
-- **Locations:**
-  - `auto_render.py:1841` (Add encoder handler)
-  - `auto_render.py:1898` (Edit encoder handler)
-- **Context:** Both Add and Edit handlers extract group and name from the EncoderDialog's name field via:
-
-  ```python
-  name_parts = dialog.result["name"].split("|", 1)
-  group = name_parts[0] if len(name_parts) > 1 else ""
-  name  = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
-  ```
-
-  Neither `name_parts[0]` nor `name_parts[1]` is `.strip()`ed. User input `"Test | My Preset"` yields `group="Test "` (trailing space) and `name=" My Preset"` (leading space). Group lookups elsewhere use exact string match and silently miss.
-
-  `EncoderDialog.accept` (`auto_render.py:~2093`) already strips the OUTER whitespace of the full name field via `self.name_edit.text().strip()`, so this bug only affects whitespace immediately adjacent to the `|` character.
-
-  Explicitly NOT affected: `core/preset_loader.py` L138/L144 Encoder.txt file-format parser — different semantics.
-- **Resolution:** Apply `.strip()` to both halves of `name_parts` at both L1841 and L1898. Two-line fix per site.
-- **Trigger for pickup:** Phase 2d UX phase, OR a user reports "my preset doesn't show under the right group", OR EncoderDialog gets touched for any other reason.
-
 ## B-021: Logging-to-UserData feature for all 4 apps
 
 - **Status:** Open, scheduled (post-v3.8; v2.5.4 candidate)
@@ -125,18 +51,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Context:** ADR-0005 specifies platformdirs default with `portable.txt` sentinel opt-in for portable mode. The sentinel mechanism works correctly in script (non-frozen) execution. In v3.8's PyInstaller frozen build (onedir mode), `portable.txt` was placed at the install dir top level (next to the .exes) as a true 0-byte file, but apps still wrote configs to `%LOCALAPPDATA%/1vmo-suite/` instead of `<install>/UserData/`. Verified by smoke test: `config_video_mixer.json` written to AppData (May 4 12:17), no `UserData/` folder created in install dir. Root cause: per PyInstaller runtime documentation, in a frozen onedir bundle the `__file__` attribute on imported modules resolves to the bundle's `_internal/` folder (not the install dir where the .exe lives). `SCRIPT_DIR` is computed via `Path(os.path.dirname(os.path.abspath(__file__)))`, so `SCRIPT_DIR/portable.txt` evaluates to a path inside `_internal/`, where the sentinel file does not exist. The actual .exe (and the co-located `portable.txt`) are at `Path(sys.executable).parent` in frozen mode.
 - **Resolution:** In `core/user_data.py`, detect frozen state via `getattr(sys, 'frozen', False)`. When frozen, derive the install dir from `Path(sys.executable).parent` instead of trusting the caller's `SCRIPT_DIR`, and check `portable.txt` there. Either update `resolve_or_die`/`resolve_user_data_dir` to perform this detection internally (preferred — keeps callers ignorant of frozen-vs-script), or add a `_get_install_dir()` helper that callers use to compute the path passed in. Verify behavior in both script and frozen runs.
 - **Trigger for pickup:** v2.5.4 hygiene cycle. Mac migration will also need similar `sys.frozen` handling in path resolution, so this is a natural pre-requisite.
-
-## B-023: Mixer event handler `on_video_merge_started` naming inconsistency
-
-- **Status:** Open, backlog
-- **Priority:** LOW (internal Python naming only; no user-facing impact)
-- **Surfaced:** v3.8 PyInstaller distribution audit (2026-04-30)
-- **Locations:**
-  - `mixer.py:971` (handler definition `def on_video_merge_started(...)`)
-  - `mixer.py:1094` (signal connection `self._merge_coordinator.video_started.connect(self.on_video_merge_started)`)
-- **Context:** Same copy-paste origin as the v3.8-fixed log/config filename typos (mixer.py was scaffolded from merge.py in early development; the `merge_` prefix was missed in three rename passes — log filename, config filename, and this handler name). The handler functions correctly because the signal-to-slot connection still resolves; the name is just misleading inside mixer's own module. Internal-only — no UI string, no external API consumer, no log output user-facing impact.
-- **Resolution:** Rename `on_video_merge_started` to `on_video_mixer_started` at both sites (definition + signal connection). Two-line change. Group with any future mixer.py-touching commit for cleanup.
-- **Trigger for pickup:** Opportunistic — any mixer.py edit that already touches that area, OR a focused `mixer.py` cleanup pass.
 
 ## B-024: auto_render.py has no log file (consistency gap)
 
@@ -272,16 +186,6 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution:** Either (a) make translate_to_nvenc default kwargs read from module constants, or (b) remove the unused constants and rely on the kwarg-default mechanism alone. Decision deferred to post-tag review.
 - **Trigger for pickup:** v2.5-complete tag landed.
 
-## B-030: self.output_mapping dict is dead state (write-only, never read)
-
-- **Status:** Open, Low
-- **Priority:** Low (technical debt)
-- **Surfaced:** Runtime QA Stabilization audit 2026-05-14 (QA-4)
-- **Context:** `auto_render.py` initialises `self.output_mapping = {}` (L725), clears it on every render start (L1957), and inserts `output_mapping[f"Processing - {basename}"] = item` at L2072. Nothing in the file ever reads back from this dict — `on_render_completed` and `on_render_error` route via `worker.tree_item` directly. The whole construct is dead state from an earlier design iteration.
-- **Implication:** Harmless memory waste + reader confusion. Removable without behavior change.
-- **Fix sketch:** Delete L725, L1957 `output_mapping.clear()`, L2072-2074 insertion. Verify py_compile + ruff + smoke. ~5 lines removed.
-- **Trigger for pickup:** Next polish PR touching `start_render` / `_start_next_task`.
-
 ## B-031: closeEvent URL-cancel cannot be undone if user declines render-close
 
 - **Status:** Open, Low
@@ -338,6 +242,33 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - Mark those two test legs as requiring impersonation deps (skip/xfail when `curl-cffi` is absent) so the suite is honest about the prerequisite.
 - **Trigger for pickup:** when TikTok online coverage needs to pass in CI / a fresh env, OR alongside the next `requirements.txt` dependency review.
 
+## B-047: pre-commit hooks not installed on this host (guards run only when invoked manually)
+
+- **Status:** Open, backlog
+- **Priority:** LOW (the guards work when run by hand; the risk is forgetting to run them)
+- **Surfaced:** backlog-batch-1 MAIN session (2026-05-24)
+- **Context:** `.git/hooks/` contains only the stock `*.sample` files and `pre-commit` is not on PATH, so the configured guards (markdownlint, `check-changelog`, `check_adr_references`, ruff-format) only run when invoked manually — they are NOT enforced at commit time. Additionally `markdownlint` is not installed at all on this host (no binary, no `pymarkdown` module), so the markdown lint gate could not be run during this batch; `ruff` is only reachable via `python -m ruff` (not a bare `ruff` on PATH).
+- **Resolution:** run `pre-commit install` to wire the hooks into `.git/hooks/`; document the step in `setup.ps1` so a fresh clone gets them. Optionally add a markdownlint provider (npm `markdownlint-cli` or `pymarkdown`) to the dev-tooling docs so the markdown gate is actually runnable.
+- **Trigger for pickup:** next toolchain/setup hygiene cycle, OR the first time a guard-violating commit slips through because the hook was not enforced.
+
+## B-048: `show_ffmpeg_command` + `open_output_when_done` Settings have no consumer (split from B-014)
+
+- **Status:** Open, backlog
+- **Priority:** LOW–MEDIUM (two Settings toggles are inert — they persist but never change behavior)
+- **Surfaced:** backlog-batch-1 MAIN session (2026-05-24), while verifying B-014
+- **Context:** B-014's reload scope is closed — `_reload_config_settings` now re-reads `num_threads`, `show_ffmpeg_command`, and `open_output_when_done` on Settings OK. But a repo-wide search shows `show_ffmpeg_command` and `open_output_when_done` are only ever *written* (persisted by `settings_dialog.py`, copied into `self.config` by `_reload_config_settings`) and never *read* by the render flow. So toggling either checkbox in Settings currently does nothing: the FFmpeg command-line echo is not gated on `show_ffmpeg_command`, and the output folder is not auto-opened on completion when `open_output_when_done` is set. (`num_threads` is genuinely consumed, so it is unaffected.) Separately, the `_reload_config_settings` docstring (`auto_render.py` ~L1781) still says these three keys are "NOT rewired here", directly contradicting the closure code below it (added in baseline `f4cf89a`) — a stale docstring to correct when this is picked up.
+- **Resolution:** decide per key whether the feature is wanted — either (a) implement the consumers (gate the FFmpeg-command echo on `show_ffmpeg_command`; call the existing `open_output_directory()` path on completion when `open_output_when_done` is true), or (b) remove the dead Settings checkboxes + their persistence if the features are not wanted. Either way, correct the contradictory `_reload_config_settings` docstring.
+- **Trigger for pickup:** a user reports "Show FFmpeg command" / "Open output when done" doesn't do anything, OR the next Settings-dialog touch.
+
+## B-049: `mixer.py` main-window class is named `VideoMergerTool` (copy-paste residue)
+
+- **Status:** Open, backlog
+- **Priority:** LOW (internal Python naming only; no user-facing impact)
+- **Surfaced:** backlog-batch-1 MAIN session (2026-05-24), while fixing B-023
+- **Context:** Same copy-paste origin as B-023 — `mixer.py` was scaffolded from `merge.py`, and the main-window class declared at `mixer.py:293` is `class VideoMergerTool(QMainWindow)` rather than a mixer-specific name. The app works (the class is internally consistent), but the `Merger` name is misleading inside the mixer module, exactly like the B-023 handler-name case. NOT fixed in B-023 (out of that commit's one-issue scope).
+- **Resolution:** rename the class to a mixer-appropriate name (e.g. `VideoMixerTool`) and update its references within `mixer.py`. Confirm no other module imports the class by name. Group with any future `mixer.py`-touching commit.
+- **Trigger for pickup:** opportunistic — any `mixer.py` edit in that area, OR a focused mixer cleanup pass.
+
 ## Resolved
 
 - **B-015** — translate_to_nvenc codec routing: codified single-knob routing (user's gpu_codec wins over per-preset map) and removed the dead `mapped` variable; corrected the `_CODEC_MAP` "per ADR-0007 D4" mis-citation (D4 is the codec dropdown, not routing). Resolved [c051473], documented in [ADR-0015](docs/decisions/ADR-0015-nvenc-codec-routing.md). 2026-05-24.
@@ -356,6 +287,14 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **B-037** — Local encoder intelligence layer (`core/encoder_intel/`; pure-Python advisories). Resolved in Phase 3.5 (2026-05-22). See [ADR-0012](docs/decisions/ADR-0012-encoder-intelligence.md).
 - **B-038** — Production packaging + local release readiness (build scripts + integrity checker under `tools/build/`; partial — spec/updater hardening deferred). Resolved in Phase 3.6 (2026-05-22). See [ADR-0013](docs/decisions/ADR-0013-release-packaging.md).
 - **B-039** — Phase 3 closure + handoff readiness (verification-only milestone; `docs/PHASE_3_*` handoff set). Resolved in Phase 3.7 (2026-05-22). See [ADR-0014](docs/decisions/ADR-0014-phase-3-closure.md).
+- **B-016** — `start_render` resets the visible per-worker QProgressBar to 0 at batch start; found already fixed by the Phase 2d Issue 7 hardening (a `thread_bars[i].setValue(0)` loop alongside the `_worker_state` reset). Confirmed already-resolved during batch-1, no new commit. 2026-05-24.
+- **B-014** — `_reload_config_settings` now re-reads `num_threads` + `show_ffmpeg_command` + `open_output_when_done` on Settings OK (no app restart); found already wired in baseline [f4cf89a] (reload scope closed; `num_threads` genuinely takes effect). Batch-1 verification confirmed it; no new commit. The *consumer* gap (`show_ffmpeg_command` / `open_output_when_done` persist but nothing in the render flow reads them) + the now-contradictory docstring are split out to B-048. Resolved (reload scope) 2026-05-24.
+- **B-046** — `scripts/check_adr_references.py` self-exclusion failed on Windows (`str(p)` backslash paths vs forward-slash substrings) → false exit 1; normalized via `Path.as_posix()`. Test `tests/smoke/test_check_adr_references.py`. Resolved [aedc37c] 2026-05-24.
+- **B-023** — mixer slot `on_video_merge_started` renamed to `on_video_mixer_started` (def + `per_video_started.connect` site). Internal only. Resolved [fc26a70] 2026-05-24.
+- **B-019** — all-fail batch no longer shows success-toned "Completed processing N video(s)!" / "Success"; terminal-cleanup branch reworded to neutral "Batch Finished" / "Batch finished — see status column for results." Resolved [c23461d] 2026-05-24.
+- **B-030** — write-only `output_mapping` dead state removed (init + 2 clears + insert) and the stale `_row_ref_distorted` comment corrected; completion routes via `worker.tree_item`. No behavior change. Resolved [e7cd2b1] 2026-05-24.
+- **B-018** — added an always-enabled "Clone" button so a read-only built-in preset (ADR-0006) can be copied into an editable `user:<slug>` preset; id-derivation factored into the pure `_allocate_user_preset_id` (shared by Add/Clone). Read-only tooltips (part a) had already shipped. Test `tests/smoke/test_clone_preset_id.py` + headless UI smoke; dialog rename + save MANUAL-VERIFIED. Resolved [8080631] 2026-05-24.
+- **B-020** — `EncoderDialog` "Group|Name" pipe-split now strips both halves via the pure `_split_group_name` (Add/Clone helper + Edit handler), so whitespace adjacent to the pipe no longer breaks exact-match group lookups. Test `tests/smoke/test_split_group_name.py`. Resolved [cf8ef1a] 2026-05-24.
 
 ### B-032: GPU semaphore acquire is unbounded under contention + cancel
 
