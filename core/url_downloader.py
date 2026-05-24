@@ -308,6 +308,10 @@ def _build_ydl_opts(
         # is upload-friendly. Avoids "incompatible codec for mp4" mux errors.
         "merge_output_format": "mkv",
         "noplaylist": True,
+        # Bound each socket read so a stalled connection fails fast and the
+        # retry machinery (retries/fragment_retries) can kick in, rather
+        # than a worker hanging indefinitely on a dead peer.
+        "socket_timeout": 30,
         "quiet": True,
         # Phase 2d production-hardening fix (Issue 6): silence yt-dlp's
         # own progress text to stderr. We already pipe per-URL progress
