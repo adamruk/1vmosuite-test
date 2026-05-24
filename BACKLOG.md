@@ -269,19 +269,9 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution:** rename the class to a mixer-appropriate name (e.g. `VideoMixerTool`) and update its references within `mixer.py`. Confirm no other module imports the class by name. Group with any future `mixer.py`-touching commit.
 - **Trigger for pickup:** opportunistic — any `mixer.py` edit in that area, OR a focused mixer cleanup pass.
 
-## B-050: manager-review overwrites RESULTS.md instead of appending (clobbers audit history)
-
-- **Status:** Open, backlog.
-- **Priority:** MEDIUM-HIGH (silent audit-history loss on every VERIFY/gate run).
-- **Surfaced:** backlog-batch-1 close-out (2026-05-24).
-- **Context:** The `manager-review` skill writes RESULTS.md by truncate-and-replace. Each VERIFY run therefore wipes the prior cumulative audit log. Confirmed: the batch-1 verdict replaced 672 lines of Phase 3 + Phase A history in commit `7318ae4`; manually restored (verdict grafted on top of the full history) in commit `c156d4d`. Without a skill fix, the NEXT VERIFY run repeats the clobber.
-- **Resolution (pick one):**
-  - (a) Skill reads existing RESULTS.md, PREPENDS a new dated verdict block, writes back (never truncate); or
-  - (b) Skill writes per-run files `RESULTS-<branch>-<YYYYMMDD>.md` and keeps RESULTS.md as an index.
-  - Either way: add a guard/test that a second consecutive run does not reduce RESULTS.md line count.
-- **Trigger for pickup:** before the next VERIFY/manager-review run (otherwise batch-2's gate clobbers batch-1's verdict), OR a dedicated gate-hardening pass.
-
 ## Resolved
+
+- **B-050** — manager-review overwrote RESULTS.md (truncate-and-replace via the Write tool), clobbering the cumulative audit log on every VERIFY run. Chose Option A: added `.claude/skills/manager-review/append_results.py` (reads existing RESULTS.md, PREPENDS a new dated verdict block newest-first, atomic temp+`os.replace`); rewrote SKILL.md Step 6 to write the block to a scratch file and call the helper via Bash, and forbade Write-tool use on RESULTS.md. Guard `tests/smoke/test_results_append.py` proves a 2nd run grows the file (4→10→16 lines in the CLI dry-run) and the 1st verdict survives. Resolved [0200733] 2026-05-24.
 
 - **B-015** — translate_to_nvenc codec routing: codified single-knob routing (user's gpu_codec wins over per-preset map) and removed the dead `mapped` variable; corrected the `_CODEC_MAP` "per ADR-0007 D4" mis-citation (D4 is the codec dropdown, not routing). Resolved [c051473], documented in [ADR-0015](docs/decisions/ADR-0015-nvenc-codec-routing.md). 2026-05-24.
 
