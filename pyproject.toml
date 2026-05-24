@@ -128,6 +128,11 @@ follow_imports = "skip"
 # ----------------------------------------------------------------------
 
 [tool.pytest.ini_options]
+# Add the repo root to sys.path so test modules can `import core` /
+# `import auto_render` regardless of how pytest is launched (bare `pytest`
+# does not add CWD to sys.path the way `python -m pytest` does). Without
+# this, CI's bare-`pytest` invocation fails collection with ModuleNotFoundError.
+pythonpath = ["."]
 markers = [
   "online: test requires live network access (yt-dlp, HTTP probes). Skip in offline CI with `-m 'not online'`.",
 ]

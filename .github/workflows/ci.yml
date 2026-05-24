@@ -45,4 +45,4 @@ jobs:
       - name: Smoke tests (headless)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: pytest tests/smoke -q
+        run: python -m pytest tests/smoke -q
