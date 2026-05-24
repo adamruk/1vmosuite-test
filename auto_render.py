@@ -311,6 +311,9 @@ class RenderWorker(QObject):
     def _has_acodec(self, params):
         return any(p in ("-c:a", "-acodec") for p in params)
 
+    def _has_threads(self, params):
+        return any(p == "-threads" for p in params)
+
     def process(self):
         current_input = self.video_path
         final_output = None
@@ -452,6 +455,14 @@ class RenderWorker(QObject):
                             command.extend(["-c:v", "libx264"])
                     if not self._has_acodec(encoder_params):
                         command.extend(["-c:a", "aac"])
+                    # Phase 4: restore the CPU `-threads 0` hint dropped during
+                    # the phase3 rebuild. On the CPU (libx264) path, let ffmpeg
+                    # auto-pick the worker thread count unless the preset already
+                    # pins `-threads`. The NVENC/gpu path is left untouched —
+                    # NVENC parallelism is governed by async_depth + the
+                    # gpu_semaphore, not libavcodec threads.
+                    if not self.gpu_enabled and not self._has_threads(encoder_params):
+                        command.extend(["-threads", "0"])
                 # Phase 2d production-hardening fix (Issue 1): ffmpeg
                 # writes to `ffmpeg_target` (== `<output>.partial` for
                 # single-file, == `output_file` for image sequences).
@@ -539,6 +550,15 @@ class RenderWorker(QObject):
                         cpu_command.extend(["-c:v", "libx264"])
                     if not self._has_acodec(encoder_params_original):
                         cpu_command.extend(["-c:a", "aac"])
+                    # Phase 4: this is the GPU->CPU fallback — an inherently CPU
+                    # (libx264) encode — so apply the same `-threads 0` hint when
+                    # the preset hasn't pinned `-threads`. The main-path guard's
+                    # `not self.gpu_enabled` clause is intentionally omitted here:
+                    # this branch only runs after a GPU attempt failed (i.e. when
+                    # gpu_enabled is True), so keeping that clause would make the
+                    # hint dead code.
+                    if not self._has_threads(encoder_params_original):
+                        cpu_command.extend(["-threads", "0"])
                     # Phase 2d production-hardening fix (Issue 1):
                     # CPU retry writes to the same `.partial` sidecar
                     # as the failed GPU attempt. ffmpeg `-y` overwrites
