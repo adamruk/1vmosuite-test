@@ -555,8 +555,11 @@ def download_videos(
         not isinstance(max_concurrent, int)
         or isinstance(max_concurrent, bool)
         or max_concurrent < 1
+        or max_concurrent > 16
     ):
-        raise ValueError(f"max_concurrent must be an int >= 1, got {max_concurrent!r}")
+        raise ValueError(
+            f"max_concurrent must be an int between 1 and 16, got {max_concurrent!r}"
+        )
     if cookies_file is not None:
         cookies_file = Path(cookies_file)
         if not cookies_file.is_file():

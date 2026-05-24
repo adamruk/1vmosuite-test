@@ -113,6 +113,21 @@ def test_max_concurrent_zero_raises(tmp_path: Path) -> None:
 # ---------- 7. Pre-set cancel_event -> all-cancelled ----------
 
 
+def test_max_concurrent_over_cap_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError):
+        download_videos(
+            ["https://example.com/v.mp4"],
+            tmp_path,
+            max_concurrent=17,
+        )
+
+
+def test_max_concurrent_at_cap_is_accepted(tmp_path: Path) -> None:
+    # 16 is the boundary — must pass validation (download fails per-URL).
+    results = download_videos(["not a url"], tmp_path, max_concurrent=16)
+    assert results[0].error_type == "invalid_url"
+
+
 def test_pre_cancelled_batch_returns_all_cancelled(tmp_path: Path) -> None:
     cancel = threading.Event()
     cancel.set()
