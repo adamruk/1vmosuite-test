@@ -1,0 +1,230 @@
+{
+  "_version": 2,
+  "_project": "1vmo",
+  "_description": "Machine-readable quality rules for the 1vmo manager-review gate, usable across the WHOLE project (any module, any phase). The VERIFY session (read-only) evaluates: (1) every rule in durable_rules, plus (2) the one block in phase_rules whose key matches the active phase. It emits PASS/FAIL/WARN/SKIP with file:line evidence. Severity: critical = BLOCKS merge, warning = must acknowledge, info = suggestion.",
+  "_check_types": "grep (search target file(s) in changed lines for a pattern) | grep_diff (search only added lines) | structural (read code and judge per description) | file_check (read a target and verify a condition) | status_check (verify .agent-status JSON) | contract (verify a behavioral invariant).",
+  "_grading": "score_pct = passed / (passed + failed + warned*0.5) * 100. A=90-100, B=80-89, C=70-79, D=60-69, F<60.",
+  "_status_logic": "Any critical FAIL -> BLOCKED (regardless of score). No critical fail but >=1 warning -> PASSED_WITH_WARNINGS. All pass -> PASSED.",
+  "_how_phases_work": "A phase is declared in .agent-status/main.json via a 'phase' key (e.g. \"url-dl-hardening\"). The reviewer evaluates all durable_rules + phase_rules[<phase>]. If main.json has no 'phase', the reviewer matches a phase_rules key as a substring of the branch name; failing that, it evaluates durable_rules only and notes that no phase block was found. To add a future phase, append a new keyed array to phase_rules — durable_rules and the skill stay unchanged.",
+  "_conventions": {
+    "repo_layout": "Code at repo ROOT, no src/ dir. NVENC logic in gpu_detect.py, core/preset_translator.py, core/. URL downloader at core/url_downloader.py. PySide6 UI + FFmpeg/NVENC batch pipeline, Python 3.13, frozen via PyInstaller.",
+    "mainline_branch": "phase3-adam-v39-merge (fixes on phase3-fixes).",
+    "phase_base_default": "phase3-adam-v39-merge — the branch a phase is cut from; the scope diff is computed against this unless .agent-status/main.json names a different base.",
+    "adrs": "docs/decisions/ (NOT docs/adr/).",
+    "backlog_ids": "B-NNN.",
+    "hook_convention": "Claude Code hook scripts MUST parse stdin with Python (jq is NOT installed) and block via JSON permissionDecision:deny — never exit 2. Hardcode the Git-Bash path (bare bash resolves to WSL on Windows).",
+    "frozen_build": "Bundled binaries (ffmpeg, deno) live next to the executable / under sys._MEIPASS and are resolved by helpers (e.g. _resolve_bundled_ffmpeg_dir) + PATH injection — never assumed on the system PATH.",
+    "governance_files_excluded_from_scope": ["quality-rules.json", ".claude/**", "RESULTS.md", ".agent-status/**", "CLAUDE.md"]
+  },
+
+  "durable_rules": [
+    {
+      "id": "DURABLE-CONTRACT",
+      "name": "Per-item failures never raise",
+      "severity": "critical",
+      "check_type": "contract",
+      "description": "For any batch/worker operation, per-item failures MUST be captured and returned/recorded, never propagated as an exception that aborts the batch. Only argument/precondition validation may raise. SKIP only if the phase touches no batch/worker code.",
+      "evidence": "Trace exception paths in the batch worker and its aggregation loop. Show any path where a per-item failure escapes as a raised exception. Confirm precondition validation still raises."
+    },
+    {
+      "id": "DURABLE-NO-SILENT-CATCH",
+      "name": "No silent error swallowing",
+      "severity": "warning",
+      "check_type": "structural",
+      "description": "Every except block in changed code must log with context, re-raise, or set an error status that surfaces to the caller. Bare 'except: pass' or except-with-only-a-comment is not acceptable. EXCEPTION: a guard that deliberately swallows a user callback's exception is acceptable IF it re-raises any cancellation signal and continues.",
+      "evidence": "Show any except block in changed lines with no logging, no re-raise, and no error-status assignment."
+    },
+    {
+      "id": "DURABLE-SCOPE",
+      "name": "Diff stays within phase scope",
+      "severity": "critical",
+      "check_type": "file_check",
+      "description": "git diff <base>..HEAD --name-only must touch ONLY the files the phase declared. Governance files in _conventions.governance_files_excluded_from_scope are NEVER counted against scope. Any other path is an out-of-scope change ('while I'm here' edits = FAIL).",
+      "evidence": "Run git diff <base>..HEAD --name-only. List every path. Flag any path that is neither a declared phase file nor an excluded governance file."
+    },
+    {
+      "id": "DURABLE-COMMITS",
+      "name": "One issue per commit",
+      "severity": "warning",
+      "check_type": "structural",
+      "description": "Each commit should address a single concern; commit messages should name the issue or backlog ID (B-NNN). Bundling unrelated fixes into one commit defeats per-commit audit and revert.",
+      "evidence": "git log --oneline <base>..HEAD. Show any commit bundling unrelated concerns or any non-descriptive message ('fixes', 'updates')."
+    },
+    {
+      "id": "DURABLE-DOCS",
+      "name": "Docs / ADR move with behavior",
+      "severity": "warning",
+      "check_type": "structural",
+      "description": "If a public signature, default, or documented behavior changed, the relevant docstring must reflect it; if an architectural decision was made, an ADR in docs/decisions/ should exist or be referenced.",
+      "evidence": "Compare changed public signatures/behaviors against docstrings and docs/decisions/. Show any drift (code changed, doc/ADR did not)."
+    },
+    {
+      "id": "DURABLE-HOOK-CONV",
+      "name": "Hook scripts follow 1vmo convention",
+      "severity": "critical",
+      "check_type": "structural",
+      "description": "Applies ONLY if this phase added/edited a Claude Code hook script. Hooks MUST parse stdin with Python (jq is NOT installed), block via JSON permissionDecision:deny (never exit 2), and hardcode the Git-Bash path. SKIP if no hook script changed.",
+      "evidence": "If a hook script is in the diff: show Python stdin parsing, permissionDecision:deny JSON (not exit 2), and a hardcoded Git-Bash path. Else SKIP."
+    },
+    {
+      "id": "QT-THREADSAFE",
+      "name": "No UI access from worker threads",
+      "severity": "critical",
+      "check_type": "structural",
+      "description": "Qt widgets/UI state must only be touched on the main (GUI) thread. Worker threads (ThreadPoolExecutor, QThread, callbacks fired from workers) must marshal updates to the UI via signals/slots or a queued connection — never call widget methods or mutate widgets directly. SKIP if the phase touches no UI and no worker->UI callback.",
+      "evidence": "Show any worker-thread code path that calls a Qt widget method / mutates a widget directly. Confirm cross-thread updates go through a signal or queued connection. Module-level worker code that invokes a user-supplied callback must document that the callback may run off the UI thread."
+    },
+    {
+      "id": "NO-BLOCK-EVENTLOOP",
+      "name": "No blocking calls on the GUI thread",
+      "severity": "warning",
+      "check_type": "structural",
+      "description": "Long-running or blocking operations (subprocess without timeout, network I/O, large file reads, sleeps, heavy CPU loops) must not run on the Qt main thread — they belong on a worker. SKIP if no GUI-thread code changed.",
+      "evidence": "Show any blocking/synchronous long-running call invoked from a slot/handler that runs on the GUI thread."
+    },
+    {
+      "id": "SUBPROCESS-SAFE",
+      "name": "FFmpeg / external process handling is safe",
+      "severity": "critical",
+      "check_type": "structural",
+      "description": "External-process invocations (FFmpeg, ffprobe, yt-dlp-as-process, deno) must: not use shell=True with interpolated/user input (pass an argv list); set a timeout or be cancellable; and terminate + reap the child process on cancel/error (no orphaned processes). SKIP if no subprocess/external-process code changed.",
+      "evidence": "Show each new external-process call: argv-list (not shell=True+interpolation), timeout/cancellability, and process termination/cleanup on the error/cancel path."
+    },
+    {
+      "id": "FROZEN-BUILD",
+      "name": "Frozen-build path correctness",
+      "severity": "critical",
+      "check_type": "structural",
+      "description": "Bundled binaries/resources must be resolved via sys._MEIPASS / repo root + PATH injection or an explicit location option — never assumed present on the system PATH, and never via a hardcoded absolute dev path. Any new binary dependency must have a resolver mirroring the existing ffmpeg pattern and a matching PyInstaller .spec entry (note .spec separately; it's a build file). SKIP if no path/bundling/resource-resolution code changed.",
+      "evidence": "Show how any new binary/resource is located (must use _MEIPASS/repo-root + PATH/location, not bare system PATH or absolute dev path)."
+    },
+    {
+      "id": "RESOURCE-CLEANUP",
+      "name": "Resources released on all paths",
+      "severity": "warning",
+      "check_type": "structural",
+      "description": "File handles, temp files/dirs, process handles, and thread pools must be released on success, error, AND cancel — prefer context managers or try/finally. Cleanup that only runs on the happy path is a leak. SKIP if the phase allocates no such resources.",
+      "evidence": "Show any resource opened/created without a guaranteed release on the error/cancel path."
+    },
+    {
+      "id": "NO-SECRETS-PATHS",
+      "name": "No hardcoded secrets or machine paths",
+      "severity": "critical",
+      "check_type": "grep_diff",
+      "description": "No API keys, tokens, passwords, or machine-specific absolute paths (e.g. C:\\Users\\<name>\\..., a personal proxy URL with credentials) as string literals in committed source. Secrets belong in config/env; paths must be resolved relative to the repo or a config value.",
+      "evidence": "Show any added line containing a credential-shaped literal or a machine-specific absolute path. (A documentation placeholder is acceptable; an actual secret/path is FAIL.)"
+    },
+    {
+      "id": "TESTS-PRESENT",
+      "name": "Behavior changes ship with tests",
+      "severity": "warning",
+      "check_type": "structural",
+      "description": "New behavior, new error paths, and bug fixes should add or update at least one test. A critical-path change with no test is a warning (escalate to the phase rule if that phase names a required test).",
+      "evidence": "Map each behavior change in the diff to a test added/updated in the same phase. Flag changes with no corresponding test."
+    },
+    {
+      "id": "DETERMINISTIC-TESTS",
+      "name": "Tests are deterministic",
+      "severity": "warning",
+      "check_type": "structural",
+      "description": "Tests must not depend on network, wall-clock sleeps as synchronization, or execution order — unless explicitly marked (e.g. @pytest.mark.online). Offline tests must pass without network. SKIP if no tests changed.",
+      "evidence": "Show any new test with an unmarked network call, a sleep used for synchronization, or an order dependency."
+    }
+  ],
+
+  "phase_rules": {
+    "url-dl-hardening": [
+      {
+        "id": "URLDL-C1-FORMAT",
+        "name": "Quality-maximal mkv intermediate",
+        "severity": "critical",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "QUALITY_FORMATS must have NO [ext=mp4]/[ext=m4a] pins (download is always re-encoded; grab best source); [height<=N] caps MUST be retained. merge_output_format must be 'mkv'. Output-file resolution must not hardcode .mp4; trust prepare_filename(info) with an extension-agnostic glob fallback, stem wrapped in glob.escape().",
+        "evidence": "Show QUALITY_FORMATS (no [ext=...], height caps present), merge_output_format value, and the glob fallback with glob.escape on the stem."
+      },
+      {
+        "id": "URLDL-C2-HOOK",
+        "name": "Progress hook trivial (issue #5957)",
+        "severity": "critical",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "progress_hook does ONLY dict-key reads + at most one division for percent — no logging, formatting, or allocation. subtitle_langs is a parameter (threaded download_videos -> _download_one -> _build_ydl_opts). A subtitles+progress test asserts complete video + .srt present + progress reached 100.",
+        "evidence": "Show the hook body, subtitle_langs as a param, and the subs+progress test assertions."
+      },
+      {
+        "id": "URLDL-C3-CLEANUP",
+        "name": "Partial-file cleanup after with-block",
+        "severity": "critical",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "Fragments isolated via paths={'home':work_dir,'temp':<per-download tmp>}. rmtree of that tmp runs in try/finally AFTER the `with yt_dlp.YoutubeDL(...)` block exits (yt-dlp holds the .part handle until the instance closes) — NEVER inside the hook. Cancel test asserts error_type=='cancelled', ZERO .part/.ytdl remain, pool drains.",
+        "evidence": "Show paths['temp'], the rmtree site relative to the with-block (FAIL if inside the hook or before close), and the cancel test's no-orphan + drain assertions."
+      },
+      {
+        "id": "URLDL-C4-DENO",
+        "name": "Bundled Deno / JS runtime",
+        "severity": "critical",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "_resolve_bundled_js_runtime() mirrors _resolve_bundled_ffmpeg_dir (checks sys._MEIPASS then repo root for deno(.exe)); at import time prepends its dir to os.environ['PATH']. no_warnings removed/False with yt-dlp logging routed to logger. _categorize_error has a 'js_runtime_missing' branch matching the real warning text.",
+        "evidence": "Show the resolver, PATH-prepend at import, no_warnings change + logger routing, and the js_runtime_missing match. (The deno binary + .spec entry are integration tasks — note if absent, do not FAIL the module on it.)"
+      },
+      {
+        "id": "URLDL-C5-COOKIES",
+        "name": "cookies_file replaces cookies_browser",
+        "severity": "critical",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "cookies_browser + VALID_BROWSERS + its validation fully removed. cookies_file: Optional[Path] replaces it, validated exists+readable (raises, consistent style), set as opts['cookiefile']. _categorize_error has a 'cookies_invalid' branch. Docstring states the CALLER owns consent (auth-walled downloads may violate ToS / risk the account).",
+        "evidence": "grep for lingering cookies_browser/VALID_BROWSERS (must be zero). Show cookies_file validation, opts['cookiefile'], cookies_invalid category, consent docstring note."
+      },
+      {
+        "id": "URLDL-C6A-LIMITS",
+        "name": "Timeouts, concurrency cap, live guard",
+        "severity": "warning",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "socket_timeout set in opts. download_videos rejects max_concurrent > 16 (keeps >=1 and isinstance bool checks). After extract_info, info.get('is_live') -> bail with a failed result, don't download.",
+        "evidence": "Show socket_timeout, the max_concurrent upper bound, and the is_live guard after extract_info."
+      },
+      {
+        "id": "URLDL-C6B-CONTRACT",
+        "name": "One result per URL guaranteed",
+        "severity": "critical",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "download_videos returns exactly len(urls) results in input order even if a future is lost. Any remaining None slot is filled with a synthetic failed DownloadResult before return. A bare `return [r for r in results if r is not None]` is a FAIL.",
+        "evidence": "Show the return path; confirm the None-fill exists (not just a filter). Name any test asserting len(out)==len(urls) with a simulated lost future."
+      },
+      {
+        "id": "URLDL-C6C-ERRORCATS",
+        "name": "Error categorization gaps closed",
+        "severity": "warning",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "yt-dlp ImportError -> 'dependency_missing' (not 'unknown'). _categorize_error maps members-only ('join this channel','members') -> auth_required and country-block ('blocked'+'country') -> region_locked.",
+        "evidence": "Show the ImportError error_type and the two new _categorize_error branches."
+      },
+      {
+        "id": "URLDL-C7-PIN",
+        "name": "yt-dlp[default] pin bumped",
+        "severity": "critical",
+        "check_type": "grep",
+        "target": "requirements*.txt, setup.ps1, pyproject.toml",
+        "pattern": "yt-dlp\\[default\\]>=2026\\.03\\.17",
+        "description": "Pin must be 'yt-dlp[default]>=2026.03.17'. The [default] extra is REQUIRED — it bundles yt-dlp-ejs (JS challenge scripts). Bare 'yt-dlp' = FAIL (YouTube would fetch EJS over the network at runtime).",
+        "evidence": "grep the requirements/setup files; show the pin line. Bare yt-dlp without [default], or version < 2026.03.17 = FAIL."
+      },
+      {
+        "id": "URLDL-C8-PROXY",
+        "name": "Optional proxy support",
+        "severity": "warning",
+        "check_type": "structural",
+        "target": "core/url_downloader.py",
+        "description": "proxy: Optional[str] threads to opts['proxy'], scheme-validated (^(https?|socks5h?|socks4)://) raising ValueError on bad scheme; '' allowed = direct. geo_bypass NOT set (wrong layer for an ISP block). _categorize_error has a 'proxy_error' branch. Module does NOT read env/config itself (arg -> ONEVMO_PROXY env -> config -> none lives in the integration layer). Offline test covers bad-scheme-raises and SOCKS-refused -> proxy_error.",
+        "evidence": "Show proxy -> opts['proxy'], scheme validation, absence of geo_bypass, the proxy_error category, and name the offline test."
+      }
+    ]
+  }
+}
