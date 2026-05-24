@@ -1,4 +1,4 @@
-default_install_hook_types: [pre-commit, commit-msg]
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
 default_stages: [pre-commit]
 
 repos:
@@ -76,3 +76,18 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # Pre-push gate: mirrors CI (.github/workflows/ci.yml) so a broken push is
+      # blocked locally even after the repo goes private (branch protection does
+      # not enforce on a private free plan). Runs once per push, not per file.
+      - id: ruff-push
+        name: "ruff (pre-push)"
+        entry: ruff check .
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+      - id: smoke-push
+        name: "smoke tests (pre-push, headless)"
+        entry: bash -c 'QT_QPA_PLATFORM=offscreen python -m pytest tests/smoke -q'
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
