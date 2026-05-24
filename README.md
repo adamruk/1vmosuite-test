@@ -48,7 +48,7 @@ python mixer.py
   config_video_renderer.json                      # AutoRender config (input_files, output_dir, num_threads)
   config_video_cutter.json                        # Cutter config
   config_video_merge.json                         # Merge config
-  config_video_merger.json                        # Mixer config (note: historical name is "merger")
+  config_video_mixer.json                         # Mixer config
   requirements.txt                                # PySide6 + requests + (see file for full list)
 ```
 
@@ -74,10 +74,39 @@ Defaults: `gpu_enabled=False`, `gpu_codec=h264_nvenc`, `gpu_preset=p4`, `gpu_max
 
 ## Updater
 
-`updater.py` checks a public Google Sheet (anonymous gviz endpoint) for new versions and downloads updates from Dropbox. Version state is tracked in `assets/Version AutoRender.json`.
+`updater.py` checks a public Google Sheet (anonymous gviz endpoint) for new
+versions and downloads the update from Dropbox over HTTPS. Before launching, the
+downloaded file is sanity-checked: a best-effort SHA-256 against a sibling
+`.sha256` when one is served, plus a PE-header (`MZ`) check. Version state is
+tracked in `assets/Version AutoRender.json`.
+
+Stronger fail-closed integrity (a mandatory SHA from a trusted channel, or
+Authenticode signature verification of the `.exe`) is tracked in the backlog as
+B-051.
 
 ## Notes
 
-- Source was recovered by decompiling the original PyInstaller-packaged `.exe` with pylingual. 43 control-flow artifacts from the decompiler were manually fixed. All 4 apps pass end-to-end smoke tests (real video → real FFmpeg cut → real output).
-- Configs persist per-app state (last output dir, last input files, mode selection). They're committed empty — safe to delete locally while testing; apps recreate them on first save.
-- Default encoder settings use `libx264 + aac`. Change via the encoder tree in AutoRender or edit `assets/Encoder.txt`.
+- **Architecture.** The four apps share a modular `core/` library. AutoRender's
+  render pipeline is built from local-only subsystems (no cloud, no telemetry):
+  - `core/preset_translator.py` — single-knob NVENC codec routing
+    (h264/hevc/av1_nvenc) and CPU↔GPU preset translation (ADR-0015).
+  - `core/encoder_intel/` — encoder capability analysis + graceful fallback (ADR-0012).
+  - `core/scoring/` — quality scoring: VMAF, SSIM/PSNR, and perceptual-hash
+    runners with a local score store (ADR-0009).
+  - `core/optimization/` — batch analyzer, failure/quality classifiers, and a
+    render recommendation layer (ADR-0010).
+  - `core/orchestration/` — scheduler, retry policy, persistent queue, sleep
+    inhibitor, system monitor, task logger, diagnostic bundle (ADR-0011).
+  - `core/url_downloader.py` — hardened yt-dlp batch downloader (per-call
+    timeout, concurrency cap, live-stream refusal, structured error categories);
+    bundles Deno + yt-dlp-ejs for YouTube JS challenges (ADR-0016).
+- **Decisions & history.** Design decisions are recorded as ADRs in
+  `docs/decisions/`; every change is tracked per-commit in `CHANGELOG.md`. The
+  codebase originated as a recovered port of the original packaged app and has
+  since been rebuilt into the structure above.
+- **Quality gates.** All subsystems are covered by smoke tests in `tests/smoke/`
+  (28 suites); CI runs ruff + the smoke suite on every push and pull request.
+- **Configs** persist per-app state (last output dir, last input files, mode).
+  Committed empty — safe to delete locally; apps recreate them on first save.
+- **Default encoder** is `libx264 + aac`. Change it via the encoder tree in
+  AutoRender or by editing `assets/Encoder.txt`.
