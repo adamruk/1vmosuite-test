@@ -24,6 +24,7 @@ import glob
 import logging
 import os
 import re
+import shutil
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
