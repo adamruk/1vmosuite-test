@@ -62,7 +62,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Added
 
-- **Phase A — URL downloader hardening (C1–C8), `core/url_downloader.py`.** Additive capabilities layered onto the existing yt-dlp batch downloader. Commits: [c66fd20, 1b0900c, 39c7658, 589bb1e, 4c2eaa9, cbbacb0, 8742c09, 53682f1, de68772, 189c221, 63afded, 4155f9a, d3f742c, 9a2263a, cb8fe69].
+- **Phase A — URL downloader hardening (C1–C8), `core/url_downloader.py`.** Additive capabilities layered onto the existing yt-dlp batch downloader. Commits: [c66fd20, 1b0900c, 39c7658, 589bb1e, 4c2eaa9, cbbacb0, 8742c09, 53682f1, de68772, 189c221, 63afded, 4155f9a, d3f742c, 9a2263a, cb8fe69, 8a5fef6].
   - Bundled Deno JS-runtime resolution + PATH injection for YouTube extraction, with a `js_runtime_missing` error when no runtime is present. (C4) [589bb1e]
   - Optional per-call proxy (http/https/socks5/socks5h; `""` = direct) for blocked networks. (C8) [9a2263a]
   - Configurable `subtitle_langs` (default `["en"]`). (C2) [1b0900c]
@@ -401,7 +401,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 ### Fixed
 
 - **Phase A — URL downloader hardening (C2/C3/C6c/C6d).** `core/url_downloader.py`.
-  - Cancelled/failed downloads no longer leave `.part`/`.ytdl` fragments (temp isolation + cleanup after the download handle closes). (C3) [39c7658, 53682f1]
+  - Cancelled/failed downloads no longer leave `.part`/`.ytdl` fragments — fragments are isolated in a per-URL temp dir (relative `outtmpl` so yt-dlp honors `paths`) and removed in a `finally` after the download handle closes; verified by an online mid-download cancel test (no orphans in work_dir or temp dir). (C3) [39c7658, 53682f1, 8a5fef6]
   - Hardened progress + subtitle downloads against yt-dlp issue #5957. (C2) [1b0900c]
   - Live streams rejected before download instead of hanging a worker. (C6c) [de68772]
   - Downloader always returns exactly one result per input URL, in order. (C6d) [189c221]
