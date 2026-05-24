@@ -147,13 +147,40 @@ def test_result_order_matches_input_order(tmp_path: Path) -> None:
 # ---------- Additional offline coverage ----------
 
 
-def test_unknown_cookies_browser_raises(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
+def test_missing_cookies_file_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
         download_videos(
             ["https://example.com/v.mp4"],
             tmp_path,
-            cookies_browser="netscape",
+            cookies_file=tmp_path / "no_such_cookies.txt",
         )
+
+
+def test_valid_cookies_file_passes_validation(tmp_path: Path) -> None:
+    # An existing, readable cookies file must clear arg-validation; the
+    # download itself fails per-URL (no network / fake URL) without raising.
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    results = download_videos(
+        ["not a url"],
+        tmp_path,
+        cookies_file=jar,
+    )
+    assert len(results) == 1
+    assert results[0].success is False
+    assert results[0].error_type == "invalid_url"
+
+
+def test_categorize_cookies_invalid_message() -> None:
+    assert (
+        _categorize_error(
+            Exception("The provided YouTube account cookies are no longer valid")
+        )
+        == "cookies_invalid"
+    )
+    assert (
+        _categorize_error(Exception("cookies file is malformed")) == "cookies_invalid"
+    )
 
 
 def test_missing_work_dir_raises(tmp_path: Path) -> None:

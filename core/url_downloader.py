@@ -122,8 +122,6 @@ QUALITY_FORMATS: dict[str, str] = {
     "smallest": "worst/w",
 }
 
-VALID_BROWSERS = {"chrome", "firefox", "edge", "brave", "safari"}
-
 
 # ========== Internal exception hierarchy ==========
 
@@ -230,6 +228,15 @@ def _categorize_error(exc: BaseException) -> str:
 
     if "no supported javascript runtime" in msg or "js runtime" in msg:
         return "js_runtime_missing"
+    if "cookie" in msg and (
+        "expired" in msg
+        or "no longer valid" in msg
+        or "malformed" in msg
+        or "not a valid" in msg
+        or "could not be loaded" in msg
+        or "invalid" in msg
+    ):
+        return "cookies_invalid"
     if "unsupported url" in msg or "no suitable extractor" in msg:
         return "unsupported_site"
     if (
@@ -283,7 +290,7 @@ def _build_ydl_opts(
     temp_dir: Path,
     download_subtitles: bool,
     subtitle_langs: list[str],
-    cookies_browser: Optional[str],
+    cookies_file: Optional[Path],
     progress_hook: Callable[[dict], None],
 ) -> dict:
     """Build the yt-dlp options dict for a single download."""
@@ -346,8 +353,8 @@ def _build_ydl_opts(
                 ],
             }
         )
-    if cookies_browser:
-        opts["cookiesfrombrowser"] = (cookies_browser,)
+    if cookies_file is not None:
+        opts["cookiefile"] = str(cookies_file)
     return opts
 
 
@@ -358,7 +365,7 @@ def _download_one(
     quality: str,
     download_subtitles: bool,
     subtitle_langs: list[str],
-    cookies_browser: Optional[str],
+    cookies_file: Optional[Path],
     progress_callback: Optional[Callable[[int, str, float, str], None]],
     cancel_event: Optional[threading.Event],
 ) -> DownloadResult:
@@ -416,7 +423,7 @@ def _download_one(
         temp_dir,
         download_subtitles,
         subtitle_langs,
-        cookies_browser,
+        cookies_file,
         _hook,
     )
     logger.info("Starting download: %s", url)
@@ -510,7 +517,7 @@ def download_videos(
     subtitle_langs: Optional[list[str]] = None,
     max_concurrent: int = 3,
     progress_callback: Optional[Callable[[int, str, float, str], None]] = None,
-    cookies_browser: Optional[str] = None,
+    cookies_file: Optional[Path] = None,
     cancel_event: Optional[threading.Event] = None,
 ) -> list[DownloadResult]:
     """Download a batch of video URLs concurrently.
@@ -519,6 +526,13 @@ def download_videos(
     Per-URL failures are reported on the Result; only argument validation
     raises (ValueError, FileNotFoundError, PermissionError). See
     URL_DOWNLOADER_SPEC.md for full semantics and the error_type taxonomy.
+
+    cookies_file, when given, is passed to yt-dlp as `cookiefile` (a
+    Netscape-format cookie jar) to access auth-walled content. The CALLER
+    is responsible for obtaining the user's consent before supplying it:
+    downloading auth-walled media may violate a platform's Terms of
+    Service and can put the account whose cookies are used at risk.
+    Consent UI is out of scope for this module.
     """
     if not isinstance(urls, list) or len(urls) == 0:
         raise ValueError("urls must be a non-empty list")
@@ -539,11 +553,12 @@ def download_videos(
         or max_concurrent < 1
     ):
         raise ValueError(f"max_concurrent must be an int >= 1, got {max_concurrent!r}")
-    if cookies_browser is not None and cookies_browser not in VALID_BROWSERS:
-        raise ValueError(
-            f"unknown cookies_browser {cookies_browser!r}; "
-            f"must be one of {sorted(VALID_BROWSERS)}"
-        )
+    if cookies_file is not None:
+        cookies_file = Path(cookies_file)
+        if not cookies_file.is_file():
+            raise FileNotFoundError(f"cookies_file does not exist: {cookies_file}")
+        if not os.access(cookies_file, os.R_OK):
+            raise PermissionError(f"cookies_file is not readable: {cookies_file}")
 
     if not isinstance(work_dir, Path):
         work_dir = Path(work_dir)
@@ -576,7 +591,7 @@ def download_videos(
                 quality,
                 download_subtitles,
                 subtitle_langs,
-                cookies_browser,
+                cookies_file,
                 progress_callback,
                 cancel_event,
             ): idx
