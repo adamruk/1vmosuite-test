@@ -220,6 +220,46 @@ def test_non_string_url_raises(tmp_path: Path) -> None:
         download_videos([12345], tmp_path)  # type: ignore[list-item]
 
 
+def test_is_live_post_extract_returns_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C6c: a URL with no /live/ marker that resolves to a live broadcast
+    must be refused after the metadata probe, before any download."""
+    import types
+
+    downloaded = {"called": False}
+
+    class _FakeYDL:
+        def __init__(self, opts: dict) -> None:
+            pass
+
+        def __enter__(self) -> "_FakeYDL":
+            return self
+
+        def __exit__(self, *a: object) -> bool:
+            return False
+
+        def extract_info(self, url: str, download: bool):  # noqa: ANN201
+            if download:
+                downloaded["called"] = True
+            return {"is_live": True, "title": "live broadcast"}
+
+        def prepare_filename(self, info: dict) -> str:
+            return str(tmp_path / "x.mkv")
+
+    monkeypatch.setitem(
+        sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=_FakeYDL)
+    )
+    results = download_videos(
+        ["https://www.youtube.com/watch?v=fakeLiveId"],
+        tmp_path,
+    )
+    assert len(results) == 1
+    assert results[0].success is False
+    assert results[0].error_type == "invalid_url"
+    assert downloaded["called"] is False, "must not download a live stream"
+
+
 def test_js_runtime_resolver_returns_none_when_absent() -> None:
     # No Deno binary is bundled in the source tree / test env, so the
     # resolver must return None cleanly (never raise).

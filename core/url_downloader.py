@@ -442,6 +442,18 @@ def _download_one(
     try:
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
+                # Metadata-only probe first so we can bail on live streams
+                # BEFORE starting a download that would otherwise run for
+                # the duration of the broadcast. _validate_url already
+                # rejects /live/ URLs; this catches live content reached via
+                # a channel/watch URL that has no /live/ marker.
+                info = ydl.extract_info(url, download=False)
+                if isinstance(info, dict) and info.get("is_live"):
+                    err = InvalidURLError("Live streams not supported")
+                    logger.error("Refusing live stream: %s", url)
+                    return DownloadResult(
+                        url=url, success=False, error=err, error_type="invalid_url"
+                    )
                 info = ydl.extract_info(url, download=True)
                 filename = Path(ydl.prepare_filename(info))
         except _CancelledMarker as exc:
