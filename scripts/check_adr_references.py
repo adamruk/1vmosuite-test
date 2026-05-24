@@ -49,7 +49,6 @@ DOC_FILES = [
     "docs/ROADMAP.md",
     "FFMPEG_CPU_TO_NVENC_REFERENCE.md",
     "ONBOARDING.md",
-    "WORKING_AGREEMENT.md",
     "URL_DOWNLOADER_SPEC.md",
     "IDEAS_BACKLOG.md",
 ]

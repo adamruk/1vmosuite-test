@@ -458,7 +458,7 @@ The module is done when ALL true:
 8. `tests/smoke/test_url_downloader.py` with the 12 minimum tests
 9. Module docstring documents your implementation choice + any deviations
 10. `requirements.txt` updated with yt-dlp
-11. PR opened with the PR template filled out (see `AGENTS.md`)
+11. PR opened following the commit + review discipline in `AGENTS.md` §5–6 (Conventional Commits, one concern per commit; the PR description lists any BACKLOG/ROADMAP items it closes)
 12. Verified on macOS (your env) — Adam verifies on Windows during PR review
 
 ---

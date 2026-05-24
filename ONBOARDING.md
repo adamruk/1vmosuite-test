@@ -79,7 +79,7 @@ This zip is a focused subset of the 1vmo repo containing only what's needed for 
 1vmo-junaid-onboarding-2026-04-25/
 ├── README.md                          ← what's in this zip
 ├── URL_DOWNLOADER_SPEC.md             ← your contract
-├── WORKING_AGREEMENT.md               ← collaboration rules
+├── AGENTS.md                          ← collaboration / workflow rules
 ├── ONBOARDING.md                      ← this file
 ├── IDEAS_BACKLOG.md                   ← future ideas
 ├── CLAUDE.md                          ← project rules you must follow
@@ -125,7 +125,7 @@ That's it. Three files. Nothing else.
 **Required before coding:**
 
 1. **`URL_DOWNLOADER_SPEC.md`** — your technical contract. Read it twice.
-2. **`WORKING_AGREEMENT.md`** — how we collaborate. Reference when process questions come up.
+2. **`AGENTS.md`** — how we collaborate (canonical workflow doc). Reference when process questions come up.
 3. **`ONBOARDING.md`** (this file) — once.
 
 **Skim:**
@@ -149,7 +149,7 @@ A concrete checklist for getting from "downloaded the zip" to "ready to code":
 [ ] cd into the extracted folder
 [ ] Read ONBOARDING.md (this file) — done if you're here
 [ ] Open and read URL_DOWNLOADER_SPEC.md (twice)
-[ ] Open and read WORKING_AGREEMENT.md
+[ ] Open and read AGENTS.md
 [ ] Skim CLAUDE.md
 [ ] Set up Python venv (commands below)
 [ ] Verify the existing core/ modules at least import cleanly
@@ -223,7 +223,7 @@ When you do have repo access:
 
 - **Branch:** `feature/url-downloader`
 - **Commits:** each does one thing; descriptive messages
-- **PR:** opened from your branch into `main`, fill out the template (see `WORKING_AGREEMENT.md`)
+- **PR:** opened from your branch into `main`; follow the commit + review discipline in `AGENTS.md` §5–6 (Conventional Commits, one concern per commit; the PR description lists any BACKLOG/ROADMAP items it closes)
 
 ---
 
@@ -240,7 +240,7 @@ These are good questions. Adam would rather answer 5 clarifying questions upfron
 
 **During coding:**
 
-When stuck (see Stuck Rule in `WORKING_AGREEMENT.md`):
+When stuck, the rule of thumb is:
 - Try for 2 hours
 - If still stuck, message Adam: "Stuck on [specific thing]. Tried [approaches]. Current confusion is [what]."
 
@@ -293,7 +293,7 @@ Surface it via GitHub issue or message. **Don't fix it as part of your PR** — 
 ## What to do right now
 
 1. Read `URL_DOWNLOADER_SPEC.md` twice
-2. Read `WORKING_AGREEMENT.md` once
+2. Read `AGENTS.md` once
 3. Set up your dev environment (steps above)
 4. Send Adam "got it, ready to start" via WhatsApp/Teams
 5. Pick your implementation approach (1, 2, or 3 from the spec) — message Adam if unsure

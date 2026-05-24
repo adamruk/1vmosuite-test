@@ -89,7 +89,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Files in scope (preserved as-is for now):**
   - `ONBOARDING.md`           — Junaid's onboarding orientation
   - `URL_DOWNLOADER_SPEC.md`  — spec doc paired with `core/url_downloader.py`
-  - `WORKING_AGREEMENT.md`    — Junaid <-> Adam working agreement
+  - _(retired — deleted on main, superseded by `AGENTS.md`; see [a0c5e69])_ the Junaid <-> Adam working-agreement doc
   - `IDEAS_BACKLOG.md`        — open-form ideas list (mostly empty template)
 - **Decision needed:**
   - (a) Keep all 4 on main (current state).

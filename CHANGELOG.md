@@ -239,6 +239,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Changed
 
+- **Repointed dangling `WORKING_AGREEMENT.md` references to `AGENTS.md`** (the canonical workflow doc) after that file was retired in `a0c5e69`. `scripts/check_adr_references.py` no longer lists the deleted `WORKING_AGREEMENT.md` in its `DOC_FILES` scan list (dead config — the `is_file()` guard already skipped it, so the checker still exits 0). `ONBOARDING.md` (file-tree, reading list, 30-min checklist, "what to do now") and `URL_DOWNLOADER_SPEC.md:461` repointed to `AGENTS.md`; the onboarding "PR template" / "Stuck Rule" cross-refs (neither exists in `AGENTS.md`) reworded to `AGENTS.md` §5–6 (commit + review discipline) and to the inline stuck rule respectively — no invented PR template. `BACKLOG.md` B-028 marks the file retired/superseded. CHANGELOG history left untouched. `grep -rn WORKING_AGREEMENT` (excl. CHANGELOG) now returns nothing. [_pending_]
+
 - `.gitignore`: ignore `config_video_mixer.json` (the real filename `mixer.py` writes — `mixer.py:305`) and drop the stale `config_video_merger.json`, which no app ever writes. The four runtime configs now match reality: renderer / cutter / merge / mixer. Previously the live mixer config was not ignored and could be committed by accident.
 
 - BACKLOG.md: filed **B-051** (updater SHA-256 check is fail-OPEN; a compromised/edited Google Sheet can still point at an arbitrary `.exe`). Records two options for Adam — (1) mandatory fail-closed SHA from a trusted channel, (2) Authenticode signature verification — marked needs-Adam-decision; not implemented. Surfaced by the C2 updater hardening.
