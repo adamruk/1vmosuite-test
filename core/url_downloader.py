@@ -325,7 +325,13 @@ def _build_ydl_opts(
     """Build the yt-dlp options dict for a single download."""
     opts: dict = {
         "format": QUALITY_FORMATS[quality],
-        "outtmpl": str(work_dir / "%(title).100B-%(id)s.%(ext)s"),
+        # outtmpl MUST be relative: yt-dlp ignores `paths` entirely when the
+        # output template is an absolute path, which would route .part /
+        # fragment files next to the final file in work_dir and defeat the
+        # temp isolation below. With a relative template, yt-dlp joins it
+        # onto paths["home"] for the finished file and paths["temp"] for
+        # intermediates. (prepare_filename still returns the full home path.)
+        "outtmpl": "%(title).100B-%(id)s.%(ext)s",
         # Isolate this download's partial/fragment files in a per-URL temp
         # dir so a cancel/crash leaves nothing in work_dir; the finished
         # file still lands in work_dir ("home"). _download_one rmtrees the
