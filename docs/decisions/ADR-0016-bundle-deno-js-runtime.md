@@ -2,8 +2,8 @@
 
 - **Status:** Accepted — implementation deferred to the packaging phase (see [B-044](../../BACKLOG.md))
 - **Date:** 2026-05-24
-- **Decision makers:** [adamruk]
-- **Related:** C4 of Phase A url-dl hardening (resolver + PATH injection, merged `124ea1d`); B-044 (packaging task); B-045 (TikTok/curl-cffi — separate, not covered here)
+- **Decision makers:** Adam (project lead)
+- **Related:** ADR-0013 (release packaging — extends its build-side scope); ADR-0007 (GPU pipeline; the bundled-binary pattern this mirrors); C4 of Phase A url-dl hardening (resolver + PATH injection, merged `124ea1d`); B-044 (packaging task); B-045 (TikTok/curl-cffi — separate, not covered here)
 
 ---
 
