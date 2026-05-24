@@ -20,6 +20,7 @@ validation smoke tests do not require yt-dlp to be installed.
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 import re
@@ -72,13 +73,20 @@ logger = logging.getLogger("core.url_downloader")
 
 # ========== Quality format mapping ==========
 
+# The download is a transient intermediate: it is ALWAYS re-encoded
+# downstream by the NVENC renderer, never shipped as-is. So we optimise
+# for source fidelity, not upload/playback compatibility — drop the
+# [ext=mp4]/[ext=m4a] container pins and let yt-dlp pick the highest-
+# quality video+audio streams regardless of container, muxed into mkv
+# (see merge_output_format below). mkv accepts essentially any codec
+# combination, so we never lose a better stream to a container mismatch.
 QUALITY_FORMATS: dict[str, str] = {
-    "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-    "1080p": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]",
-    "720p": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]",
-    "480p": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]",
-    "360p": "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]",
-    "smallest": "worst[ext=mp4]/worst",
+    "best": "bv*+ba/b",
+    "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
+    "720p": "bv*[height<=720]+ba/b[height<=720]",
+    "480p": "bv*[height<=480]+ba/b[height<=480]",
+    "360p": "bv*[height<=360]+ba/b[height<=360]",
+    "smallest": "worst/w",
 }
 
 VALID_BROWSERS = {"chrome", "firefox", "edge", "brave", "safari"}
@@ -246,7 +254,10 @@ def _build_ydl_opts(
         "format": QUALITY_FORMATS[quality],
         "outtmpl": str(work_dir / "%(title).100B-%(id)s.%(ext)s"),
         "restrict_filenames": True,
-        "merge_output_format": "mp4",
+        # mkv intermediate: the renderer always re-encodes the download, so
+        # we prefer a container that accepts any codec combo over one that
+        # is upload-friendly. Avoids "incompatible codec for mp4" mux errors.
+        "merge_output_format": "mkv",
         "noplaylist": True,
         "quiet": True,
         # Phase 2d production-hardening fix (Issue 6): silence yt-dlp's
@@ -370,10 +381,15 @@ def _download_one(
 
     actual_path = filename
     if not actual_path.exists():
-        candidates = list(work_dir.glob(f"{filename.stem}.*"))
+        # prepare_filename predicts the pre-merge extension; after a
+        # merge_output_format=mkv mux the real file may carry a different
+        # suffix. Trust prepare_filename first, then fall back to an
+        # extension-agnostic glob on the (glob-escaped) stem and take
+        # whatever the muxer actually wrote. No container is preferred —
+        # the intermediate is re-encoded downstream regardless.
+        candidates = list(work_dir.glob(f"{glob.escape(filename.stem)}.*"))
         if candidates:
-            mp4s = [p for p in candidates if p.suffix.lower() == ".mp4"]
-            actual_path = mp4s[0] if mp4s else candidates[0]
+            actual_path = candidates[0]
         else:
             err = PostprocessError(f"Output file missing after download: {filename}")
             logger.error("%s", err)

@@ -200,7 +200,9 @@ def test_youtube_short_downloads(tmp_path: Path) -> None:
     assert results[0].success is True, f"error={results[0].error}"
     assert results[0].path is not None
     assert results[0].path.exists()
-    assert results[0].path.suffix.lower() == ".mp4"
+    # Intermediate is now a quality-maximal mkv mux (merge_output_format=mkv);
+    # a progressive single-stream fetch may keep its native container.
+    assert results[0].path.suffix.lower() in {".mkv", ".mp4", ".webm"}
 
 
 @_skip_online
