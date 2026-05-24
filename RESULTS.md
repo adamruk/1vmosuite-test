@@ -553,3 +553,123 @@ Log hashes re-confirmed present on this branch: `ccd6b36`, `7f01263`, `fcd424b`,
 - B-040 re-confirmed still Open?                                              YES
 - Earlier snapshot sections left intact (append-only)?                        YES
 - No GPU/NVENC run by VERIFY in this reconciliation (CPU libx264 only)?       YES
+
+---
+---
+
+# MANAGER REVIEW — phase-a-url-dl-hardening  (phase: url-dl-hardening)
+
+- **Recorded:** 2026-05-24
+- **Auditor:** VERIFY session via `/manager-review` (read-only)
+- **Base:** `phase3-adam-v39-merge` (`7484196`) → **HEAD** `9a2263a` (14 commits)
+- **Scope diff:** `core/url_downloader.py`, `requirements.txt`, `tests/smoke/test_url_downloader.py` (matches main.json `scope_files` exactly)
+- **Rules applied:** 14 durable + 10 `phase_rules["url-dl-hardening"]`
+- **Suite re-run by me:** `pytest tests/smoke/test_url_downloader.py` → **28 passed, 6 skipped** (6 online deselected); `py_compile` OK. ruff not installed in this venv (MAIN's "ruff: All checks passed" not independently re-confirmed).
+
+## Verdict: **PASSED_WITH_WARNINGS** · Grade **A** (95%)
+
+`score_pct = 20 / (20 + 0 + 2*0.5) * 100 = 95.2`. 20 PASS, 0 FAIL, 2 WARN, 2 SKIP. No critical FAIL ⇒ not blocked.
+
+| rule id | name | severity | result | evidence |
+|---------|------|----------|--------|----------|
+| URLDL-C1-FORMAT | Quality-maximal mkv intermediate | critical | ✓ PASS | `QUALITY_FORMATS` L117-124 has no `[ext=...]` pins, height caps retained (`bv*[height<=1080]+ba/b...`); `merge_output_format":"mkv"` L338; glob fallback `glob.escape(filename.stem)` L523, no `.mp4` preference (`candidates[0]` L525). |
+| URLDL-C2-HOOK | Progress hook trivial (#5957) | critical | ✓ PASS | `_hook` L437-459 hot path = 3 `d.get` reads + one division (L450-452) + callback; `logger.exception` is in the cold except (caller-callback failure only) L458-459. `subtitle_langs` threaded: `download_videos` L572 → `_download_one` L406 → `_build_ydl_opts` L320 → `list(subtitle_langs)` L379. Online subs+progress test L412-435 asserts video+`.srt`+`max(seen)>=100`. |
+| URLDL-C3-CLEANUP | Partial-file cleanup after with-block | critical | ✓ PASS | `paths={"home":work_dir,"temp":temp_dir}` L333; `temp_dir=work_dir/".ytdl_tmp_{idx}"` L461; `shutil.rmtree(temp_dir, ignore_errors=True)` in `finally` L558-561, AFTER the `with YoutubeDL` (L482) closes — not in the hook. Online cancel test L440-464 asserts `cancelled` + zero `.part`/`.ytdl` + temp dir gone + pool drained. |
+| URLDL-C4-DENO | Bundled Deno / JS runtime | critical | ✓ PASS | `_resolve_bundled_js_runtime` L75-95 mirrors ffmpeg resolver (`_MEIPASS`→repo root, `deno(.exe)`); PATH prepend at import L98-105; `no_warnings` absent, `"logger": logger` L356; `js_runtime_missing` branch L232-233. Deno binary + .spec = noted integration task, not failed (per rule note). |
+| URLDL-C5-COOKIES | cookies_file replaces cookies_browser | critical | ✓ PASS | `grep cookies_browser\|VALID_BROWSERS` = **0**. `cookies_file:Optional[Path]` L575, validated `is_file`→FileNotFoundError / `R_OK`→PermissionError L623-628, `opts["cookiefile"]` L390; `cookies_invalid` branch L234-242; caller-owns-consent docstring L586-591. |
+| URLDL-C6A-LIMITS | Timeouts, concurrency cap, live guard | warning | ✓ PASS | `socket_timeout:30` L343; `max_concurrent>16` rejected L614-622 (bool + `>=1` kept); `is_live` guard after `extract_info(download=False)` probe L488-494. |
+| URLDL-C6B-CONTRACT | One result per URL guaranteed | critical | ✓ PASS | None-fill loop L694-704 synthesises a failed result for any `None` slot, preserves order — not a bare filter. Test L280-293 monkeypatches `as_completed`→empty, asserts `len(out)==len(urls)` + order. |
+| URLDL-C6C-ERRORCATS | Error categorization gaps closed | warning | ✓ PASS | `ImportError→dependency_missing` L213-214 + L431-435; members-only→`auth_required` L251-254; `"blocked"+"country"`→`region_locked` L262-263. Tests L189-216. |
+| URLDL-C7-PIN | yt-dlp[default] pin bumped | critical | ✓ PASS | `requirements.txt:25` `yt-dlp[default]>=2026.03.17` — regex `yt-dlp\[default\]>=2026\.03\.17` matched. |
+| URLDL-C8-PROXY | Optional proxy support | warning | ✓ PASS | `proxy:Optional[str]`→`opts["proxy"]` L395-396; scheme regex `^(https?\|socks5h?\|socks4)://` raises ValueError L633-637; `""`=direct L632-633; `geo_bypass` only in a comment (NOT set) L393; `proxy_error` branch L277-291; module reads no env/config. Tests L230-255. |
+| DURABLE-CONTRACT | Per-item failures never raise | critical | ✓ PASS | `_download_one` always returns a Result (every path caught); `download_videos` raises only on arg/precondition validation (L601-646); worker exceptions caught + categorised L681-688; None-fill guarantees a Result. |
+| DURABLE-NO-SILENT-CATCH | No silent error swallowing | warning | ✓ PASS | Every `except` in the diff logs or returns a categorised result (L423-427, L431-435, L456-459, L497-513, L681-688). `rmtree(ignore_errors=True)` L561 = deliberate best-effort cleanup (rule's allowed exception). |
+| DURABLE-SCOPE | Diff stays within phase scope | critical | ✓ PASS | `git diff --name-only` = the 3 declared files only; governance files (quality-rules.json/.claude) git-ignored locally + excluded by rule. |
+| DURABLE-COMMITS | One issue per commit | warning | ✓ PASS | 14 commits, each names one C-item; `53682f1` is an honest single-purpose fixup (restore shutil import). No bundling. |
+| DURABLE-DOCS | Docs / ADR move with behavior | warning | ⚠ WARN | Stale comment `core/url_downloader.py:39` still says `merge_output_format=mp4`, but C1 changed it to `mkv` (L338) — doc drift where behavior changed. Also new `subtitle_langs` param is undocumented in the `download_videos` docstring (L579-600 covers cookies_file/proxy only). Fix: update the L39 comment to `mkv` and add a `subtitle_langs` line to the docstring. |
+| DURABLE-HOOK-CONV | Hook scripts follow 1vmo convention | critical | ⊘ SKIP | No Claude Code hook script in the diff. |
+| QT-THREADSAFE | No UI access from worker threads | critical | ⚠ WARN | Core satisfied: the module touches zero Qt widgets. But `progress_callback` is invoked from worker threads (`_hook` fires on the download thread, L438) and the public `download_videos` docstring never states this — a future caller could wire a direct widget update into it and crash under a batch. The internal `_hook` comment documents the thread context; the caller-facing contract does not. Fix: add a docstring line — "progress_callback fires on worker threads; marshal any Qt UI update via a signal/queued connection." |
+| NO-BLOCK-EVENTLOOP | No blocking calls on the GUI thread | warning | ⊘ SKIP | No GUI-thread code in the diff; the module is worker-side by design (the QThread caller `URLDownloadWorker` is out of scope, verified-not-modified per main.json). |
+| SUBPROCESS-SAFE | FFmpeg / external process handling is safe | critical | ✓ PASS | No raw `subprocess`/`shell=True` in the diff; ffmpeg/deno are driven by yt-dlp in library mode (bundled binaries via `ffmpeg_location` L366 + PATH for Deno); `socket_timeout` bounds I/O; cancel via `_CancelledMarker` from the hook. |
+| FROZEN-BUILD | Frozen-build path correctness | critical | ✓ PASS | New Deno dependency resolved via `_MEIPASS`→repo root (L86-94) + PATH injection — mirrors the ffmpeg pattern; no bare-PATH/abs-dev-path assumption. The PyInstaller `.spec` entry + shipping the `deno` binary are the noted separate integration task (not a module FAIL, per C4). |
+| RESOURCE-CLEANUP | Resources released on all paths | warning | ✓ PASS | temp dir `rmtree` in `finally` (success/error/cancel) L558-561; `ThreadPoolExecutor` (L660) and `YoutubeDL` (L482) both context-managed. |
+| NO-SECRETS-PATHS | No hardcoded secrets or machine paths | critical | ✓ PASS | Added-line scan found only test fixtures (`1.2.3.4:8080`, `127.0.0.1:9050`); no `C:\Users\...`, API keys, or credentials. |
+| TESTS-PRESENT | Behavior changes ship with tests | warning | ✓ PASS | Each C-item maps to a test: C1 L264, C2 L412, C3 L440, C4 L336/L343, C5 L165/L174/L218, C6a L116/L125/L296, C6b L280, C6c L189/L201/L211, C8 L230-255. |
+| DETERMINISTIC-TESTS | Tests are deterministic | warning | ✓ PASS | Offline tests hit no network; the 6 network tests are `@pytest.mark.online` + `@_skip_online`; is_live / lost-future use `monkeypatch` (deterministic). |
+
+### Warnings to acknowledge (non-blocking)
+1. **DURABLE-DOCS** — `core/url_downloader.py:39` stale `merge_output_format=mp4` comment (now `mkv`); `subtitle_langs` undocumented in the docstring.
+2. **QT-THREADSAFE** — `download_videos` docstring doesn't warn that `progress_callback` runs on a worker thread (scale-risk for a future caller; the lone current caller marshals correctly).
+
+### Observations (info — not scored)
+- C2 subs+progress (L412) and C3 no-orphan (L440) guards are **online-only**, so the offline CI does not exercise the subtitle/cleanup assertions — run `RUN_ONLINE_TESTS=1` periodically to keep them honest.
+- C6c adds a metadata-only `extract_info(download=False)` probe before each download (one extra round-trip/URL) — acceptable, already noted by MAIN.
+
+### Manager-review self-review
+- Read the actual post-fix code in full, not the commit messages?            YES (709-line module + 481-line test read end-to-end)
+- Every PASS/FAIL/WARN cited to a real file:line, re-verified this session?    YES
+- Offline suite re-run by me and counted from real output (28 passed)?         YES
+- C7 pin confirmed by regex match, C5 removal by grep=0, C8 geo_bypass absent?  YES
+- No critical FAIL ⇒ correctly NOT blocked; no BLOCKERS.json / CLAUDE.md edit?  YES
+- No source/test/config edited by VERIFY (governance outputs only)?            YES
+
+---
+---
+
+# MANAGER REVIEW — phase-a-url-dl-hardening (RE-GRADE after C3 fix)
+
+- **Recorded:** 2026-05-24
+- **Phase key:** `url-dl-hardening` (branch substring; main.json.phase absent)
+- **Base:** `phase3-adam-v39-merge` (7484196)
+- **Audited HEAD:** `ca8d34f` (main.json.last_sha 9a2263a is stale; branch advanced by the doc + C3-fix commits — audited current HEAD)
+- **Changed files (scope):** `core/url_downloader.py`, `requirements.txt`, `tests/smoke/test_url_downloader.py`, `CHANGELOG.md` (+550 / −77)
+
+> This re-grade SUPERSEDES the prior A/95% PASSED_WITH_WARNINGS section above. The prior
+> URLDL-C3-CLEANUP "pass" was static-only and hollow (an online cancel test then proved temp
+> isolation was a no-op: absolute `outtmpl` made yt-dlp ignore `paths`). C3 was fixed in
+> `8a5fef6`; this pass re-verifies it with FIRST-HAND RUNTIME evidence, not structure alone.
+
+## Verdict table
+
+| rule id | name | severity | result | evidence |
+|---|---|---|---|---|
+| DURABLE-CONTRACT | Per-item failures never raise | critical | PASS | `_download_one` returns a DownloadResult on every error path (L420/431/439/498/504/517/537); aggregation loop catches `fut.result()` and records a result (url_downloader.py:690-699); only arg-validation raises (L612-657) |
+| DURABLE-NO-SILENT-CATCH | No silent swallowing | warning | PASS | every except logs/re-raises/records: L429,437,503,507,692; hook's `except Exception` logs `logger.exception` and re-raises `_CancelledMarker` first (L462-465) — matches the callback-guard exception clause |
+| DURABLE-SCOPE | Diff within scope | critical | PASS | 4 changed files all on-phase (module + pin + tests + CHANGELOG); no out-of-scope path |
+| DURABLE-COMMITS | One issue per commit | warning | PASS | 18 commits, each single-concern + descriptive (C1..C8, C3 fix 8a5fef6, doc/changelog split) |
+| DURABLE-DOCS | Docs move with behavior | warning | PASS | **prior warning CLEARED**: L39 comment now `merge_output_format=mkv`; `subtitle_langs` documented (L592); cookies_file consent (L597-602); proxy (L604-610) [cb8fe69] |
+| DURABLE-HOOK-CONV | Hook script convention | critical | SKIP | no Claude Code hook script in the diff |
+| QT-THREADSAFE | No UI access from workers | critical | PASS | **prior warning CLEARED**: module touches no Qt; docstring L593-595 states `progress_callback` fires on WORKER threads and callers must marshal via signal/queued connection [cb8fe69] |
+| NO-BLOCK-EVENTLOOP | No blocking on GUI thread | warning | SKIP | no GUI-thread code in diff; module is worker-side by design |
+| SUBPROCESS-SAFE | External-process handling safe | critical | PASS | no `shell=True` / no direct subprocess in module; yt-dlp (library) runs ffmpeg/deno — cancellable via `_CancelledMarker` in hook (L450), `socket_timeout=30` (L349), children reaped when `with yt_dlp.YoutubeDL` closes (L488) |
+| FROZEN-BUILD | Frozen-build path correctness | critical | PASS | new deno dep resolved by `_resolve_bundled_js_runtime` (L75-95) mirroring ffmpeg resolver (sys._MEIPASS→repo root), PATH-prepend at import (L98-105). deno binary + .spec entry are integration tasks per rule note — not a FAIL |
+| RESOURCE-CLEANUP | Resources released all paths | warning | PASS | temp dir rmtree in `finally` (L564-567); `with` on YoutubeDL (L488) and ThreadPoolExecutor (L671) |
+| NO-SECRETS-PATHS | No secrets / machine paths | critical | PASS | grep_diff: no credential literals, no `C:\Users\...`; proxy doc text is generic |
+| TESTS-PRESENT | Behavior ships with tests | warning | PASS | each Cx mapped to a test (34 test fns); C3→test_cancel_mid_download_leaves_no_orphans, C6d→test_lost_future_filled_so_len_matches_urls, etc. |
+| DETERMINISTIC-TESTS | Tests deterministic | warning | PASS | offline 28 pass with no network; online gated by `@pytest.mark.online`+`RUN_ONLINE_TESTS`; is_live/lost_future tests use monkeypatch/sys.modules injection |
+| URLDL-C1-FORMAT | Quality-maximal mkv | critical | PASS | QUALITY_FORMATS L117-124 (no `[ext=]`, height caps kept e.g. `bv*[height<=1080]`); `merge_output_format:"mkv"` L344; readback trusts prepare_filename + `glob.escape(filename.stem)` fallback L529, no `.mp4` hardcode. **Re-checked after C3 fix:** prepare_filename still returns the full abs path under work_dir (probed) — youtube_short + subtitles_and_progress online tests PASSED, file located post-download |
+| URLDL-C2-HOOK | Progress hook trivial (#5957) | critical | PASS | hook L443-465 = dict reads + one division (L458); logger only in the callback-failure branch (not hot path, documented L447); `subtitle_langs` threaded L578→L412→L320; test_subtitles_and_progress_reach_completion asserts video+.srt+pct 100 (L412) |
+| URLDL-C3-CLEANUP | Partial-file cleanup | critical | **PASS (runtime-verified)** | (1) outtmpl RELATIVE `"%(title).100B-%(id)s.%(ext)s"` L334, NOT `str(work_dir/...)`; `paths={"home":work_dir,"temp":temp_dir}` L339. (2) rmtree in `finally` L564-567 AFTER the `with` (opens L488), not in hook. (3) **RUNTIME:** VERIFY re-ran `RUN_ONLINE_TESTS=1 ...test_cancel_mid_download_leaves_no_orphans` → **1 passed (3.09s)**; asserts error_type=='cancelled', `rglob` over work_dir = 0 `.part`/`.ytdl` (covers temp dir), `.ytdl_tmp_0` removed, pool drained. Fixed in 8a5fef6 |
+| URLDL-C4-DENO | Bundled Deno / JS runtime | critical | PASS | `_resolve_bundled_js_runtime` L75-95 mirrors ffmpeg resolver; PATH-prepend at import L98-105; `logger` routing L362 (no `no_warnings`); `js_runtime_missing` branch L232-233. deno binary/.spec absent = integration task per rule |
+| URLDL-C5-COOKIES | cookies_file replaces browser | critical | PASS | grep `cookies_browser`/`VALID_BROWSERS` = 0; `cookies_file:Optional[Path]` L581 validated exists+readable raises (L634-639); `opts["cookiefile"]` L396; `cookies_invalid` branch L234-242; consent docstring L597-602 |
+| URLDL-C6A-LIMITS | Timeouts / cap / live guard | warning | PASS | `socket_timeout:30` L349; `max_concurrent>16` rejected L629 (keeps `>=1`+bool L626-628); `is_live` guard after extract_info L494-500 |
+| URLDL-C6B-CONTRACT | One result per URL | critical | PASS | None-fill loop L705-715 (not a bare filter), returns `out`; test_lost_future_filled_so_len_matches_urls L280 |
+| URLDL-C6C-ERRORCATS | Error categorization gaps | warning | PASS | ImportError→`dependency_missing` L213-214 + L440; members-only→auth_required L251-254; country-block→region_locked L262-263 |
+| URLDL-C7-PIN | yt-dlp[default] pin | critical | PASS | requirements.txt:25 `yt-dlp[default]>=2026.03.17` (regex match) |
+| URLDL-C8-PROXY | Optional proxy | warning | PASS | `proxy`→`opts["proxy"]` L401-402; scheme regex `^(https?\|socks5h?\|socks4)://` raises L644; `""`=direct; geo_bypass only in a comment (L399, deliberately NOT set); `proxy_error` branch L277-291; offline tests test_proxy_bad_scheme_raises L230 + test_categorize_socks_refused_is_proxy_error L250 |
+
+## Score / grade / status
+- **PASS 22, FAIL 0, WARN 0, SKIP 2.**
+- `score_pct = 22 / (22 + 0 + 0*0.5) * 100 = 100%` → **Grade A**.
+- No critical FAIL, no warning → **PASSED**. Not blocked; no BLOCKERS.json written; CLAUDE.md has no Agent Warnings line for this branch (nothing to clear).
+
+## Environmental note (not counted)
+- `test_tiktok_downloads_watermark_free` + the TikTok leg of `test_mixed_batch_returns_correct_per_url_outcomes` fail in this env — yt-dlp TikTok extractor "attempting impersonation, but no impersonate target available" (curl-cffi missing). Environmental, unrelated to C1–C8.
+
+### Re-grade self-review
+- C3 outtmpl confirmed RELATIVE + paths set, cited to real lines (334/339)?      YES
+- C3 cancel test re-run BY ME this session with runtime evidence (not static)?    YES (1 passed, 3.09s)
+- C1 output readback re-checked post-fix (prepare_filename + glob fallback)?       YES (probe + 2 online success tests)
+- Both prior warnings (DURABLE-DOCS, QT-THREADSAFE) confirmed cleared at file:line? YES
+- TikTok failures excluded as environmental, not charged to the branch?           YES
+- No source/test/config edited by VERIFY (only RESULTS.md + verify.json)?          YES
