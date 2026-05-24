@@ -1024,7 +1024,6 @@ class VideoRendererTool(QMainWindow):
         self.encoder_options = []
         self.selected_encoders = []
         self.encoder_params = {}
-        self.output_mapping = {}
         self.is_rendering = False
         self.num_threads = 3
         self.sequential_mode = False
@@ -2668,7 +2667,6 @@ class VideoRendererTool(QMainWindow):
             )
             self.current_label.setText("Currently Rendering: None")
             self.tree_output.clear()
-            self.output_mapping.clear()
             self.clear_progress_boxes()
 
             # Reset every worker label back to Ready before a new batch begins.
@@ -2817,9 +2815,6 @@ class VideoRendererTool(QMainWindow):
                     item.setText(3, "Loading...")
                     item.setText(4, "Loading...")
                     item.setText(5, "🟡 Processing")
-                    self.output_mapping[
-                        f"Processing - {os.path.basename(video_path)}"
-                    ] = item
                     encoder_params_list = []
                     for encoder_id in encoder_ids:
                         if not encoder_id:
@@ -3757,7 +3752,6 @@ class VideoRendererTool(QMainWindow):
         try:
             self.tree_output.clear()
             self.output_text.clear()
-            self.output_mapping.clear()
             self.encoder_options = self.load_encoder_options()
             self.load_encoders_to_tree()
             if self.videos:
@@ -4465,9 +4459,10 @@ class VideoRendererTool(QMainWindow):
 
         def _row_ref_distorted(it) -> tuple:
             # We stored the (input video_path, output basename) inside
-            # the row via column text 1 / 2. But filenames may have
-            # been mangled by clip_to_limit; the safer source is the
-            # mapping kept in output_mapping. Fall back to tree text.
+            # the row via column text 1 / 2. Re-derive the reference
+            # input from self.videos by basename match (filenames may
+            # have been mangled by clip_to_limit) and fall back to
+            # (None, None) when the row has no usable text.
             try:
                 in_name = it.text(1)
                 out_name = it.text(2)
