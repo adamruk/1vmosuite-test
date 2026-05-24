@@ -400,6 +400,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- **B-046 — `scripts/check_adr_references.py` self-exclusion failed on Windows.** The script excluded itself and the `docs/decisions/ADR-*` tree by substring-matching forward-slash paths against `str(p)`; on Windows a resolved `Path` stringifies with backslashes, so the exclusion never matched and the checker scanned — and falsely flagged — its own regex range comment (a fabricated four-digit ADR token), exiting 1 on every clean Windows run. Normalized the match to forward slashes via `Path.as_posix()` so it is separator-agnostic. Repro + regression coverage in `tests/smoke/test_check_adr_references.py` (exits 0 on a clean tree; self/ADR-tree exclusion holds; synthetic Windows-path normalization). [HASH-B046]
+
 - **Phase A — URL downloader hardening (C2/C3/C6c/C6d).** `core/url_downloader.py`.
   - Cancelled/failed downloads no longer leave `.part`/`.ytdl` fragments — fragments are isolated in a per-URL temp dir (relative `outtmpl` so yt-dlp honors `paths`) and removed in a `finally` after the download handle closes; verified by an online mid-download cancel test (no orphans in work_dir or temp dir). (C3) [39c7658, 53682f1, 8a5fef6]
   - Hardened progress + subtitle downloads against yt-dlp issue #5957. (C2) [1b0900c]

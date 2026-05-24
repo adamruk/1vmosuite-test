@@ -108,7 +108,12 @@ def collect_scan_paths() -> list[Path]:
         p = p.resolve()
         if p in seen:
             continue
-        if any(sub in str(p) for sub in EXCLUDE_PATH_SUBSTRINGS):
+        # EXCLUDE_PATH_SUBSTRINGS use forward slashes; on Windows a
+        # resolved Path stringifies with "\\", so str(p) substring
+        # matching silently fails (B-046) and the script scans — and
+        # falsely flags — itself + docs/decisions/ADR-*. Normalize to
+        # "/" via as_posix() so the match is path-separator-agnostic.
+        if any(sub in p.as_posix() for sub in EXCLUDE_PATH_SUBSTRINGS):
             continue
         seen.add(p)
         out.append(p)
