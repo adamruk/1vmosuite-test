@@ -269,6 +269,22 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution:** rename the class to a mixer-appropriate name (e.g. `VideoMixerTool`) and update its references within `mixer.py`. Confirm no other module imports the class by name. Group with any future `mixer.py`-touching commit.
 - **Trigger for pickup:** opportunistic — any `mixer.py` edit in that area, OR a focused mixer cleanup pass.
 
+## B-051: updater integrity is fail-OPEN — decide fail-closed SHA and/or Authenticode signature verification
+
+- **Status:** Open, **needs-Adam-decision**. Do NOT implement without Adam's explicit call on which option(s) to adopt — this changes update behavior (a wrong choice can block all legitimate updates or keep the door open).
+- **Priority:** MEDIUM (the auto-updater fetches and launches an `.exe` whose only authenticity gate is best-effort; a compromised or edited Google Sheet can still point at an arbitrary binary).
+- **Surfaced:** Phase 4 hardening follow-ups (2026-05-24), while dropping `shell=True` from the updater launch path (C2, see CHANGELOG `[1239be7]`).
+- **Locations:**
+  - `updater.py::_download_and_install` — the SHA-256 verification block (best-effort) and the `shutil.move` swap.
+  - `updater.py::_get_version_info` — the Google Sheet (`exe_name`, `version`, `download_link`) source of truth.
+- **Context:** As of C2 the updater enforces HTTPS-only download links and a PE-header (`b"MZ"`) sanity check before the swap, and removed the `shell=True` relaunch. But the SHA-256 check remains **fail-OPEN**: it only runs if a sibling `<download>.sha256` URL returns 200, and a 404 / network error is *tolerated* — the update proceeds with no integrity gate. The hash itself is also fetched from the same Dropbox/Sheet-controlled channel, so a single compromised channel can serve both a malicious `.exe` and a matching `.sha256`. The HTTPS + PE-header guards stop trivial MITM and wrong-file cases but do **not** establish that the binary is genuinely an Adam-published release.
+- **Options for Adam (not yet chosen):**
+  - **(1) Mandatory fail-CLOSED SHA-256 from a trusted channel.** Require the `.sha256` to be present and to match, and source the expected hash from a channel independent of the binary host (e.g. pinned in-repo / signed manifest / a separate domain) so the hash and the binary cannot be swapped together. Abort the update on any missing/mismatched hash. Risk: a missing/mis-published hash blocks *all* updates until fixed — needs a publishing-discipline checklist.
+  - **(2) Authenticode signature verification of the `.exe`.** Verify the downloaded binary carries a valid Authenticode signature chained to Adam's code-signing certificate (e.g. `WinVerifyTrust` via `ctypes`, or `signtool verify`) before the swap. Strongest guarantee of publisher authenticity; requires Adam to actually code-sign releases (cert acquisition + signing step in the build). Naturally Windows-only (the macOS path already returns early).
+  - **(1)+(2) combined** — signature as the authenticity gate, SHA-256 as the integrity/transport check.
+- **Resolution:** Adam picks (1), (2), or (1)+(2); then implement with a repro test and exercise the real download path. Record the decision in an ADR if it changes the ADR-0013 D5 updater-hardening contract.
+- **Trigger for pickup:** Adam's decision, OR the next release-signing / packaging cycle (relates to B-038 / B-044 build work).
+
 ## Resolved
 
 - **B-050** — manager-review overwrote RESULTS.md (truncate-and-replace via the Write tool), clobbering the cumulative audit log on every VERIFY run. Chose Option A: added `.claude/skills/manager-review/append_results.py` (reads existing RESULTS.md, PREPENDS a new dated verdict block newest-first, atomic temp+`os.replace`); rewrote SKILL.md Step 6 to write the block to a scratch file and call the helper via Bash, and forbade Write-tool use on RESULTS.md. Guard `tests/smoke/test_results_append.py` proves a 2nd run grows the file (4→10→16 lines in the CLI dry-run) and the 1st verdict survives. Resolved [0200733] 2026-05-24.
