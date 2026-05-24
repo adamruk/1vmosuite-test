@@ -18,4 +18,8 @@ Pillow>=10.0
 pydantic>=2.0,<3
 platformdirs>=4.0,<5
 pytest>=8.0,<9
-yt-dlp>=2025.06.09
+# The [default] extra bundles yt-dlp-ejs (the JS challenge scripts) so the
+# JS-runtime path works offline/airgapped; bare yt-dlp would fetch them
+# over the network at runtime. >=2026.03.17 is the floor validated against
+# the bundled Deno runtime (see core/url_downloader.py).
+yt-dlp[default]>=2026.03.17

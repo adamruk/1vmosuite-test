@@ -20,9 +20,11 @@ validation smoke tests do not require yt-dlp to be installed.
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 import re
+import shutil
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -34,7 +36,7 @@ from typing import Callable, Literal, Optional
 # macOS stabilization (Step 5): resolve the bundled ffmpeg directory so
 # yt-dlp uses the same binary the renderer uses, not whatever brew /
 # system ffmpeg happens to be in PATH. yt-dlp invokes ffmpeg as a
-# subprocess for muxing (merge_output_format=mp4) and subtitle remux;
+# subprocess for muxing (merge_output_format=mkv) and subtitle remux;
 # a mismatched system ffmpeg can produce containers the renderer
 # rejects or codecs the bundled ffmpeg can't read.
 #
@@ -70,18 +72,56 @@ _BUNDLED_FFMPEG_DIR = _resolve_bundled_ffmpeg_dir()
 logger = logging.getLogger("core.url_downloader")
 
 
+def _resolve_bundled_js_runtime() -> Optional[str]:
+    """Return the directory containing a bundled Deno binary, or None.
+
+    Modern yt-dlp needs a JavaScript runtime (Deno) to solve the JS
+    "n-sig"/PO-token challenges some extractors (notably YouTube) now
+    require; without one those downloads degrade or fail. Mirrors
+    _resolve_bundled_ffmpeg_dir: look in the PyInstaller bundle first,
+    then the repo root. yt-dlp discovers the runtime via shutil.which,
+    so the caller prepends this dir to PATH at import time.
+    """
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass))
+    # Source-mode: repo root is this file's parent's parent.
+    candidates.append(Path(__file__).resolve().parent.parent)
+    suffix = ".exe" if os.name == "nt" else ""
+    for cand in candidates:
+        if (cand / f"deno{suffix}").is_file():
+            return str(cand)
+    return None
+
+
+_BUNDLED_JS_RUNTIME_DIR = _resolve_bundled_js_runtime()
+if _BUNDLED_JS_RUNTIME_DIR:
+    # Prepend so yt-dlp's shutil.which finds the bundled Deno ahead of any
+    # system install. Import-time so it is set before the first download.
+    os.environ["PATH"] = (
+        _BUNDLED_JS_RUNTIME_DIR + os.pathsep + os.environ.get("PATH", "")
+    )
+    logger.info("Bundled JS runtime (Deno) added to PATH: %s", _BUNDLED_JS_RUNTIME_DIR)
+
+
 # ========== Quality format mapping ==========
 
+# The download is a transient intermediate: it is ALWAYS re-encoded
+# downstream by the NVENC renderer, never shipped as-is. So we optimise
+# for source fidelity, not upload/playback compatibility — drop the
+# [ext=mp4]/[ext=m4a] container pins and let yt-dlp pick the highest-
+# quality video+audio streams regardless of container, muxed into mkv
+# (see merge_output_format below). mkv accepts essentially any codec
+# combination, so we never lose a better stream to a container mismatch.
 QUALITY_FORMATS: dict[str, str] = {
-    "best": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-    "1080p": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[height<=1080]",
-    "720p": "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]",
-    "480p": "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[height<=480]",
-    "360p": "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best[height<=360]",
-    "smallest": "worst[ext=mp4]/worst",
+    "best": "bv*+ba/b",
+    "1080p": "bv*[height<=1080]+ba/b[height<=1080]",
+    "720p": "bv*[height<=720]+ba/b[height<=720]",
+    "480p": "bv*[height<=480]+ba/b[height<=480]",
+    "360p": "bv*[height<=360]+ba/b[height<=360]",
+    "smallest": "worst/w",
 }
-
-VALID_BROWSERS = {"chrome", "firefox", "edge", "brave", "safari"}
 
 
 # ========== Internal exception hierarchy ==========
@@ -170,6 +210,8 @@ def _categorize_error(exc: BaseException) -> str:
     """Translate an exception to one of the documented error_type strings."""
     if isinstance(exc, _CancelledMarker):
         return "cancelled"
+    if isinstance(exc, ImportError):
+        return "dependency_missing"
     if isinstance(exc, InvalidURLError):
         return "invalid_url"
     if isinstance(exc, UnsupportedSiteError):
@@ -187,6 +229,17 @@ def _categorize_error(exc: BaseException) -> str:
 
     msg = str(exc).lower()
 
+    if "no supported javascript runtime" in msg or "js runtime" in msg:
+        return "js_runtime_missing"
+    if "cookie" in msg and (
+        "expired" in msg
+        or "no longer valid" in msg
+        or "malformed" in msg
+        or "not a valid" in msg
+        or "could not be loaded" in msg
+        or "invalid" in msg
+    ):
+        return "cookies_invalid"
     if "unsupported url" in msg or "no suitable extractor" in msg:
         return "unsupported_site"
     if (
@@ -195,6 +248,10 @@ def _categorize_error(exc: BaseException) -> str:
         or "private video" in msg
         or "this video is private" in msg
         or ("cookies" in msg and "auth" in msg)
+        or "join this channel" in msg
+        or "members-only" in msg
+        or "members only" in msg
+        or "available to this channel's members" in msg
     ):
         return "auth_required"
     if (
@@ -202,6 +259,8 @@ def _categorize_error(exc: BaseException) -> str:
         or "geo restrict" in msg
         or ("geo" in msg and "block" in msg)
         or ("region" in msg and "restrict" in msg)
+        or "blocked it in your country" in msg
+        or ("blocked" in msg and "country" in msg)
     ):
         return "region_locked"
     if (
@@ -211,6 +270,25 @@ def _categorize_error(exc: BaseException) -> str:
         or "cloudflare" in msg
     ):
         return "rate_limited"
+    # Proxy failures must be checked before the generic network bucket
+    # below — a proxy error message often also contains "connection
+    # refused"/"unable to connect", which would otherwise be miscategorised
+    # as a plain network_error.
+    if (
+        "proxyerror" in msg
+        or "socks" in msg
+        or (
+            "proxy" in msg
+            and (
+                "refus" in msg
+                or "unable to connect" in msg
+                or "cannot connect" in msg
+                or "handshake" in msg
+                or "failed" in msg
+            )
+        )
+    ):
+        return "proxy_error"
     if any(
         s in msg
         for s in (
@@ -237,17 +315,38 @@ def _categorize_error(exc: BaseException) -> str:
 def _build_ydl_opts(
     quality: str,
     work_dir: Path,
+    temp_dir: Path,
     download_subtitles: bool,
-    cookies_browser: Optional[str],
+    subtitle_langs: list[str],
+    cookies_file: Optional[Path],
+    proxy: Optional[str],
     progress_hook: Callable[[dict], None],
 ) -> dict:
     """Build the yt-dlp options dict for a single download."""
     opts: dict = {
         "format": QUALITY_FORMATS[quality],
-        "outtmpl": str(work_dir / "%(title).100B-%(id)s.%(ext)s"),
+        # outtmpl MUST be relative: yt-dlp ignores `paths` entirely when the
+        # output template is an absolute path, which would route .part /
+        # fragment files next to the final file in work_dir and defeat the
+        # temp isolation below. With a relative template, yt-dlp joins it
+        # onto paths["home"] for the finished file and paths["temp"] for
+        # intermediates. (prepare_filename still returns the full home path.)
+        "outtmpl": "%(title).100B-%(id)s.%(ext)s",
+        # Isolate this download's partial/fragment files in a per-URL temp
+        # dir so a cancel/crash leaves nothing in work_dir; the finished
+        # file still lands in work_dir ("home"). _download_one rmtrees the
+        # temp dir in a finally after the YoutubeDL instance closes.
+        "paths": {"home": str(work_dir), "temp": str(temp_dir)},
         "restrict_filenames": True,
-        "merge_output_format": "mp4",
+        # mkv intermediate: the renderer always re-encodes the download, so
+        # we prefer a container that accepts any codec combo over one that
+        # is upload-friendly. Avoids "incompatible codec for mp4" mux errors.
+        "merge_output_format": "mkv",
         "noplaylist": True,
+        # Bound each socket read so a stalled connection fails fast and the
+        # retry machinery (retries/fragment_retries) can kick in, rather
+        # than a worker hanging indefinitely on a dead peer.
+        "socket_timeout": 30,
         "quiet": True,
         # Phase 2d production-hardening fix (Issue 6): silence yt-dlp's
         # own progress text to stderr. We already pipe per-URL progress
@@ -255,7 +354,12 @@ def _build_ydl_opts(
         # progress is duplicative and pollutes the console + terminal
         # output panel.
         "noprogress": True,
-        "no_warnings": True,
+        # Route yt-dlp's own log/warning/error output through our logger
+        # (instead of suppressing it) so signals like "No supported JS
+        # runtime" — see _resolve_bundled_js_runtime / "js_runtime_missing"
+        # — are visible in logs rather than silently swallowed. We do NOT
+        # set no_warnings (it would re-hide exactly those warnings).
+        "logger": logger,
         "retries": 3,
         # macOS stabilization (Step 5): pin yt-dlp's muxer to the
         # bundled ffmpeg. On macOS source-mode the user may have
@@ -278,7 +382,7 @@ def _build_ydl_opts(
             {
                 "writesubtitles": True,
                 "writeautomaticsub": True,
-                "subtitleslangs": ["en", "orig"],
+                "subtitleslangs": list(subtitle_langs),
                 "subtitlesformat": "srt/vtt/best",
                 "postprocessors": [
                     {
@@ -288,8 +392,14 @@ def _build_ydl_opts(
                 ],
             }
         )
-    if cookies_browser:
-        opts["cookiesfrombrowser"] = (cookies_browser,)
+    if cookies_file is not None:
+        opts["cookiefile"] = str(cookies_file)
+    # Empty string == direct connection (no proxy); only set the option for
+    # a real proxy URL. yt-dlp handles http/https/socks4/socks5/socks5h
+    # natively — we deliberately do NOT set geo_bypass (that spoofs an
+    # X-Forwarded-For header, a different layer that doesn't route traffic).
+    if proxy:
+        opts["proxy"] = proxy
     return opts
 
 
@@ -299,7 +409,9 @@ def _download_one(
     work_dir: Path,
     quality: str,
     download_subtitles: bool,
-    cookies_browser: Optional[str],
+    subtitle_langs: list[str],
+    cookies_file: Optional[Path],
+    proxy: Optional[str],
     progress_callback: Optional[Callable[[int, str, float, str], None]],
     cancel_event: Optional[threading.Event],
 ) -> DownloadResult:
@@ -324,9 +436,16 @@ def _download_one(
         import yt_dlp
     except ImportError as exc:
         logger.error("yt-dlp not installed: %s", exc)
-        return DownloadResult(url=url, success=False, error=exc, error_type="unknown")
+        return DownloadResult(
+            url=url, success=False, error=exc, error_type="dependency_missing"
+        )
 
     def _hook(d: dict) -> None:
+        # #5957 hardening: yt-dlp fires this hook on a tight loop from the
+        # download thread, so the hot path stays trivial — dict key reads
+        # plus a single division, then hand off to the caller's callback.
+        # No formatting, logging, or allocation here. (The except branch
+        # below only runs if the *caller's* callback raises — not hot path.)
         if cancel_event is not None and cancel_event.is_set():
             raise _CancelledMarker("cancelled")
         if progress_callback is None:
@@ -345,65 +464,107 @@ def _download_one(
         except Exception:
             logger.exception("progress_callback raised; continuing")
 
+    temp_dir = work_dir / f".ytdl_tmp_{url_index}"
     opts = _build_ydl_opts(
-        quality, work_dir, download_subtitles, cookies_browser, _hook
+        quality,
+        work_dir,
+        temp_dir,
+        download_subtitles,
+        subtitle_langs,
+        cookies_file,
+        proxy,
+        _hook,
     )
     logger.info("Starting download: %s", url)
 
+    # The temp dir is rmtree'd in the finally — but only AFTER the
+    # `with yt_dlp.YoutubeDL(...)` block exits. yt-dlp holds the .part /
+    # fragment handles open until the YoutubeDL instance closes, so
+    # cleaning up earlier (e.g. inside the progress hook) would race the
+    # still-open handles on Windows. finally covers success, error, and
+    # cancel alike.
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = Path(ydl.prepare_filename(info))
-    except _CancelledMarker as exc:
-        return DownloadResult(url=url, success=False, error=exc, error_type="cancelled")
-    except Exception as exc:
-        # Unwrap yt-dlp DownloadError if its cause is a _CancelledMarker
-        if isinstance(getattr(exc, "__cause__", None), _CancelledMarker) or isinstance(
-            getattr(exc, "__context__", None), _CancelledMarker
-        ):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                # Metadata-only probe first so we can bail on live streams
+                # BEFORE starting a download that would otherwise run for
+                # the duration of the broadcast. _validate_url already
+                # rejects /live/ URLs; this catches live content reached via
+                # a channel/watch URL that has no /live/ marker.
+                info = ydl.extract_info(url, download=False)
+                if isinstance(info, dict) and info.get("is_live"):
+                    err = InvalidURLError("Live streams not supported")
+                    logger.error("Refusing live stream: %s", url)
+                    return DownloadResult(
+                        url=url, success=False, error=err, error_type="invalid_url"
+                    )
+                info = ydl.extract_info(url, download=True)
+                filename = Path(ydl.prepare_filename(info))
+        except _CancelledMarker as exc:
             return DownloadResult(
                 url=url, success=False, error=exc, error_type="cancelled"
             )
-        error_type = _categorize_error(exc)
-        logger.error("Download failed (%s): %s — %s", error_type, url, exc)
-        return DownloadResult(url=url, success=False, error=exc, error_type=error_type)
-
-    actual_path = filename
-    if not actual_path.exists():
-        candidates = list(work_dir.glob(f"{filename.stem}.*"))
-        if candidates:
-            mp4s = [p for p in candidates if p.suffix.lower() == ".mp4"]
-            actual_path = mp4s[0] if mp4s else candidates[0]
-        else:
-            err = PostprocessError(f"Output file missing after download: {filename}")
-            logger.error("%s", err)
+        except Exception as exc:
+            # Unwrap yt-dlp DownloadError if its cause is a _CancelledMarker
+            if isinstance(
+                getattr(exc, "__cause__", None), _CancelledMarker
+            ) or isinstance(getattr(exc, "__context__", None), _CancelledMarker):
+                return DownloadResult(
+                    url=url, success=False, error=exc, error_type="cancelled"
+                )
+            error_type = _categorize_error(exc)
+            logger.error("Download failed (%s): %s — %s", error_type, url, exc)
             return DownloadResult(
-                url=url, success=False, error=err, error_type="postprocess_error"
+                url=url, success=False, error=exc, error_type=error_type
             )
 
-    sub_path: Optional[Path] = None
-    if download_subtitles:
-        for cand in sorted(work_dir.glob(f"{actual_path.stem}*.srt")):
-            sub_path = cand
-            break
+        actual_path = filename
+        if not actual_path.exists():
+            # prepare_filename predicts the pre-merge extension; after a
+            # merge_output_format=mkv mux the real file may carry a different
+            # suffix. Trust prepare_filename first, then fall back to an
+            # extension-agnostic glob on the (glob-escaped) stem and take
+            # whatever the muxer actually wrote. No container is preferred —
+            # the intermediate is re-encoded downstream regardless.
+            candidates = list(work_dir.glob(f"{glob.escape(filename.stem)}.*"))
+            if candidates:
+                actual_path = candidates[0]
+            else:
+                err = PostprocessError(
+                    f"Output file missing after download: {filename}"
+                )
+                logger.error("%s", err)
+                return DownloadResult(
+                    url=url, success=False, error=err, error_type="postprocess_error"
+                )
 
-    title: Optional[str] = None
-    duration_seconds: Optional[int] = None
-    if isinstance(info, dict):
-        t = info.get("title")
-        title = t if isinstance(t, str) else None
-        dur = info.get("duration")
-        duration_seconds = int(dur) if isinstance(dur, (int, float)) else None
+        sub_path: Optional[Path] = None
+        if download_subtitles:
+            for cand in sorted(work_dir.glob(f"{actual_path.stem}*.srt")):
+                sub_path = cand
+                break
 
-    logger.info("Download complete: %s -> %s", url, actual_path)
-    return DownloadResult(
-        url=url,
-        success=True,
-        path=actual_path,
-        subtitle_path=sub_path,
-        title=title,
-        duration_seconds=duration_seconds,
-    )
+        title: Optional[str] = None
+        duration_seconds: Optional[int] = None
+        if isinstance(info, dict):
+            t = info.get("title")
+            title = t if isinstance(t, str) else None
+            dur = info.get("duration")
+            duration_seconds = int(dur) if isinstance(dur, (int, float)) else None
+
+        logger.info("Download complete: %s -> %s", url, actual_path)
+        return DownloadResult(
+            url=url,
+            success=True,
+            path=actual_path,
+            subtitle_path=sub_path,
+            title=title,
+            duration_seconds=duration_seconds,
+        )
+    finally:
+        # Isolated per-URL fragment dir — safe to remove wholesale. The
+        # finished output already lives in work_dir ("home"), not here.
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # ========== Public function ==========
@@ -414,9 +575,11 @@ def download_videos(
     work_dir: Path,
     quality: Literal["best", "1080p", "720p", "480p", "360p", "smallest"] = "best",
     download_subtitles: bool = False,
+    subtitle_langs: Optional[list[str]] = None,
     max_concurrent: int = 3,
     progress_callback: Optional[Callable[[int, str, float, str], None]] = None,
-    cookies_browser: Optional[str] = None,
+    cookies_file: Optional[Path] = None,
+    proxy: Optional[str] = None,
     cancel_event: Optional[threading.Event] = None,
 ) -> list[DownloadResult]:
     """Download a batch of video URLs concurrently.
@@ -425,6 +588,26 @@ def download_videos(
     Per-URL failures are reported on the Result; only argument validation
     raises (ValueError, FileNotFoundError, PermissionError). See
     URL_DOWNLOADER_SPEC.md for full semantics and the error_type taxonomy.
+
+    - subtitle_langs: subtitle language codes to fetch (default ["en"]).
+    - progress_callback: invoked from WORKER threads, not the GUI thread; callers
+      updating a Qt UI must marshal via a signal/queued connection and must not
+      touch widgets directly.
+
+    cookies_file, when given, is passed to yt-dlp as `cookiefile` (a
+    Netscape-format cookie jar) to access auth-walled content. The CALLER
+    is responsible for obtaining the user's consent before supplying it:
+    downloading auth-walled media may violate a platform's Terms of
+    Service and can put the account whose cookies are used at risk.
+    Consent UI is out of scope for this module.
+
+    proxy, when given, routes ALL downloads in this call through one proxy
+    (it is a per-instance yt-dlp option, not per-URL); callers needing
+    per-platform routing must issue separate calls. Accepts http(s),
+    socks4, socks5, and socks5h URLs; "" means a direct connection. On a
+    censored network a remote-DNS proxy — HTTP CONNECT or socks5h, which
+    resolve hostnames proxy-side — is required, since a plain socks5 proxy
+    leaks/uses local DNS.
     """
     if not isinstance(urls, list) or len(urls) == 0:
         raise ValueError("urls must be a non-empty list")
@@ -435,17 +618,34 @@ def download_videos(
         raise ValueError(
             f"invalid quality {quality!r}; must be one of {sorted(QUALITY_FORMATS)}"
         )
+    # Default to English captions only; normalised here (not as a mutable
+    # default arg) so callers and threads never share one list instance.
+    if subtitle_langs is None:
+        subtitle_langs = ["en"]
     if (
         not isinstance(max_concurrent, int)
         or isinstance(max_concurrent, bool)
         or max_concurrent < 1
+        or max_concurrent > 16
     ):
-        raise ValueError(f"max_concurrent must be an int >= 1, got {max_concurrent!r}")
-    if cookies_browser is not None and cookies_browser not in VALID_BROWSERS:
         raise ValueError(
-            f"unknown cookies_browser {cookies_browser!r}; "
-            f"must be one of {sorted(VALID_BROWSERS)}"
+            f"max_concurrent must be an int between 1 and 16, got {max_concurrent!r}"
         )
+    if cookies_file is not None:
+        cookies_file = Path(cookies_file)
+        if not cookies_file.is_file():
+            raise FileNotFoundError(f"cookies_file does not exist: {cookies_file}")
+        if not os.access(cookies_file, os.R_OK):
+            raise PermissionError(f"cookies_file is not readable: {cookies_file}")
+    if proxy is not None:
+        if not isinstance(proxy, str):
+            raise ValueError(f"proxy must be a str or None, got {type(proxy).__name__}")
+        # "" is allowed (direct); a non-empty value must be a supported scheme.
+        if proxy != "" and not re.match(r"^(https?|socks5h?|socks4)://", proxy):
+            raise ValueError(
+                f"unsupported proxy URL {proxy!r}; scheme must be one of "
+                "http, https, socks4, socks5, socks5h"
+            )
 
     if not isinstance(work_dir, Path):
         work_dir = Path(work_dir)
@@ -477,7 +677,9 @@ def download_videos(
                 work_dir,
                 quality,
                 download_subtitles,
-                cookies_browser,
+                subtitle_langs,
+                cookies_file,
+                proxy,
                 progress_callback,
                 cancel_event,
             ): idx
@@ -496,7 +698,23 @@ def download_videos(
                     error_type=_categorize_error(exc),
                 )
 
-    succeeded = sum(1 for r in results if r and r.success)
+    # One-result-per-URL contract: a future that neither returned nor
+    # raised (e.g. pool shutdown lost it) would leave a None slot. Fill any
+    # such slot with a synthetic failure so len(out) == len(urls) ALWAYS
+    # and positional order is preserved.
+    out: list[DownloadResult] = []
+    for idx, r in enumerate(results):
+        if r is None:
+            logger.error("No result produced for %r; synthesising failure", urls[idx])
+            r = DownloadResult(
+                url=urls[idx],
+                success=False,
+                error=URLDownloadError("worker produced no result"),
+                error_type="unknown",
+            )
+        out.append(r)
+
+    succeeded = sum(1 for r in out if r.success)
     logger.info("Batch complete: %d/%d succeeded", succeeded, n)
 
-    return [r for r in results if r is not None]
+    return out
