@@ -230,6 +230,22 @@ def _acquire_gpu_slot(semaphore, should_cancel, poll_ms: int = 100) -> bool:
     return False
 
 
+def _split_group_name(full_name: str) -> tuple[str, str]:
+    """Split an EncoderDialog "Group|Name" field into ``(group, name)``.
+
+    B-020: ``.strip()`` each half so that input like ``"Test | My Preset"``
+    yields ``("Test", "My Preset")`` rather than ``("Test ", " My Preset")``.
+    Group lookups elsewhere use exact string match and silently miss on
+    whitespace adjacent to the pipe. With no pipe, group is ``""`` and the
+    full name (already stripped by ``EncoderDialog.accept``) is returned
+    unchanged. Used by both the Add/Clone helper and the Edit handler.
+    """
+    parts = full_name.split("|", 1)
+    if len(parts) > 1:
+        return parts[0].strip(), parts[1].strip()
+    return "", full_name
+
+
 def _allocate_user_preset_id(name: str, existing_user_ids) -> str:
     """Derive a collision-free ``user:<slug>`` id for a new user preset.
 
@@ -3628,9 +3644,7 @@ class VideoRendererTool(QMainWindow):
         """
         item = QTreeWidgetItem(self.tree_encoders)
         item.setText(0, str(len(self.encoder_options) + 1))
-        name_parts = result["name"].split("|", 1)
-        group = name_parts[0] if len(name_parts) > 1 else ""
-        name = name_parts[1] if len(name_parts) > 1 else result["name"]
+        group, name = _split_group_name(result["name"])  # B-020
         # 2c-c-4: derive user-namespace id with disambiguation suffix.
         existing_user_ids = {
             p.id for p in self.encoder_options if p.id.startswith("user:")
@@ -3690,9 +3704,7 @@ class VideoRendererTool(QMainWindow):
         }
         dialog = EncoderDialog(self, "Edit Encoder", initial_values)
         if dialog.exec() == QDialog.Accepted and dialog.result:
-            name_parts = dialog.result["name"].split("|", 1)
-            group = name_parts[0] if len(name_parts) > 1 else ""
-            name = name_parts[1] if len(name_parts) > 1 else dialog.result["name"]
+            group, name = _split_group_name(dialog.result["name"])  # B-020
             item.setText(1, group)
             item.setText(2, name)
             item.setText(3, dialog.result["description"])
