@@ -214,7 +214,15 @@ class DriveUpdater:
                             except Exception as e:
                                 print(f"Error deleting old version: {str(e)}")
                         try:
-                            subprocess.Popen([exe_name], shell=True)
+                            # Phase 4 hardening: no shell=True. The arg is
+                            # already a list, so a shell adds nothing but a
+                            # command-injection surface (exe_name comes from a
+                            # remote Google Sheet). Match the CREATE_NO_WINDOW
+                            # style of the delete-batch Popen above.
+                            subprocess.Popen(
+                                [exe_name],
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                            )
                             sys.exit(0)
                         except Exception as e:
                             print(f"Error launching new version: {str(e)}")
@@ -273,6 +281,14 @@ class DriveUpdater:
     ) -> Tuple[bool, str]:
         """Tải file mới từ Dropbox\n        \n        Args:\n            download_link: Link tải file\n            current_exe: Tên file hiện tại\n            new_exe_name: Tên file mới\n            is_asset: True nếu là file assets (.rar), False nếu là file exe\n"""
         try:
+            # Phase 4 hardening: refuse non-HTTPS download links outright.
+            # download_link originates from a remote Google Sheet; an http://
+            # (or other-scheme) link would expose the .exe swap to a trivial
+            # man-in-the-middle rewrite of the binary about to be launched.
+            if not download_link.lower().startswith("https://"):
+                error_msg = f"Refusing non-HTTPS download link: {download_link[:80]}"
+                print(f"❌ {error_msg}")
+                return (False, error_msg)
             temp_dir = tempfile.mkdtemp()
             if is_asset:
                 if not new_exe_name.lower().endswith(".rar"):
@@ -351,6 +367,31 @@ class DriveUpdater:
                         print(f"✅ SHA256 verified: {actual[:12]}…")
             except Exception as exc:
                 print(f"⚠️ SHA256 verify skipped: {exc}")
+
+            # Phase 4 hardening: verify the downloaded executable is a real
+            # PE binary (DOS header magic b"MZ") before swapping it in and
+            # launching it. A Sheet that points at an HTML error page, a
+            # truncated download, or the wrong file would otherwise be moved
+            # into place and run. Assets (.rar) are exempt — not PE files.
+            if not is_asset:
+                try:
+                    with open(temp_file, "rb") as fh:
+                        magic = fh.read(2)
+                except OSError as exc:
+                    error_msg = f"Could not read downloaded file for PE check: {exc}"
+                    print(f"❌ {error_msg}")
+                    return (False, error_msg)
+                if magic != b"MZ":
+                    error_msg = (
+                        "Downloaded file is not a valid Windows executable "
+                        f"(missing MZ header, got {magic!r}). Update aborted."
+                    )
+                    print(f"❌ {error_msg}")
+                    try:
+                        os.remove(temp_file)
+                    except OSError:
+                        pass
+                    return (False, error_msg)
 
             # 2. Backup-before-swap. If the target file exists, rename
             #    it to <name>.backup_<ts> first. shutil.move below
