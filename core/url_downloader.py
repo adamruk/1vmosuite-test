@@ -210,6 +210,8 @@ def _categorize_error(exc: BaseException) -> str:
     """Translate an exception to one of the documented error_type strings."""
     if isinstance(exc, _CancelledMarker):
         return "cancelled"
+    if isinstance(exc, ImportError):
+        return "dependency_missing"
     if isinstance(exc, InvalidURLError):
         return "invalid_url"
     if isinstance(exc, UnsupportedSiteError):
@@ -395,7 +397,9 @@ def _download_one(
         import yt_dlp
     except ImportError as exc:
         logger.error("yt-dlp not installed: %s", exc)
-        return DownloadResult(url=url, success=False, error=exc, error_type="unknown")
+        return DownloadResult(
+            url=url, success=False, error=exc, error_type="dependency_missing"
+        )
 
     def _hook(d: dict) -> None:
         # #5957 hardening: yt-dlp fires this hook on a tight loop from the

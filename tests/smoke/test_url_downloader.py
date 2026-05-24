@@ -186,6 +186,13 @@ def test_valid_cookies_file_passes_validation(tmp_path: Path) -> None:
     assert results[0].error_type == "invalid_url"
 
 
+def test_categorize_importerror_is_dependency_missing() -> None:
+    assert _categorize_error(ImportError("No module named 'yt_dlp'")) == (
+        "dependency_missing"
+    )
+    assert _categorize_error(ModuleNotFoundError("nope")) == "dependency_missing"
+
+
 def test_categorize_cookies_invalid_message() -> None:
     assert (
         _categorize_error(
