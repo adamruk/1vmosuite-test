@@ -474,6 +474,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - **Verify by frozen-`.exe` YouTube extraction** — the only thing that proves the bundled `_MEIPASS` path works end-to-end (a source-mode pass does not).
 - **ADR:** an ADR documenting the bundle-a-JS-runtime decision is warranted (size cost, Deno pinning policy, why full `deno` over `denort`).
 - **Trigger for pickup:** the packaging / frozen-build phase, OR a teammate reports YouTube extraction failing in the `.exe`.
+- **Note — ffmpeg is the template, not new work.** ffmpeg is already bundled into the build (ADR-0013 D4 integrity check + `_resolve_bundled_ffmpeg_dir` in core/url_downloader.py). Deno bundling copies that exact pattern: same staging location, same `_MEIPASS` dest. At packaging time, ONE frozen-build verification confirms BOTH ship inside the `.exe` — a real YouTube extraction (proves Deno + yt_dlp_ejs) AND a real NVENC render (proves ffmpeg). Don't re-invent ffmpeg's bundling; mirror it.
 
 ## B-045: curl-cffi needed for TikTok impersonation in online tests
 
