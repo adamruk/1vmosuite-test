@@ -245,6 +245,7 @@ def _categorize_error(exc: BaseException) -> str:
 def _build_ydl_opts(
     quality: str,
     work_dir: Path,
+    temp_dir: Path,
     download_subtitles: bool,
     subtitle_langs: list[str],
     cookies_browser: Optional[str],
@@ -254,6 +255,11 @@ def _build_ydl_opts(
     opts: dict = {
         "format": QUALITY_FORMATS[quality],
         "outtmpl": str(work_dir / "%(title).100B-%(id)s.%(ext)s"),
+        # Isolate this download's partial/fragment files in a per-URL temp
+        # dir so a cancel/crash leaves nothing in work_dir; the finished
+        # file still lands in work_dir ("home"). _download_one rmtrees the
+        # temp dir in a finally after the YoutubeDL instance closes.
+        "paths": {"home": str(work_dir), "temp": str(temp_dir)},
         "restrict_filenames": True,
         # mkv intermediate: the renderer always re-encodes the download, so
         # we prefer a container that accepts any codec combo over one that
@@ -363,70 +369,94 @@ def _download_one(
         except Exception:
             logger.exception("progress_callback raised; continuing")
 
+    temp_dir = work_dir / f".ytdl_tmp_{url_index}"
     opts = _build_ydl_opts(
-        quality, work_dir, download_subtitles, subtitle_langs, cookies_browser, _hook
+        quality,
+        work_dir,
+        temp_dir,
+        download_subtitles,
+        subtitle_langs,
+        cookies_browser,
+        _hook,
     )
     logger.info("Starting download: %s", url)
 
+    # The temp dir is rmtree'd in the finally — but only AFTER the
+    # `with yt_dlp.YoutubeDL(...)` block exits. yt-dlp holds the .part /
+    # fragment handles open until the YoutubeDL instance closes, so
+    # cleaning up earlier (e.g. inside the progress hook) would race the
+    # still-open handles on Windows. finally covers success, error, and
+    # cancel alike.
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = Path(ydl.prepare_filename(info))
-    except _CancelledMarker as exc:
-        return DownloadResult(url=url, success=False, error=exc, error_type="cancelled")
-    except Exception as exc:
-        # Unwrap yt-dlp DownloadError if its cause is a _CancelledMarker
-        if isinstance(getattr(exc, "__cause__", None), _CancelledMarker) or isinstance(
-            getattr(exc, "__context__", None), _CancelledMarker
-        ):
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = Path(ydl.prepare_filename(info))
+        except _CancelledMarker as exc:
             return DownloadResult(
                 url=url, success=False, error=exc, error_type="cancelled"
             )
-        error_type = _categorize_error(exc)
-        logger.error("Download failed (%s): %s — %s", error_type, url, exc)
-        return DownloadResult(url=url, success=False, error=exc, error_type=error_type)
-
-    actual_path = filename
-    if not actual_path.exists():
-        # prepare_filename predicts the pre-merge extension; after a
-        # merge_output_format=mkv mux the real file may carry a different
-        # suffix. Trust prepare_filename first, then fall back to an
-        # extension-agnostic glob on the (glob-escaped) stem and take
-        # whatever the muxer actually wrote. No container is preferred —
-        # the intermediate is re-encoded downstream regardless.
-        candidates = list(work_dir.glob(f"{glob.escape(filename.stem)}.*"))
-        if candidates:
-            actual_path = candidates[0]
-        else:
-            err = PostprocessError(f"Output file missing after download: {filename}")
-            logger.error("%s", err)
+        except Exception as exc:
+            # Unwrap yt-dlp DownloadError if its cause is a _CancelledMarker
+            if isinstance(
+                getattr(exc, "__cause__", None), _CancelledMarker
+            ) or isinstance(getattr(exc, "__context__", None), _CancelledMarker):
+                return DownloadResult(
+                    url=url, success=False, error=exc, error_type="cancelled"
+                )
+            error_type = _categorize_error(exc)
+            logger.error("Download failed (%s): %s — %s", error_type, url, exc)
             return DownloadResult(
-                url=url, success=False, error=err, error_type="postprocess_error"
+                url=url, success=False, error=exc, error_type=error_type
             )
 
-    sub_path: Optional[Path] = None
-    if download_subtitles:
-        for cand in sorted(work_dir.glob(f"{actual_path.stem}*.srt")):
-            sub_path = cand
-            break
+        actual_path = filename
+        if not actual_path.exists():
+            # prepare_filename predicts the pre-merge extension; after a
+            # merge_output_format=mkv mux the real file may carry a different
+            # suffix. Trust prepare_filename first, then fall back to an
+            # extension-agnostic glob on the (glob-escaped) stem and take
+            # whatever the muxer actually wrote. No container is preferred —
+            # the intermediate is re-encoded downstream regardless.
+            candidates = list(work_dir.glob(f"{glob.escape(filename.stem)}.*"))
+            if candidates:
+                actual_path = candidates[0]
+            else:
+                err = PostprocessError(
+                    f"Output file missing after download: {filename}"
+                )
+                logger.error("%s", err)
+                return DownloadResult(
+                    url=url, success=False, error=err, error_type="postprocess_error"
+                )
 
-    title: Optional[str] = None
-    duration_seconds: Optional[int] = None
-    if isinstance(info, dict):
-        t = info.get("title")
-        title = t if isinstance(t, str) else None
-        dur = info.get("duration")
-        duration_seconds = int(dur) if isinstance(dur, (int, float)) else None
+        sub_path: Optional[Path] = None
+        if download_subtitles:
+            for cand in sorted(work_dir.glob(f"{actual_path.stem}*.srt")):
+                sub_path = cand
+                break
 
-    logger.info("Download complete: %s -> %s", url, actual_path)
-    return DownloadResult(
-        url=url,
-        success=True,
-        path=actual_path,
-        subtitle_path=sub_path,
-        title=title,
-        duration_seconds=duration_seconds,
-    )
+        title: Optional[str] = None
+        duration_seconds: Optional[int] = None
+        if isinstance(info, dict):
+            t = info.get("title")
+            title = t if isinstance(t, str) else None
+            dur = info.get("duration")
+            duration_seconds = int(dur) if isinstance(dur, (int, float)) else None
+
+        logger.info("Download complete: %s -> %s", url, actual_path)
+        return DownloadResult(
+            url=url,
+            success=True,
+            path=actual_path,
+            subtitle_path=sub_path,
+            title=title,
+            duration_seconds=duration_seconds,
+        )
+    finally:
+        # Isolated per-URL fragment dir — safe to remove wholesale. The
+        # finished output already lives in work_dir ("home"), not here.
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # ========== Public function ==========

@@ -263,6 +263,35 @@ def test_subtitles_and_progress_reach_completion(tmp_path: Path) -> None:
 
 @_skip_online
 @pytest.mark.online
+def test_cancel_mid_download_leaves_no_orphans(tmp_path: Path) -> None:
+    """C3 guard: cancelling once bytes are flowing yields error_type
+    'cancelled', leaves NO .part/.ytdl orphans in work_dir, removes the
+    isolated temp dir, and the pool drains (download_videos returns)."""
+    cancel = threading.Event()
+
+    def on_progress(idx: int, url: str, pct: float, status: str) -> None:
+        # Trip the cancel as soon as the first bytes arrive; the next
+        # progress-hook invocation raises _CancelledMarker and aborts.
+        cancel.set()
+
+    results = download_videos(
+        ["https://www.youtube.com/watch?v=aqz-KE-bpKQ"],
+        tmp_path,
+        quality="720p",
+        progress_callback=on_progress,
+        cancel_event=cancel,
+    )
+    # Pool drained — we got here, function returned.
+    assert len(results) == 1
+    assert results[0].success is False
+    assert results[0].error_type == "cancelled"
+    orphans = list(tmp_path.rglob("*.part")) + list(tmp_path.rglob("*.ytdl"))
+    assert orphans == [], f"orphaned partial files: {orphans}"
+    assert not (tmp_path / ".ytdl_tmp_0").exists(), "temp dir not cleaned up"
+
+
+@_skip_online
+@pytest.mark.online
 def test_mixed_batch_returns_correct_per_url_outcomes(tmp_path: Path) -> None:
     urls = [
         "https://www.youtube.com/shorts/aqz-KE-bpKQ",
