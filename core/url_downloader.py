@@ -36,7 +36,7 @@ from typing import Callable, Literal, Optional
 # macOS stabilization (Step 5): resolve the bundled ffmpeg directory so
 # yt-dlp uses the same binary the renderer uses, not whatever brew /
 # system ffmpeg happens to be in PATH. yt-dlp invokes ffmpeg as a
-# subprocess for muxing (merge_output_format=mp4) and subtitle remux;
+# subprocess for muxing (merge_output_format=mkv) and subtitle remux;
 # a mismatched system ffmpeg can produce containers the renderer
 # rejects or codecs the bundled ffmpeg can't read.
 #
@@ -582,6 +582,11 @@ def download_videos(
     Per-URL failures are reported on the Result; only argument validation
     raises (ValueError, FileNotFoundError, PermissionError). See
     URL_DOWNLOADER_SPEC.md for full semantics and the error_type taxonomy.
+
+    - subtitle_langs: subtitle language codes to fetch (default ["en"]).
+    - progress_callback: invoked from WORKER threads, not the GUI thread; callers
+      updating a Qt UI must marshal via a signal/queued connection and must not
+      touch widgets directly.
 
     cookies_file, when given, is passed to yt-dlp as `cookiefile` (a
     Netscape-format cookie jar) to access auth-walled content. The CALLER
