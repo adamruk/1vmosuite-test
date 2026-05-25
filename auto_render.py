@@ -1038,7 +1038,7 @@ class VideoRendererTool(QMainWindow):
         self.setWindowTitle(
             f"{self.app_name} v{self.current_version} (Assets v{self.current_assets_version})"
         )
-        self.setGeometry(100, 100, 1600, 900)
+        self.setGeometry(100, 100, 1280, 800)
         # Allow resize and maximize — set a reasonable minimum so layouts don't
         # collapse below their designed size, and use resize() for initial geometry.
         # macOS stabilization (Step 1): minimum size reduced from
@@ -1048,8 +1048,8 @@ class VideoRendererTool(QMainWindow):
         # stays at 1600×900 — Qt auto-shrinks to the available screen
         # rect on smaller displays. Windows users with ≥1080p screens
         # see the same launch size they had before.
-        self.setMinimumSize(1280, 800)
-        self.resize(1600, 900)
+        self.setMinimumSize(1024, 720)
+        self.resize(1280, 800)
         # Phase 2d follow-up fix (Item 2): updater no longer runs at
         # startup. Previously two unconditional calls here made network
         # requests and could pop a modal UpdaterDialog BEFORE the main

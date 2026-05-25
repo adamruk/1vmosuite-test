@@ -316,14 +316,14 @@ class VideoMergerTool(QMainWindow):
             self.current_version = "1.0"
             self.updater._save_current_version(self.current_version, "1vmo Mixer")
         self.setWindowTitle(f"1vmo Mixer v{self.current_version}")
-        self.setGeometry(100, 100, 1600, 900)
+        self.setGeometry(100, 100, 1280, 800)
         # Allow resize and maximize — set a reasonable minimum so layouts don't
         # collapse below their designed size, and use resize() for initial geometry.
         # macOS stabilization (Step 1): minimum size reduced from
         # 1600×900 to 1280×800 so the app fits on a 13" MacBook
         # without horizontal overflow. Initial size unchanged.
-        self.setMinimumSize(1280, 800)
-        self.resize(1600, 900)
+        self.setMinimumSize(1024, 720)
+        self.resize(1280, 800)
         # Phase 2d production-hardening fix (Issue 2): updater no longer
         # runs at startup. See auto_render.py for the full rationale.
         # Now reachable via the "🔄 Updates" toolbar button (see
