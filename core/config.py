@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("core.config")
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,11 @@ def load(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
     Returns:
         Parsed dict on success, a copy of default on missing/corrupt file.
         Never raises; file errors and JSON errors both fall through to default.
+
+    Corruption recovery: when the main file fails to parse, attempts the
+    last-good `<path>.bak` written by core.atomic_write.save_json_atomic
+    before falling back to default. Mirrors the proven .bak read-back in
+    core.preset_loader.load_user_presets_json.
     """
     if default is None:
         default = {}
@@ -61,6 +69,21 @@ def load(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError):
+        # Main file is corrupt/unreadable. save_json_atomic keeps a
+        # single-generation backup at <path>.bak — try it before giving
+        # up to the default.
+        bak_path = path.with_suffix(path.suffix + ".bak")
+        if bak_path.exists():
+            try:
+                with open(bak_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    logger.warning(
+                        "config: loaded %s from .bak after main failed", path.name
+                    )
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass
         return dict(default)
 
 

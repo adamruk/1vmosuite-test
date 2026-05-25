@@ -202,6 +202,15 @@ class QueueStore:
           - schema_version mismatch
           - pydantic validation failure (fields missing or wrong type)
 
+        Corruption recovery: on the two genuinely-recoverable failures
+        (malformed JSON and pydantic validation), retries the last-good
+        `<queue_path>.bak` written by save_json_atomic, validating it
+        through the SAME schema+pydantic path so a corrupt or
+        schema-mismatched .bak is also rejected. The non-recoverable
+        cases (missing / OSError read failure / schema_version mismatch)
+        do NOT touch .bak — a missing file is not an error, a locked file
+        could race, and a .bak is almost certainly the same old schema.
+
         Logs a single warning line for the corruption cases — never
         crashes. First-launch case logs nothing.
         """
@@ -220,7 +229,7 @@ class QueueStore:
             data = json.loads(raw)
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("queue_store: queue file is corrupt: %s", exc)
-            return None
+            return self._load_from_bak()
 
         # Fast-path schema check BEFORE pydantic — lets us reject
         # incompatible files without paying the validation cost.
@@ -241,7 +250,53 @@ class QueueStore:
             return QueueBatch.model_validate(data)
         except ValidationError as exc:
             logger.warning("queue_store: queue validation failed: %s", exc)
+            return self._load_from_bak()
+
+    def _validate_queue_file(self, path: Path) -> Optional[QueueBatch]:
+        """Parse + schema-check + pydantic-validate one queue file.
+
+        Returns the QueueBatch on success or None on ANY failure
+        (unreadable, malformed JSON, non-object, schema mismatch,
+        validation failure). Logs nothing — the caller owns the warning
+        lines. Used for both the main file and the .bak fallback so they
+        traverse identical validation.
+        """
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+        except OSError:
             return None
+
+        import json
+
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        if data.get("schema_version") != QUEUE_SCHEMA_VERSION:
+            return None
+        try:
+            return QueueBatch.model_validate(data)
+        except ValidationError:
+            return None
+
+    def _load_from_bak(self) -> Optional[QueueBatch]:
+        """Attempt recovery from the single-generation `<queue_path>.bak`.
+
+        Returns the recovered QueueBatch (and logs a warning) when the
+        backup exists and passes the full validation path; otherwise
+        returns None, preserving the caller's fall-through-to-None
+        behavior. A schema-mismatched or corrupt .bak is rejected here.
+        """
+        bak_path = self._queue_path.with_suffix(self._queue_path.suffix + ".bak")
+        if not bak_path.exists():
+            return None
+        batch = self._validate_queue_file(bak_path)
+        if batch is not None:
+            logger.warning("queue_store: loaded queue from .bak after main failed")
+        return batch
 
     def clear(self) -> None:
         """Remove the queue file. Idempotent — silent if absent."""

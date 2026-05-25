@@ -324,3 +324,102 @@ def test_unfinished_statuses_set_for_resume_decision(
     assert TaskStatus.FAILED not in UNFINISHED_STATUSES
     assert TaskStatus.CANCELLED not in UNFINISHED_STATUSES
     assert TaskStatus.SKIPPED not in UNFINISHED_STATUSES
+
+
+# ----------------------------------------------------------------------
+# Scenario 12 — .bak read-back on recoverable corruption (T1)
+#
+# save_json_atomic leaves a single-generation <queue.json>.bak. When the
+# main file is corrupt in a RECOVERABLE way (malformed JSON / pydantic
+# validation failure), load() must recover the last-good batch from .bak
+# instead of returning None and silently dropping the resume queue.
+# The non-recoverable cases (schema mismatch / missing file) must NOT
+# consult .bak.
+# ----------------------------------------------------------------------
+
+
+def _bak_path(tmp_path: Path) -> Path:
+    return tmp_path / (QUEUE_FILENAME + ".bak")
+
+
+def test_corrupt_json_recovers_from_bak(store: QueueStore, tmp_path: Path) -> None:
+    # Two saves so the first good payload rotates into queue.json.bak.
+    store.save(_make_batch(tmp_path, n_tasks=3))
+    store.save(_make_batch(tmp_path, n_tasks=3))
+    assert _bak_path(tmp_path).exists()
+    # Corrupt the main file (malformed JSON → recoverable branch).
+    (tmp_path / QUEUE_FILENAME).write_text("{not json", encoding="utf-8")
+
+    loaded = store.load()
+    assert loaded is not None
+    assert loaded.total_tasks == 3
+    assert loaded.batch_uuid == "batch-test-0001"
+
+
+def test_validation_failure_recovers_from_bak(
+    store: QueueStore, tmp_path: Path
+) -> None:
+    # Real .bak from a prior good save.
+    store.save(_make_batch(tmp_path, n_tasks=2))
+    store.save(_make_batch(tmp_path, n_tasks=2))
+    assert _bak_path(tmp_path).exists()
+    # Main file: valid JSON + correct schema_version but a task missing
+    # required fields → pydantic ValidationError (recoverable branch).
+    bad = {"schema_version": QUEUE_SCHEMA_VERSION, "tasks": [{"nope": 1}]}
+    (tmp_path / QUEUE_FILENAME).write_text(json.dumps(bad), encoding="utf-8")
+
+    loaded = store.load()
+    assert loaded is not None
+    assert loaded.total_tasks == 2
+
+
+def test_both_main_and_bak_corrupt_returns_none(
+    store: QueueStore, tmp_path: Path
+) -> None:
+    store.save(_make_batch(tmp_path, n_tasks=1))
+    store.save(_make_batch(tmp_path, n_tasks=1))
+    (tmp_path / QUEUE_FILENAME).write_text("{not json", encoding="utf-8")
+    _bak_path(tmp_path).write_text("also { broken", encoding="utf-8")
+
+    assert store.load() is None
+
+
+def test_corrupt_main_no_bak_returns_none(store: QueueStore, tmp_path: Path) -> None:
+    (tmp_path / QUEUE_FILENAME).write_text("{not json", encoding="utf-8")
+    assert not _bak_path(tmp_path).exists()
+    assert store.load() is None
+
+
+def test_schema_mismatch_main_does_not_load_bak(
+    store: QueueStore, tmp_path: Path
+) -> None:
+    """A schema_version mismatch on the main file must return None WITHOUT
+    consulting .bak — a .bak is almost certainly the same old schema, and
+    loading an incompatible queue is worse than starting clean. Here the
+    .bak is a perfectly valid current-schema batch and must STILL be
+    ignored, because the trigger (schema mismatch) is non-recoverable."""
+    # Lay down a valid current-schema .bak.
+    store.save(_make_batch(tmp_path, n_tasks=2))
+    store.save(_make_batch(tmp_path, n_tasks=2))
+    assert _bak_path(tmp_path).exists()
+    valid_bak = store.load()
+    assert valid_bak is not None  # confirm the .bak path is genuinely good
+    # Now poison the main file with a schema_version mismatch.
+    payload = _make_batch(tmp_path, n_tasks=2).model_dump(mode="json")
+    payload["schema_version"] = 99
+    (tmp_path / QUEUE_FILENAME).write_text(json.dumps(payload), encoding="utf-8")
+
+    # Must be None: schema mismatch is NOT a .bak-recoverable case.
+    assert store.load() is None
+
+
+def test_schema_mismatched_bak_is_rejected(store: QueueStore, tmp_path: Path) -> None:
+    """When the main file IS recoverable (malformed JSON) but the .bak is
+    schema-mismatched, the .bak must be rejected via the same validation
+    path → load() returns None rather than loading an incompatible queue."""
+    payload = _make_batch(tmp_path, n_tasks=2).model_dump(mode="json")
+    payload["schema_version"] = 99
+    _bak_path(tmp_path).write_text(json.dumps(payload), encoding="utf-8")
+    (tmp_path / QUEUE_FILENAME).write_text("{not json", encoding="utf-8")
+
+    assert store.load() is None
