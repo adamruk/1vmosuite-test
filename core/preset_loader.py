@@ -257,7 +257,14 @@ def load_presets_json(path: Path) -> list[Preset]:
             f"got {type(data.get('presets')).__name__}"
         )
 
+    # v2 entries are constructed with Preset(id=p["id"], ...) below, so a
+    # missing 'id' would otherwise escape this loop and throw a bare
+    # KeyError('id'). Make the check schema-aware so v2 surfaces the same
+    # descriptive ValueError as any other missing field. v1 entries derive
+    # their ids, so 'id' is not required there.
     required_fields = ("group", "name", "description", "details", "params")
+    if sv == 2:
+        required_fields = ("id",) + required_fields
     for i, entry in enumerate(data["presets"]):
         if not isinstance(entry, dict):
             raise ValueError(
