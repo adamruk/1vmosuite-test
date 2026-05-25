@@ -284,6 +284,23 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Cross-refs:** [B-051](#resolved) (resolved by removal of the unsafe channel) and [ADR-0017](docs/decisions/ADR-0017-remove-update-channel.md) (records the removal + the reversible signed-channel path this item implements).
 - **Trigger for pickup:** the packaging / final-`.exe` build phase (relates to B-038 / B-044 build work), OR a code-signing certificate becoming available.
 
+## B-053: sibling-app robustness divergence (cutter / merge / mixer vs auto_render)
+
+- **Status:** Open, **DEFERRED** — conscious decision: `auto_render.py` is the current focus and the three sibling apps are acceptable for present use. Not started.
+- **Priority:** LOW / track — matches the pre-mortem rating. Not launch-blocking for the current friends / own-footage use; revisit if the audience or the variety of input files widens.
+- **Surfaced:** Independent pre-mortem audit (finding T3), 2026-05-25.
+- **Context:** Robustness hardening is concentrated in `auto_render.py` — NVENC handling, the bounded/cancellable GPU semaphore, atomic output (`.partial` + `os.replace` promotion), queue persistence, and crash-resume. The three sibling apps are weaker in three specific ways:
+  1. **Non-atomic output** — `cutter.py` and `merge.py` write ffmpeg output directly to the final path (no `.partial` + `os.replace` promotion like auto_render), so an interrupted encode can leave a truncated `.mp4` at the real output name that looks complete but is not.
+  2. **mixer concat-copy fragility** — `mixer.py` concatenates via `-f concat ... -c copy` (stream copy, no re-encode) with NO input-compatibility check. On inputs that differ in codec / resolution / framerate / timebase, concat-copy can produce a broken or glitchy output while the app still reports success (ffmpeg rc=0 + a non-empty file). Common trigger: mixing clips from different sources.
+  3. **Undocumented divergence** — neither users nor a future maintainer (Junaid) are told that the three siblings lack auto_render's hardening.
+- **Open decision (needed before implementing the mixer part):** when mixer detects mismatched inputs, what should it do? (a) detect via ffprobe and REFUSE with a clear message; (b) detect and FALL BACK to a real re-encode (slower, but always works); (c) detect and at minimum stop reporting false success. This is a product-behavior decision for Adam — not yet made.
+- **Acceptance criteria (when picked up):**
+  - `cutter.py` + `merge.py` promote output atomically (mirror auto_render's `.partial` + `os.replace` pattern) so an interrupted encode never leaves a corrupt final file.
+  - `mixer.py` validates input compatibility before concat-copy and handles mismatches per the chosen option above (no silent false "success").
+  - The robustness divergence is documented so users / Junaid know the siblings differ from auto_render.
+- **Cross-refs:** pre-mortem audit finding T3 (2026-05-25); `auto_render.py`'s atomic-output pattern (`.partial` + `os.replace`) is the reference implementation to mirror.
+- **Trigger for pickup:** the audience or input variety widens beyond friends / own footage, OR a user reports a truncated / glitchy sibling-app output, OR a focused sibling-hardening pass.
+
 ## Resolved
 
 - **B-051** — updater integrity was fail-OPEN (best-effort `.sha256` tolerated when absent; hash + binary both served from the same Sheet/Dropbox channel). Resolved by **removing the in-app update channel entirely** rather than hardening it: the audience is source-based devs, so download-and-run-remote was pure attack surface. Deleted `updater.py`; relocated version-state to `core/version_state.py` (version display preserved); updates now via `git pull`. The two hardening options originally filed here (fail-closed SHA / Authenticode) are recorded in [ADR-0017](docs/decisions/ADR-0017-remove-update-channel.md) "Alternatives considered" for a future signed GitHub-Releases channel if a distribution audience appears. Resolved [c5bdd3e] 2026-05-25.
