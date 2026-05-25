@@ -4,6 +4,7 @@
 # Source timestamp: 1970-01-01 00:00:00 UTC (0)
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -64,11 +65,61 @@ from core.queue_models import (
     TaskStatus,
 )
 from core.queue_store import QueueStore
-from core.user_data import migrate_legacy_configs, resolve_or_die
+from core.user_data import (
+    migrate_legacy_configs,
+    resolve_or_die,
+    resolve_user_data_dir,
+)
 from help_dialog import HelpDialog
 from settings_dialog import SettingsDialog
 
 SEQUENTIAL_SLOT_COUNT = 8
+
+
+def _setup_file_logging(install_dir, log_filename):
+    """Attach an absolute per-user FileHandler to the root logger.
+
+    Runs at import time, before any QApplication exists, so it must never exit
+    or raise. Uses the NON-exiting ``resolve_user_data_dir`` (never
+    ``resolve_or_die``, which calls ``sys.exit``) and falls back to
+    ``install_dir`` on any error. Idempotent: re-calling will not add a second
+    handler for the same file. Returns the resolved log path, or None if even
+    the fallback could not be configured.
+    """
+    try:
+        try:
+            log_dir = resolve_user_data_dir(install_dir)
+        except Exception:
+            log_dir = install_dir
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            log_dir = install_dir
+        log_path = os.path.abspath(str(log_dir / log_filename))
+        root = logging.getLogger()
+        for handler in root.handlers:
+            if (
+                isinstance(handler, logging.FileHandler)
+                and handler.baseFilename == log_path
+            ):
+                return log_path
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        root.addHandler(file_handler)
+        root.setLevel(logging.INFO)
+        return log_path
+    except Exception:
+        return None
+
+
+# auto_render has no module-level SCRIPT_DIR (it lives on self.SCRIPT_DIR in
+# __init__); compute the install dir the same way here so logging is configured
+# at import time without depending on __init__ ordering (B-024).
+_setup_file_logging(
+    Path(os.path.dirname(os.path.abspath(__file__))), "video_renderer.log"
+)
 
 
 def resource_path(relative_path):
