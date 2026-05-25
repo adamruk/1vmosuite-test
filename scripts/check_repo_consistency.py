@@ -36,7 +36,6 @@ REQUIRED_FILES = [
     "mixer.py",
     "settings_dialog.py",
     "help_dialog.py",
-    "updater.py",
     "bench.py",
     "gpu_detect.py",
     "requirements.txt",
@@ -63,6 +62,7 @@ REQUIRED_FILES = [
     "core/preset_loader.py",
     "core/preset_translator.py",
     "core/user_data.py",
+    "core/version_state.py",
     "core/widgets.py",
     "core/url_downloader.py",
     # Assets
