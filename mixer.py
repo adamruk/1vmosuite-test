@@ -47,17 +47,57 @@ from core import ffmpeg_runner as core_ffmpeg_runner
 from core import file_picker as core_file_picker
 from core import version_state as core_version_state
 from core import widgets as core_widgets
-from core.user_data import migrate_legacy_configs, resolve_or_die
+from core.user_data import (
+    migrate_legacy_configs,
+    resolve_or_die,
+    resolve_user_data_dir,
+)
 from help_dialog import HelpDialog
 
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / "assets" / "Mixer.ico"
-logging.basicConfig(
-    filename="video_mixer.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+
+
+def _setup_file_logging(install_dir, log_filename):
+    """Attach an absolute per-user FileHandler to the root logger.
+
+    Runs at import time, before any QApplication exists, so it must never exit
+    or raise. Uses the NON-exiting ``resolve_user_data_dir`` (never
+    ``resolve_or_die``, which calls ``sys.exit``) and falls back to
+    ``install_dir`` on any error. Idempotent: re-calling will not add a second
+    handler for the same file. Returns the resolved log path, or None if even
+    the fallback could not be configured.
+    """
+    try:
+        try:
+            log_dir = resolve_user_data_dir(install_dir)
+        except Exception:
+            log_dir = install_dir
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            log_dir = install_dir
+        log_path = os.path.abspath(str(log_dir / log_filename))
+        root = logging.getLogger()
+        for handler in root.handlers:
+            if (
+                isinstance(handler, logging.FileHandler)
+                and handler.baseFilename == log_path
+            ):
+                return log_path
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        root.addHandler(file_handler)
+        root.setLevel(logging.INFO)
+        return log_path
+    except Exception:
+        return None
+
+
+_setup_file_logging(SCRIPT_DIR, "video_mixer.log")
 COMMON_STYLE = '\n    QMainWindow { background-color: #f8f9fa; }\n    QFrame#top_frame, QFrame#bottom_frame, QFrame#videos_frame, QFrame#options_frame,\n    QFrame#progress_frame, QFrame#output_frame {\n        background-color: white; border: 1px solid #dee2e6; border-radius: 4px;\n    }\n    QPushButton {\n        background-color: #007bff; color: white; border: none; border-radius: 4px;\n        padding: 8px 16px; min-width: 100px; max-width: 100px; font-weight: bold;\n    }\n    QPushButton:hover { background-color: #0056b3; }\n    QPushButton:disabled { background-color: #6c757d; }\n    QPushButton[delete="true"] { background-color: #dc3545; }\n    QPushButton[delete="true"]:hover { background-color: #c82333; }\n    QTreeWidget { border: 1px solid #dee2e6; }\n    QTextEdit { background-color: black; color: white; font-family: Consolas; }\n'
 
 

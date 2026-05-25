@@ -50,17 +50,57 @@ from core import ffmpeg_runner as core_ffmpeg_runner
 from core import file_picker as core_file_picker
 from core import version_state as core_version_state
 from core import widgets as core_widgets
-from core.user_data import migrate_legacy_configs, resolve_or_die
+from core.user_data import (
+    migrate_legacy_configs,
+    resolve_or_die,
+    resolve_user_data_dir,
+)
 from help_dialog import HelpDialog
 
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / "assets" / "Cutter.ico"
-logging.basicConfig(
-    filename="video_cutter.log",
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+
+
+def _setup_file_logging(install_dir, log_filename):
+    """Attach an absolute per-user FileHandler to the root logger.
+
+    Runs at import time, before any QApplication exists, so it must never exit
+    or raise. Uses the NON-exiting ``resolve_user_data_dir`` (never
+    ``resolve_or_die``, which calls ``sys.exit``) and falls back to
+    ``install_dir`` on any error. Idempotent: re-calling will not add a second
+    handler for the same file. Returns the resolved log path, or None if even
+    the fallback could not be configured.
+    """
+    try:
+        try:
+            log_dir = resolve_user_data_dir(install_dir)
+        except Exception:
+            log_dir = install_dir
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            log_dir = install_dir
+        log_path = os.path.abspath(str(log_dir / log_filename))
+        root = logging.getLogger()
+        for handler in root.handlers:
+            if (
+                isinstance(handler, logging.FileHandler)
+                and handler.baseFilename == log_path
+            ):
+                return log_path
+        file_handler = logging.FileHandler(log_path)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
+        root.addHandler(file_handler)
+        root.setLevel(logging.INFO)
+        return log_path
+    except Exception:
+        return None
+
+
+_setup_file_logging(SCRIPT_DIR, "video_cutter.log")
 
 
 class FFmpegError(Exception):
