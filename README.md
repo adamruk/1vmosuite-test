@@ -40,7 +40,6 @@ python mixer.py
 ```
 1vmo-suite/
   auto_render.py, cutter.py, merge.py, mixer.py   # 4 app entry points
-  updater.py                                      # shared: version check against Google Sheet
   help_dialog.py                                  # shared: markdown help viewer
   assets/                                         # icons, encoder preset library, README md, version json
     data/                                         # image assets (qr, overlay, samples)
@@ -72,17 +71,20 @@ AutoRender supports two render paths. Pick based on the work, not by reflex.
 
 Defaults: `gpu_enabled=False`, `gpu_codec=h264_nvenc`, `gpu_preset=p4`, `gpu_max_concurrent=2` (matches `settings_dialog.py::DEFAULTS`, `RenderWorker.__init__`, and `core/preset_translator.translate_to_nvenc`). Settings dialog OK applies these keys on next render without restart (B-014 partial fix).
 
-## Updater
+## Updates
 
-`updater.py` checks a public Google Sheet (anonymous gviz endpoint) for new
-versions and downloads the update from Dropbox over HTTPS. Before launching, the
-downloaded file is sanity-checked: a best-effort SHA-256 against a sibling
-`.sha256` when one is served, plus a PE-header (`MZ`) check. Version state is
-tracked in `assets/Version AutoRender.json`.
+There is no in-app updater. The previous Google-Sheet + Dropbox
+download-and-relaunch channel was removed (ADR-0017, resolving B-051): the
+audience is source-based developers, so fetching and executing a remote binary
+whose source of truth was an editable spreadsheet was pure attack surface.
+**Update by pulling the source — `git pull`.**
 
-Stronger fail-closed integrity (a mandatory SHA from a trusted channel, or
-Authenticode signature verification of the `.exe`) is tracked in the backlog as
-B-051.
+The app still shows its version in the window title; that string is read from
+`assets/Version AutoRender.json` by `core/version_state.py` (a local,
+network-free read). If a real distribution audience (`.exe`-only users) appears
+later, a signed update channel — preferably GitHub Releases with signature /
+checksum verification from a channel independent of the binary host — can be
+added back under a new ADR.
 
 ## Notes
 
