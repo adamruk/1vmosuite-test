@@ -2013,7 +2013,26 @@ class VideoRendererTool(QMainWindow):
             # assets/Encoder.json already contains the 2 Text defaults
             # (appended by tools/generate_encoder_json.py); do NOT re-append.
             encoder_json_path = self.SCRIPT_DIR / "assets" / "Encoder.json"
-            presets = core_preset_loader.load_builtin_json(encoder_json_path)
+            # Fail-soft, mirroring the Encoder.txt path below: a corrupt or
+            # schema-mismatched Encoder.json must not crash startup.
+            # load_builtin_json can raise json.JSONDecodeError (a ValueError
+            # subclass), ValueError, OSError, or pydantic.ValidationError
+            # (NOT a ValueError subclass — caught explicitly).
+            import logging
+
+            from pydantic import ValidationError
+
+            try:
+                presets = core_preset_loader.load_builtin_json(encoder_json_path)
+            except (ValueError, OSError, ValidationError) as e:
+                logging.getLogger(__name__).warning(
+                    "Failed to load built-in presets from %s (%s: %s); "
+                    "degrading to empty built-in list so the app still starts.",
+                    encoder_json_path,
+                    type(e).__name__,
+                    e,
+                )
+                presets = []
         else:
             presets = core_preset_loader.load_presets(self.ENCODER_FILE)
             # App-specific defaults appended after file load — these are
