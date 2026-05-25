@@ -45,10 +45,10 @@ from PySide6.QtWidgets import (
 from core import config as core_config
 from core import ffmpeg_runner as core_ffmpeg_runner
 from core import file_picker as core_file_picker
+from core import version_state as core_version_state
 from core import widgets as core_widgets
 from core.user_data import migrate_legacy_configs, resolve_or_die
 from help_dialog import HelpDialog
-from updater import DriveUpdater
 
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
@@ -310,11 +310,10 @@ class VideoMergerTool(QMainWindow):
                 "FFmpeg or FFprobe not found. Please place them in the 'ffmpeg' directory.",
             )
             sys.exit(1)
-        self.updater = DriveUpdater()
-        self.current_version = self.updater._load_current_version("1vmo Mixer")
+        self.current_version = core_version_state.load_current_version("1vmo Mixer")
         if self.current_version is None:
             self.current_version = "1.0"
-            self.updater._save_current_version(self.current_version, "1vmo Mixer")
+            core_version_state.save_current_version(self.current_version, "1vmo Mixer")
         self.setWindowTitle(f"1vmo Mixer v{self.current_version}")
         self.setGeometry(100, 100, 1600, 900)
         # Allow resize and maximize — set a reasonable minimum so layouts don't
@@ -324,11 +323,9 @@ class VideoMergerTool(QMainWindow):
         # without horizontal overflow. Initial size unchanged.
         self.setMinimumSize(1280, 800)
         self.resize(1600, 900)
-        # Phase 2d production-hardening fix (Issue 2): updater no longer
-        # runs at startup. See auto_render.py for the full rationale.
-        # Now reachable via the "🔄 Updates" toolbar button (see
-        # setup_ui) calling `self.check_for_updates()`. updater.py
-        # byte-identical.
+        # The in-app update channel was removed (ADR-0017 / B-051): updates
+        # now come from a source `git pull`. The version label above is read
+        # from assets/Version AutoRender.json via core.version_state.
         self.setup_icon()
         self.initialize_state()
         self.config = self.load_config()
@@ -435,21 +432,7 @@ class VideoMergerTool(QMainWindow):
         help_btn = self.create_video_button(
             "❓ Help", self.show_help, "#e3f2fd", "#1976d2", "#bbdefb"
         )
-        # Phase 2d production-hardening fix (Issue 2): manual updater
-        # entry. Stored on `self` so check_for_updates can disable it.
-        # Same pattern as auto_render.py / cutter.py / merge.py.
-        self.check_updates_btn = self.create_video_button(
-            "🔄 Updates",
-            self.check_for_updates,
-            "#ede7f6",
-            "#4527a0",
-            "#d1c4e9",
-        )
-        self.check_updates_btn.setToolTip(
-            "Check for application + asset updates (does not run at startup)"
-        )
         video_controls.addWidget(help_btn)
-        video_controls.addWidget(self.check_updates_btn)
         input_layout.addLayout(video_controls)
         tree_frame = QFrame()
         tree_frame.setStyleSheet(
@@ -1219,33 +1202,6 @@ class VideoMergerTool(QMainWindow):
         )
         dialog = HelpDialog(self, "Help - 1vmo Mixer", readme_path)
         dialog.exec()
-
-    def check_for_updates(self) -> None:
-        """Manual entry point for the updater (Phase 2d Issue 2).
-
-        Same pattern as auto_render.py / cutter.py / merge.py:
-        debounce via button.isEnabled, try/finally re-enable, broad
-        except so a future updater.py regression cannot bubble a
-        crash into the renderer UI. updater.py is unchanged.
-        """
-        btn = getattr(self, "check_updates_btn", None)
-        if btn is not None and not btn.isEnabled():
-            return
-        try:
-            if btn is not None:
-                btn.setEnabled(False)
-            QApplication.processEvents()
-            try:
-                self.updater.check_and_update("1vmo Mixer")
-            except Exception as exc:
-                QMessageBox.warning(
-                    self,
-                    "Update check failed",
-                    f"Could not check for the application update:\n\n{exc}",
-                )
-        finally:
-            if btn is not None:
-                btn.setEnabled(True)
 
 
 if __name__ == "__main__":

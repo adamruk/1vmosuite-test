@@ -50,6 +50,7 @@ from core import file_picker as core_file_picker
 from core import naming_utils, preset_translator
 from core import preset_loader as core_preset_loader
 from core import url_downloader as core_url_downloader
+from core import version_state as core_version_state
 from core import widgets as core_widgets
 from core.preset_loader import (
     derive_slug,
@@ -66,7 +67,6 @@ from core.queue_store import QueueStore
 from core.user_data import migrate_legacy_configs, resolve_or_die
 from help_dialog import HelpDialog
 from settings_dialog import SettingsDialog
-from updater import DriveUpdater
 
 SEQUENTIAL_SLOT_COUNT = 8
 
@@ -1022,17 +1022,20 @@ class VideoRendererTool(QMainWindow):
     def __init__(self, app_name: str = "1vmo Auto Render"):
         super().__init__()
         self.app_name = app_name
-        self.updater = DriveUpdater()
-        self.current_version = self.updater._load_current_version("1vmo Auto Render")
+        self.current_version = core_version_state.load_current_version(
+            "1vmo Auto Render"
+        )
         if self.current_version is None:
             self.current_version = "3.1"
-            self.updater._save_current_version(self.current_version, "1vmo Auto Render")
-        self.current_assets_version = self.updater._load_current_version(
+            core_version_state.save_current_version(
+                self.current_version, "1vmo Auto Render"
+            )
+        self.current_assets_version = core_version_state.load_current_version(
             "1vmo Auto Render Assets"
         )
         if self.current_assets_version is None:
             self.current_assets_version = "1.0"
-            self.updater._save_current_version(
+            core_version_state.save_current_version(
                 self.current_assets_version, "1vmo Auto Render Assets"
             )
         self.setWindowTitle(
@@ -1050,14 +1053,10 @@ class VideoRendererTool(QMainWindow):
         # see the same launch size they had before.
         self.setMinimumSize(1280, 800)
         self.resize(1600, 900)
-        # Phase 2d follow-up fix (Item 2): updater no longer runs at
-        # startup. Previously two unconditional calls here made network
-        # requests and could pop a modal UpdaterDialog BEFORE the main
-        # window appeared, blocking app launch behind external service
-        # availability. The same checks are now reachable through the
-        # "🔄 Updates" toolbar button (see setup_ui) which calls
-        # `self.check_for_updates()`. Existing updater.py logic is
-        # preserved verbatim — only the trigger moved from auto to manual.
+        # The in-app update channel was removed (ADR-0017 / B-051): updates now
+        # come from a source `git pull`, so there is no startup network call and
+        # no "Updates" toolbar button. The version label above is read from
+        # assets/Version AutoRender.json via core.version_state.
         try:
             icon_path = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), "assets", "Auto_Render.ico"
@@ -1321,24 +1320,6 @@ class VideoRendererTool(QMainWindow):
             "❓ Help", self.show_help, "#e3f2fd", "#1976d2", "#bbdefb"
         )
         help_btn.setToolTip("Open user guide")
-        # Phase 2d follow-up fix (Item 2): manual entry point for the
-        # updater. Replaces the previous auto-on-startup behaviour so
-        # the app launches without waiting on a network round-trip and
-        # the user controls when an update dialog can appear.
-        # Phase 2d follow-up fix (Issue 1): expose the button on `self`
-        # so check_for_updates can disable it during the (synchronous,
-        # network-blocking) check. Local-var storage would have lost
-        # the handle.
-        self.check_updates_btn = self.create_video_button(
-            "🔄 Updates",
-            self.check_for_updates,
-            "#ede7f6",
-            "#4527a0",
-            "#d1c4e9",
-        )
-        self.check_updates_btn.setToolTip(
-            "Check for application + asset updates (does not run at startup)"
-        )
         # Phase 3.3 — "🩺 Health" toolbar button opens RenderHealthDialog,
         # a read-only summary of scores + recommendations across the
         # current/last batch. Never auto-opens; toolbar-only discovery.
@@ -1378,7 +1359,6 @@ class VideoRendererTool(QMainWindow):
         video_controls.addWidget(self.health_btn)
         video_controls.addWidget(self.pause_btn)
         video_controls.addWidget(self.diagnostics_btn)
-        video_controls.addWidget(self.check_updates_btn)
         step1_label = QLabel("📥 Step 1: Add videos")
         step1_label.setStyleSheet(
             "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
@@ -3914,70 +3894,6 @@ class VideoRendererTool(QMainWindow):
         )
         dialog = HelpDialog(self, "Help - 1vmo Auto Render", readme_path)
         dialog.exec()
-
-    def check_for_updates(self) -> None:
-        """Manual entry point for the updater (Phase 2d follow-up fix, Item 2).
-
-        Triggers the same DriveUpdater.check_and_update sequence that
-        previously ran from __init__. Now reachable only by user action
-        via the "🔄 Updates" toolbar button so the app can launch
-        without a startup network round-trip and modal dialog. Both
-        the application binary and the asset bundle are checked, in
-        that order — identical to the pre-fix sequence.
-
-        Phase 2d follow-up fix (Issue 1 — Updates button UX): the
-        previous implementation gave no visible feedback during the
-        synchronous, network-blocking check, and repeated clicks
-        re-entered check_and_update each time. We now:
-          - disable the Updates button on entry, re-enable in finally;
-          - emit visible status lines to the output panel so the user
-            sees progress;
-          - call QApplication.processEvents() between phases so the
-            disabled state and status lines actually paint before the
-            blocking network calls begin.
-        Both the disable and the messages are inside a try/finally so
-        an exception in updater.py cannot leave the button stuck off.
-
-        Failure handling: updater.check_and_update already swallows
-        network errors internally (prints "Cannot read version
-        information" on _get_version_info failure and returns). We
-        wrap each call in a broad try/except as belt-and-suspenders so
-        a future regression in updater.py cannot bubble a crash back
-        into the renderer UI; the messagebox keeps the user informed.
-        """
-        btn = getattr(self, "check_updates_btn", None)
-        if btn is not None and not btn.isEnabled():
-            # Already in flight — debounce repeated clicks per Issue 1.
-            return
-        try:
-            if btn is not None:
-                btn.setEnabled(False)
-            self.update_ffmpeg_output("\n[Updates] Checking for application update…\n")
-            QApplication.processEvents()
-            try:
-                self.updater.check_and_update("1vmo Auto Render")
-            except Exception as exc:
-                QMessageBox.warning(
-                    self,
-                    "Update check failed",
-                    f"Could not check for the application update:\n\n{exc}",
-                )
-                return
-            self.update_ffmpeg_output("[Updates] Checking for asset update…\n")
-            QApplication.processEvents()
-            try:
-                self.updater.check_and_update("1vmo Auto Render Assets")
-            except Exception as exc:
-                QMessageBox.warning(
-                    self,
-                    "Update check failed",
-                    f"Could not check for the asset update:\n\n{exc}",
-                )
-                return
-            self.update_ffmpeg_output("[Updates] Check complete.\n")
-        finally:
-            if btn is not None:
-                btn.setEnabled(True)
 
     # ------------------------------------------------------------------
     # Phase 3.1 — local persistent queue helpers
