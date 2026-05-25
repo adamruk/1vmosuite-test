@@ -269,6 +269,21 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Resolution:** rename the class to a mixer-appropriate name (e.g. `VideoMixerTool`) and update its references within `mixer.py`. Confirm no other module imports the class by name. Group with any future `mixer.py`-touching commit.
 - **Trigger for pickup:** opportunistic — any `mixer.py` edit in that area, OR a focused mixer cleanup pass.
 
+## B-052: signed update channel for shipped .exe (replaces removed in-app updater)
+
+- **Status:** Open, not started. **Blocks the final `.exe` release.**
+- **Priority:** HIGH — launch-blocking dependency for shipping a frozen `.exe` to non-developer users. The old in-app updater was removed (B-051 / ADR-0017) precisely because it fetched and launched an arbitrary binary from a Google-Sheet+Dropbox channel with fail-OPEN verification. Shipping a final `.exe` with no safe replacement would either strand `.exe` users with no update path or create pressure to re-add the unsafe one — so a trustworthy channel must land before that build.
+- **Surfaced:** B-051 / ADR-0017 follow-up — removing the unsafe updater created the need for a safe forward channel ahead of the planned final `.exe` build.
+- **Context:** The product shipped `.exe` builds in Phases 1–2 and plans a final `.exe` release. Source-based devs now update via `git pull` (the current, intended path post-ADR-0017); `.exe` users cannot. A trustworthy, publisher-authenticated update path is therefore required before that release. The hardening options originally weighed in B-051 (fail-closed SHA from an independent channel; Authenticode signature verification) are the intended building blocks — see ADR-0017 "Alternatives considered".
+- **Acceptance criteria (what "done" looks like):**
+  - Code-signing certificate acquired and the build Authenticode-signs the `.exe` (also clears Windows SmartScreen / AV "unknown publisher" friction).
+  - Updates distributed via signed **GitHub Releases** (or equivalent), NOT a mutable Sheet/Dropbox link.
+  - The update check verifies publisher authenticity (Authenticode signature chained to Adam's cert) and/or a **fail-CLOSED** hash sourced independently of the binary host; abort the update on any missing/mismatched check (carries forward the fail-closed intent from B-051 options 1/2).
+  - A documented publishing checklist so a missing/mis-published signature cannot silently block all legitimate updates.
+  - Windows-first; the macOS path may no-op as the old updater did.
+- **Cross-refs:** [B-051](#resolved) (resolved by removal of the unsafe channel) and [ADR-0017](docs/decisions/ADR-0017-remove-update-channel.md) (records the removal + the reversible signed-channel path this item implements).
+- **Trigger for pickup:** the packaging / final-`.exe` build phase (relates to B-038 / B-044 build work), OR a code-signing certificate becoming available.
+
 ## Resolved
 
 - **B-051** — updater integrity was fail-OPEN (best-effort `.sha256` tolerated when absent; hash + binary both served from the same Sheet/Dropbox channel). Resolved by **removing the in-app update channel entirely** rather than hardening it: the audience is source-based devs, so download-and-run-remote was pure attack surface. Deleted `updater.py`; relocated version-state to `core/version_state.py` (version display preserved); updates now via `git pull`. The two hardening options originally filed here (fail-closed SHA / Authenticode) are recorded in [ADR-0017](docs/decisions/ADR-0017-remove-update-channel.md) "Alternatives considered" for a future signed GitHub-Releases channel if a distribution audience appears. Resolved [c5bdd3e] 2026-05-25.

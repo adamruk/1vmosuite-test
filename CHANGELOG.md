@@ -247,6 +247,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 - BACKLOG.md: filed **B-051** (updater SHA-256 check is fail-OPEN; a compromised/edited Google Sheet can still point at an arbitrary `.exe`). Records two options for Adam — (1) mandatory fail-closed SHA from a trusted channel, (2) Authenticode signature verification — marked needs-Adam-decision; not implemented. Surfaced by the C2 updater hardening.
 
+- BACKLOG.md: filed **B-052** (signed update channel for the shipped `.exe`) — the forward replacement for the in-app updater removed under B-051 / ADR-0017. Launch-blocking before any final `.exe`: Authenticode-signed build + signed GitHub-Releases distribution + a fail-CLOSED publisher/hash check sourced independently of the binary host (carries forward the B-051 fail-closed intent). Open, not started; HIGH priority. [_pending_]
+
 - **Governance — filed B-050 and refreshed `.agent-status/main.json`.** B-050 records that the `manager-review` skill overwrites `RESULTS.md` by truncate-and-replace (clobbered 672 lines of audit history in `7318ae4`, restored in `c156d4d`); `main.json` was refreshed from the stale Phase A session state to the current idle `phase3-adam-v39-merge` HEAD so future gate runs key off the right scope. Docs/status only.
 
 - **B-030 — removed the write-only `output_mapping` dead state from `auto_render.py`.** The dict was initialized, cleared in `start_render` + `reload_all`, and written in `_start_next_task`, but never read — render completion already routes via `worker.tree_item` (set at dispatch, read in `on_render_completed` / `on_render_error`). Removed all four sites and corrected the one stale comment in `_row_ref_distorted` that still referenced it. No behavior change. [e7cd2b1]
