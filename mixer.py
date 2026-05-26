@@ -433,7 +433,7 @@ class VideoMergerTool(QMainWindow):
         """Tạo frame nhập liệu."""
         input_frame = QFrame(objectName="input_frame")
         input_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        input_frame.setMinimumWidth(780)
+        input_frame.setMinimumWidth(380)
         input_layout = QVBoxLayout(input_frame)
         input_layout.setContentsMargins(5, 5, 5, 5)
         input_layout.setSpacing(5)
@@ -522,7 +522,7 @@ class VideoMergerTool(QMainWindow):
         """Tạo frame cấu hình."""
         config_frame = QFrame(objectName="config_frame")
         config_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        config_frame.setMinimumWidth(780)
+        config_frame.setMinimumWidth(380)
         config_layout = QVBoxLayout(config_frame)
         config_layout.setContentsMargins(5, 5, 5, 5)
         config_layout.setSpacing(5)
@@ -576,7 +576,7 @@ class VideoMergerTool(QMainWindow):
         """Tạo frame tiến trình."""
         progress_frame = QFrame(objectName="progress_frame")
         progress_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        progress_frame.setMinimumWidth(780)
+        progress_frame.setMinimumWidth(380)
         progress_frame.setFrameStyle(QFrame.StyledPanel)
         progress_layout = QVBoxLayout(progress_frame)
         progress_layout.setSpacing(5)
@@ -621,7 +621,7 @@ class VideoMergerTool(QMainWindow):
         """Tạo frame đầu ra."""
         output_frame = QFrame(objectName="output_frame")
         output_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        output_frame.setMinimumWidth(780)
+        output_frame.setMinimumWidth(380)
         output_frame.setFrameStyle(QFrame.StyledPanel)
         output_layout = QVBoxLayout(output_frame)
         output_layout.setSpacing(5)
