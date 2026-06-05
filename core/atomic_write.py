@@ -18,14 +18,36 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl
+except ImportError:  # Windows: no fcntl / F_FULLFSYNC
+    fcntl = None
 
 # 5 attempts with sleeps between them (4 actual sleeps).
 # Final 800ms entry preserved for symmetry; loop raises before
 # using it. Total max wait: 750ms (50+100+200+400).
 RETRY_BACKOFFS_MS = (50, 100, 200, 400, 800)
+
+
+def _durable_fsync(fd: int) -> None:
+    """Force buffered data to physical storage.
+
+    On macOS plain os.fsync() does not flush the drive's own write cache;
+    F_FULLFSYNC asks the drive to flush to permanent storage. Falls back to
+    os.fsync() everywhere else (and if F_FULLFSYNC is unavailable).
+    """
+    if sys.platform == "darwin" and fcntl is not None and hasattr(fcntl, "F_FULLFSYNC"):
+        try:
+            fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+            return
+        except OSError:
+            pass
+    os.fsync(fd)
 
 
 def save_json_atomic(
@@ -54,7 +76,7 @@ def save_json_atomic(
             f.write(payload)
             f.write("\n")
             f.flush()
-            os.fsync(f.fileno())
+            _durable_fsync(f.fileno())
 
         if path.exists():
             os.replace(path, bak_path)

@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional
 
@@ -291,6 +292,8 @@ def run_ffmpeg(
     on_progress: Optional[Callable[[int], None]] = None,
     on_output_line: Optional[Callable[[str], None]] = None,
     should_cancel: Optional[Callable[[], bool]] = None,
+    timeout_seconds: Optional[float] = None,
+    stall_timeout_seconds: Optional[float] = 180.0,
 ) -> int:
     """Run ffmpeg, stream progress, and handle cancellation cleanly.
 
@@ -341,6 +344,49 @@ def run_ffmpeg(
     proc = subprocess.Popen(command, **kwargs)
     drain_thread: Optional[threading.Thread] = None
 
+    # Render watchdog: bound the run against a mid-render no-output stall (and
+    # an optional hard ceiling). FFmpeg can hang after producing some output,
+    # in which case the `for line in primary_stream` read below blocks forever
+    # and the per-line should_cancel poll never fires again. The watchdog runs
+    # independently of output and reuses the graceful _cancel_ffmpeg ladder
+    # (q -> terminate -> kill) so a partial MP4 still flushes its moov atom.
+    # The stall timer arms only AFTER the first output line, so a render that
+    # legitimately emits no progress (e.g. a preset passing -nostats) is never
+    # falsely killed; use timeout_seconds for a hard cap.
+    _wd_state: dict[str, Optional[float]] = {"last_activity": None}
+    _wd_stop = threading.Event()
+    _cancel_lock = threading.Lock()
+
+    def _do_cancel() -> None:
+        # Idempotent: watchdog thread and per-line poll may both reach here;
+        # only the first to take the lock runs the kill ladder.
+        with _cancel_lock:
+            if proc.poll() is None:
+                _cancel_ffmpeg(proc)
+
+    def _watchdog() -> None:
+        start = time.monotonic()
+        while not _wd_stop.wait(1.0):
+            if proc.poll() is not None:
+                return
+            now = time.monotonic()
+            if timeout_seconds is not None and now - start > timeout_seconds:
+                _do_cancel()
+                return
+            last = _wd_state["last_activity"]
+            if (
+                stall_timeout_seconds is not None
+                and last is not None
+                and now - last > stall_timeout_seconds
+            ):
+                _do_cancel()
+                return
+
+    watchdog_thread: Optional[threading.Thread] = None
+    if timeout_seconds is not None or stall_timeout_seconds is not None:
+        watchdog_thread = threading.Thread(target=_watchdog, daemon=True)
+        watchdog_thread.start()
+
     try:
         # If progress_pipe, drain stderr in background
         if dialect == "progress_pipe" and proc.stderr is not None:
@@ -367,9 +413,10 @@ def run_ffmpeg(
             return proc.returncode
 
         for line in primary_stream:
+            _wd_state["last_activity"] = time.monotonic()
             # Cancellation check (polled per line — cheap, fast)
             if should_cancel is not None and should_cancel():
-                _cancel_ffmpeg(proc)
+                _do_cancel()
                 break
 
             clean_line = line.rstrip("\r\n")
@@ -400,11 +447,15 @@ def run_ffmpeg(
 
                         # Wait for exit code
         rc = proc.wait()
+        _wd_stop.set()
+        if watchdog_thread is not None:
+            watchdog_thread.join(timeout=2.0)
         if drain_thread is not None:
             drain_thread.join(timeout=2.0)
         return rc
 
     finally:
+        _wd_stop.set()
         # Safety net: if we exit by exception or early return, ensure
         # no zombie process lingers.
         if proc.poll() is None:

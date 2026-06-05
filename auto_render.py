@@ -668,7 +668,18 @@ class RenderWorker(QObject):
                     # the user to inspect.
                     if temp_output_file is not None and not is_image_encoder:
                         try:
-                            os.replace(temp_output_file, output_file)
+                            _swap_last_exc = None
+                            for _swap_i, _swap_ms in enumerate((50, 100, 200, 400, 0)):
+                                try:
+                                    os.replace(temp_output_file, output_file)
+                                    _swap_last_exc = None
+                                    break
+                                except OSError as _swap_e:
+                                    _swap_last_exc = _swap_e
+                                    if _swap_ms:
+                                        time.sleep(_swap_ms / 1000.0)
+                            if _swap_last_exc is not None:
+                                raise _swap_last_exc
                         except OSError as exc:
                             error_msg = (
                                 f"Failed to finalize output "
