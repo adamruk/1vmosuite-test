@@ -436,7 +436,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
   - Bounded the eight sibling ffprobe `subprocess.run` calls (`cutter` ×3, `merge` ×3, `mixer` ×2) with `timeout=30`; the existing broad `except` handlers already catch `TimeoutExpired`.
   - `bench.py` `proc.wait()` now has a 900s bound with kill-on-timeout so a hung encode can't wedge the harness.
   - `_apply_recommendation` snapshots `videos` + `gpu_enabled` and rolls them back if `start_render` raises, so a failed re-render start no longer leaves a destroyed file list or a silently flipped GPU toggle.
-  - Bumped the four app versions 3.8 → 3.9 in `assets/Version AutoRender.json` (Assets stays 1.4). [_pending_]
+  - Bumped the four app versions 3.8 → 3.9 in `assets/Version AutoRender.json` (Assets stays 1.4). [a0d066e]
 - FFmpeg renders that stall with no output are now ended by a watchdog instead of wedging the worker; the graceful cancel keeps the partial output playable. All four apps. [e61a5cf]
 - macOS writes flush to the drive via F_FULLFSYNC, closing a durability gap where os.fsync alone left data in the drive's write cache. [e61a5cf]
 - The finalized render output swap retries on a transient file lock rather than failing a completed render. [e61a5cf]
