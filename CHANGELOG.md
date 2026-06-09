@@ -428,6 +428,15 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- **v3.9 close-out batch — sibling-app i18n, advisory-layer guards, subprocess bounds, and a version bump.** A grouped close-out pass across the four apps and the optimization/diagnostic layers:
+  - **F-006** — `merge.py` and `mixer.py` now emit English render-status strings (`Processing` / `Completed` / `Error` / `Cancelled` / `Error processing` / `At least 1 video is required.`) instead of Vietnamese; 21 sites total. In `merge.py` the four status-colour string comparisons (`update_thread_status`) were translated in lockstep with the emits so status colours still resolve; `mixer.py` drives colour from counters, so its emits-only change carries no comparison risk.
+  - **P2** — `recommend_for_render` gains a `gpu_available` parameter and the USE_GPU advisory is suppressed on CPU-only machines (`gpu_available is not False`; `None` stays backward-compatible). `auto_render` passes the real probe via `gpu_caps.nvenc_available`.
+  - **P3** — the Settings dialog auto-disables auto-scoring (and tells the user once) when it is enabled with zero scoring axes selected, instead of leaving a silent per-render no-op.
+  - **P4** — `gpu_detect` status text uses cp1252-safe glyphs (`OK`/`yes`/`no`, ASCII hyphen) so the GPU report can't crash on a Western-Windows console encode.
+  - Bounded the eight sibling ffprobe `subprocess.run` calls (`cutter` ×3, `merge` ×3, `mixer` ×2) with `timeout=30`; the existing broad `except` handlers already catch `TimeoutExpired`.
+  - `bench.py` `proc.wait()` now has a 900s bound with kill-on-timeout so a hung encode can't wedge the harness.
+  - `_apply_recommendation` snapshots `videos` + `gpu_enabled` and rolls them back if `start_render` raises, so a failed re-render start no longer leaves a destroyed file list or a silently flipped GPU toggle.
+  - Bumped the four app versions 3.8 → 3.9 in `assets/Version AutoRender.json` (Assets stays 1.4). [_pending_]
 - FFmpeg renders that stall with no output are now ended by a watchdog instead of wedging the worker; the graceful cancel keeps the partial output playable. All four apps. [e61a5cf]
 - macOS writes flush to the drive via F_FULLFSYNC, closing a durability gap where os.fsync alone left data in the drive's write cache. [e61a5cf]
 - The finalized render output swap retries on a transient file lock rather than failing a completed render. [e61a5cf]

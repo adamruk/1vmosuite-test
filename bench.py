@@ -166,7 +166,11 @@ def _run_encode(
     start = time.perf_counter()
     t_out.start()
     t_err.start()
-    proc.wait()
+    try:
+        proc.wait(timeout=900)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
     t_out.join()
     t_err.join()
     elapsed = time.perf_counter() - start

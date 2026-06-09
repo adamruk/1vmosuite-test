@@ -77,7 +77,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - `auto_render.py:1034` `"""Đọc các tùy chọn render từ file Encoder.txt và bỏ qua các dòng lỗi."""`
   - The `auto_render.py:831` QSS block also contains two inline Vietnamese stylesheet comments (`/* Thêm viền xanh */`, `/* Thêm padding */`) — stylesheet comments rather than docstrings, but readable as non-English if the goal is full English-ification.
   - The earlier "L857 / L954" pair was a partial snapshot from older line numbering and missed four other docstrings. Treat the list above as canonical.
-- **Context:** Leftover from the original Vietnamese-language developer who authored the pre-v2 source. The 43 control-flow reconstruction artifacts from the pylingual decompile (commit a225831) addressed Python correctness; non-English docstrings survived because they were syntactically valid. cutter/merge/mixer were grep'd at audit time and appear English-only.
+- **Context:** Leftover from the original Vietnamese-language developer who authored the pre-v2 source. The 43 control-flow reconstruction artifacts from the pylingual decompile (commit a225831) addressed Python correctness; non-English docstrings survived because they were syntactically valid. cutter.py is English-only; merge.py and mixer.py carried 21 Vietnamese UI status strings (emit + comparison sites) until the v3.9 close-out batch translated them (F-006).
 - **Resolution:** Translate the 6 docstrings above (and optionally the 2 QSS comments) to English. NOT a two-line change as originally described. Verify no other Vietnamese strings exist via a Unicode-range grep over the Vietnamese-extended-Latin block.
 - **Trigger for pickup:** Opportunistic, OR before sharing the codebase with non-Vietnamese-reading contributors (which is now imminent with Junaid handoff).
 
@@ -300,6 +300,18 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - The robustness divergence is documented so users / Junaid know the siblings differ from auto_render.
 - **Cross-refs:** pre-mortem audit finding T3 (2026-05-25); `auto_render.py`'s atomic-output pattern (`.partial` + `os.replace`) is the reference implementation to mirror.
 - **Trigger for pickup:** the audience or input variety widens beyond friends / own footage, OR a user reports a truncated / glitchy sibling-app output, OR a focused sibling-hardening pass.
+
+## B-054: core/version_state.py inherits the non-atomic write + assets-dir location
+
+- **Status:** Open, LOW.
+- **Context:** ADR-0017 relocated version-state byte-for-byte from the
+  removed updater: raw json.dump (no atomic write), print() error
+  handling, no encoding=, and a write target inside assets/ next to
+  the code (unwritable under Program Files; lost under PyInstaller
+  _MEIPASS). Deliberate at relocation time to keep the diff pure.
+- **Resolution when picked up:** route through
+  core.atomic_write.save_json_atomic, log via logging, and resolve the
+  path through core.user_data like the other per-user state files.
 
 ## Resolved
 

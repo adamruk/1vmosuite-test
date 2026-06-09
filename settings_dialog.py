@@ -489,6 +489,16 @@ class SettingsDialog(QDialog):
             chosen_axes.append("phash")
         if self.scoring_axis_ssim_check.isChecked():
             chosen_axes.append("ssim")
+        # v3.9 P3 fix: auto-scoring with zero axes is a silent no-op
+        # on every render. Auto-disable and tell the user once.
+        if self.scoring_auto_check.isChecked() and not chosen_axes:
+            self.config["scoring_auto_enabled"] = False
+            QMessageBox.information(
+                self,
+                "Scoring",
+                "Auto-scoring was turned off because no scoring axes "
+                "are selected. Pick at least one axis to use it.",
+            )
         self.config["scoring_default_axes"] = chosen_axes
         self.config["scoring_max_parallel"] = self.scoring_max_parallel_spin.value()
         self.config["scoring_phash_frames"] = self.scoring_phash_frames_spin.value()

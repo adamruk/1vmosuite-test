@@ -4890,6 +4890,9 @@ class VideoRendererTool(QMainWindow):
                 render_duration_s=row["duration_s"],
                 batch_median_duration_s=median_dur,
                 settings_snapshot={"gpu_enabled": bool(self.gpu_enabled)},
+                gpu_available=bool(
+                    getattr(getattr(self, "gpu_caps", None), "nvenc_available", False)
+                ),
             )
             if recs:
                 recs_per_row[row["row_index"]] = recs
@@ -5043,6 +5046,11 @@ class VideoRendererTool(QMainWindow):
             return
         # Honor the proposed_params hints at the dispatcher level
         # (advisory only — preset_translator is untouched).
+        # v3.9 fix: snapshot state so a failed start does not leave the
+        # user with a destroyed file list or a silently flipped GPU
+        # toggle. Full restore-after-batch is deferred (BACKLOG).
+        prior_videos = list(self.videos)
+        prior_gpu_enabled = bool(self.gpu_enabled)
         prop = recommendation.proposed_params or {}
         if "gpu_enabled" in prop:
             self.gpu_enabled = bool(prop["gpu_enabled"])
@@ -5057,6 +5065,13 @@ class VideoRendererTool(QMainWindow):
         try:
             self.start_render()
         except Exception as exc:
+            # Roll back the destructive swap — the render never began.
+            self.videos = prior_videos
+            self.gpu_enabled = prior_gpu_enabled
+            try:
+                self.update_video_list()
+            except Exception:
+                pass
             QMessageBox.warning(self, "Re-render", f"Could not start: {exc}")
 
     def _cancel_all_score_workers(self) -> None:

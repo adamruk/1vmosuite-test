@@ -231,11 +231,11 @@ class MergeWorker(QRunnable):
             MergeWorker.running_workers.append(self)
             self.signals.status_updated.emit(
                 self.thread_index,
-                f"Bắt đầu xử lý: {os.path.basename(self.output_path)}",
+                f"Processing: {os.path.basename(self.output_path)}",
             )
             self.signals.progress_updated.emit(self.thread_index, 0)
             self.signals.output_updated.emit(
-                f"\n[Thread {self.thread_index + 1}] Bắt đầu xử lý: {os.path.basename(self.output_path)}\n"
+                f"\n[Thread {self.thread_index + 1}] Processing: {os.path.basename(self.output_path)}\n"
             )
             for video in self.input_files:
                 if not os.path.exists(video):
@@ -281,7 +281,7 @@ class MergeWorker(QRunnable):
                 should_cancel=lambda: self.is_cancelled,
             )
             if self.is_cancelled:
-                self.signals.status_updated.emit(self.thread_index, "Đã hủy")
+                self.signals.status_updated.emit(self.thread_index, "Cancelled")
                 self.signals.progress_updated.emit(self.thread_index, 0)
                 try:
                     if os.path.exists(temp_file_path):
@@ -296,10 +296,10 @@ class MergeWorker(QRunnable):
                     os.path.exists(self.output_path)
                     and os.path.getsize(self.output_path) > 0
                 ):
-                    self.signals.status_updated.emit(self.thread_index, "Hoàn thành")
+                    self.signals.status_updated.emit(self.thread_index, "Completed")
                     self.signals.progress_updated.emit(self.thread_index, 100)
                     self.signals.output_updated.emit(
-                        f"\n[Thread {self.thread_index + 1}] Hoàn thành: {os.path.basename(self.output_path)}\n"
+                        f"\n[Thread {self.thread_index + 1}] Completed: {os.path.basename(self.output_path)}\n"
                     )
                     self.signals.merge_completed.emit(
                         os.path.basename(self.output_path)
@@ -317,10 +317,12 @@ class MergeWorker(QRunnable):
                     f"Không thể xóa file tạm {temp_file_path}: {str(e)}"
                 )
         except Exception as e:
-            error_msg = f"Lỗi khi xử lý {os.path.basename(self.output_path)}: {str(e)}"
+            error_msg = (
+                f"Error processing {os.path.basename(self.output_path)}: {str(e)}"
+            )
             self.logger.error(error_msg)
             self.signals.error_occurred.emit(error_msg)
-            self.signals.status_updated.emit(self.thread_index, "Lỗi")
+            self.signals.status_updated.emit(self.thread_index, "Error")
             self.signals.progress_updated.emit(self.thread_index, 0)
             self.signals.output_updated.emit(
                 f"\n[Thread {self.thread_index + 1}] {error_msg}\n"
@@ -867,6 +869,7 @@ class VideoMergerTool(QMainWindow):
             creationflags=core_ffmpeg_runner.hidden_creationflags(),
             encoding="utf-8",
             errors="replace",
+            timeout=30,
         )
         try:
             duration_seconds = float(result.stdout.strip())
@@ -899,6 +902,7 @@ class VideoMergerTool(QMainWindow):
             creationflags=core_ffmpeg_runner.hidden_creationflags(),
             encoding="utf-8",
             errors="replace",
+            timeout=30,
         )
         return result.stdout.strip() or "Unknown"
 

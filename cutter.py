@@ -341,6 +341,7 @@ class CutWorker(QRunnable):
                 creationflags=core_ffmpeg_runner.hidden_creationflags(),
                 encoding="utf-8",
                 errors="replace",
+                timeout=30,
             )
             if result.returncode != 0:
                 raise FFmpegError(f"FFprobe error: {result.stderr}")
@@ -1002,6 +1003,7 @@ class VideoCutterTool(QMainWindow):
                 creationflags=core_ffmpeg_runner.hidden_creationflags(),
                 encoding="utf-8",
                 errors="replace",
+                timeout=30,
             )
             if result.returncode != 0:
                 raise FFmpegError(f"FFprobe error: {result.stderr}")
@@ -1036,6 +1038,7 @@ class VideoCutterTool(QMainWindow):
                 creationflags=core_ffmpeg_runner.hidden_creationflags(),
                 encoding="utf-8",
                 errors="replace",
+                timeout=30,
             )
             return result.stdout.strip() or "Unknown"
         except Exception as e:

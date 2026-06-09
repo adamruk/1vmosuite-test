@@ -276,7 +276,7 @@ class MergeCoordinator(QObject):
                     worker.signals.error_occurred.connect(self._on_error)
                     self.thread_pool.start(worker)
                 except Exception as e:
-                    error_msg = f"Lỗi khi xử lý video {output_index + 1}: {str(e)}"
+                    error_msg = f"Error processing video {output_index + 1}: {str(e)}"
                     print(f"Merge Error: {error_msg}")
                     self.logger.error(error_msg)
                     self.per_video_error.emit(error_msg)
@@ -347,14 +347,14 @@ class MergeWorker(QRunnable):
         try:
             self.signals.status_updated.emit(
                 self.thread_index,
-                f"Bắt đầu xử lý: {os.path.basename(self.output_path)}",
+                f"Processing: {os.path.basename(self.output_path)}",
             )
             self.signals.progress_updated.emit(self.thread_index, 0)
             self.signals.output_updated.emit(
-                f"\n[Thread {self.thread_index + 1}] Bắt đầu xử lý: {os.path.basename(self.output_path)}\n"
+                f"\n[Thread {self.thread_index + 1}] Processing: {os.path.basename(self.output_path)}\n"
             )
             if len(self.input_files) < 1:
-                raise ValueError("Cần ít nhất 1 video để xử lý.")
+                raise ValueError("At least 1 video is required.")
             for video in self.input_files:
                 if not os.path.exists(video):
                     raise FileNotFoundError(f"Không tìm thấy file: {video}")
@@ -500,7 +500,7 @@ class MergeWorker(QRunnable):
                 should_cancel=lambda: self.is_cancelled,
             )
             if self.is_cancelled:
-                self.signals.status_updated.emit(self.thread_index, "Đã hủy")
+                self.signals.status_updated.emit(self.thread_index, "Cancelled")
                 self.signals.progress_updated.emit(self.thread_index, 0)
                 if self in MergeWorker.running_workers:
                     MergeWorker.running_workers.remove(self)
@@ -510,10 +510,10 @@ class MergeWorker(QRunnable):
                     os.path.exists(self.output_path)
                     and os.path.getsize(self.output_path) > 0
                 ):
-                    self.signals.status_updated.emit(self.thread_index, "Hoàn thành")
+                    self.signals.status_updated.emit(self.thread_index, "Completed")
                     self.signals.progress_updated.emit(self.thread_index, 100)
                     self.signals.output_updated.emit(
-                        f"\n[Thread {self.thread_index + 1}] Hoàn thành: {os.path.basename(self.output_path)}\n"
+                        f"\n[Thread {self.thread_index + 1}] Completed: {os.path.basename(self.output_path)}\n"
                     )
                     self.signals.merge_completed.emit(
                         os.path.basename(self.output_path)
@@ -524,11 +524,11 @@ class MergeWorker(QRunnable):
                 error_msg = "\n".join(error_output[(-5):])
                 raise RuntimeError(f"FFmpeg trả về mã lỗi {return_code}\n{error_msg}")
         except Exception as e:
-            error_msg = f"Lỗi khi xử lý {os.path.basename(self.output_path)}: {str(e)}\n{traceback.format_exc()}"
+            error_msg = f"Error processing {os.path.basename(self.output_path)}: {str(e)}\n{traceback.format_exc()}"
             print(f"Merge Error: {error_msg}")
             self.logger.error(error_msg)
             self.signals.error_occurred.emit(error_msg)
-            self.signals.status_updated.emit(self.thread_index, "Lỗi")
+            self.signals.status_updated.emit(self.thread_index, "Error")
             self.signals.progress_updated.emit(self.thread_index, 0)
             self.signals.output_updated.emit(
                 f"\n[Thread {self.thread_index + 1}] {error_msg}\n"
@@ -1522,6 +1522,7 @@ class VideoMergeTool(QMainWindow):
             creationflags=core_ffmpeg_runner.hidden_creationflags(),
             encoding="utf-8",
             errors="replace",
+            timeout=30,
         )
         try:
             duration_seconds = float(result.stdout.strip())
@@ -1590,6 +1591,7 @@ class VideoMergeTool(QMainWindow):
             creationflags=core_ffmpeg_runner.hidden_creationflags(),
             encoding="utf-8",
             errors="replace",
+            timeout=30,
         )
         try:
             duration_seconds = float(result.stdout.strip())
@@ -1621,6 +1623,7 @@ class VideoMergeTool(QMainWindow):
             creationflags=core_ffmpeg_runner.hidden_creationflags(),
             encoding="utf-8",
             errors="replace",
+            timeout=30,
         )
         return result.stdout.strip() or "Unknown"
 
@@ -1845,7 +1848,7 @@ class VideoMergeTool(QMainWindow):
     def update_thread_status(self, thread_index: int, status: str):
         if 0 <= thread_index < len(self.thread_labels):
             self.thread_labels[thread_index].setText(status)
-        if "Bắt đầu xử lý" in status:
+        if "Processing" in status:
             if 0 <= thread_index < len(self.progress_boxes):
                 self.update_box_color(thread_index, "yellow")
             for i in range(self.tree_output.topLevelItemCount()):
@@ -1853,13 +1856,13 @@ class VideoMergeTool(QMainWindow):
                 if item.text(6) == "⏳ Waiting...":
                     item.setText(6, "🔄 Processing...")
                     break
-        if status == "Hoàn thành":
+        if status == "Completed":
             if 0 <= thread_index < len(self.progress_boxes):
                 self.update_box_color(thread_index, "green")
-        if status == "Lỗi":
+        if status == "Error":
             if 0 <= thread_index < len(self.progress_boxes):
                 self.update_box_color(thread_index, "red")
-        if status == "Đã hủy":
+        if status == "Cancelled":
             if 0 <= thread_index < len(self.progress_boxes):
                 self.update_box_color(thread_index, "red")
 

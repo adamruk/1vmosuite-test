@@ -51,6 +51,7 @@ def recommend_for_render(
     batch_median_duration_s: Optional[float] = None,
     original_preset_ids: Optional[list[str]] = None,
     settings_snapshot: Optional[dict[str, Any]] = None,
+    gpu_available: Optional[bool] = None,
     vmaf_mean_threshold: float = 96.0,
     vmaf_p5_threshold: float = 93.0,
     phash_too_similar: float = 5.0,
@@ -155,7 +156,10 @@ def recommend_for_render(
             )
         )
 
-    # --- USE_GPU when slow + GPU is currently disabled + GPU is available.
+    # --- USE_GPU when slow + GPU is currently disabled + GPU is
+    # actually present. gpu_available=None (caller didn't probe) is
+    # treated as available for backward compat; an explicit False
+    # suppresses the recommendation on CPU-only machines.
     gpu_enabled = bool(settings.get("gpu_enabled", False))
     if (
         render_duration_s is not None
@@ -163,6 +167,7 @@ def recommend_for_render(
         and batch_median_duration_s > 0
         and render_duration_s > batch_median_duration_s * 3.0
         and not gpu_enabled
+        and gpu_available is not False
     ):
         out.append(
             Recommendation(

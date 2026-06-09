@@ -295,7 +295,7 @@ def format_status(caps: GPUCapabilities) -> str:
     codec_str = "/".join(codecs) if codecs else "none"
 
     driver = f", driver {caps.driver_version}" if caps.driver_version else ""
-    return f"✓ GPU: {primary.name} ({primary.generation.display_name}){driver} — NVENC: {codec_str}"
+    return f"OK GPU: {primary.name} ({primary.generation.display_name}){driver} - NVENC: {codec_str}"
 
 
 def format_detailed_report(caps: GPUCapabilities) -> str:
@@ -325,9 +325,9 @@ def format_detailed_report(caps: GPUCapabilities) -> str:
 
     lines.append("")
     lines.append("Unlocked capabilities (hardware ∩ ffmpeg):")
-    lines.append(f"  H.264 NVENC: {'✓' if caps.h264_available else '✗'}")
-    lines.append(f"  HEVC NVENC:  {'✓' if caps.hevc_available else '✗'}")
-    lines.append(f"  AV1 NVENC:   {'✓' if caps.av1_available else '✗'}")
+    lines.append(f"  H.264 NVENC: {'yes' if caps.h264_available else 'no'}")
+    lines.append(f"  HEVC NVENC:  {'yes' if caps.hevc_available else 'no'}")
+    lines.append(f"  AV1 NVENC:   {'yes' if caps.av1_available else 'no'}")
 
     return "\n".join(lines)
 
