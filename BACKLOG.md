@@ -77,7 +77,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - `auto_render.py:1034` `"""Đọc các tùy chọn render từ file Encoder.txt và bỏ qua các dòng lỗi."""`
   - The `auto_render.py:831` QSS block also contains two inline Vietnamese stylesheet comments (`/* Thêm viền xanh */`, `/* Thêm padding */`) — stylesheet comments rather than docstrings, but readable as non-English if the goal is full English-ification.
   - The earlier "L857 / L954" pair was a partial snapshot from older line numbering and missed four other docstrings. Treat the list above as canonical.
-- **Context:** Leftover from the original Vietnamese-language developer who authored the pre-v2 source. The 43 control-flow reconstruction artifacts from the pylingual decompile (commit a225831) addressed Python correctness; non-English docstrings survived because they were syntactically valid. cutter.py is English-only; merge.py and mixer.py carried 21 Vietnamese UI status strings (emit + comparison sites) until the v3.9 close-out batch translated them (F-006).
+- **Context:** Leftover from the original Vietnamese-language developer who authored the pre-v2 source. The 43 control-flow reconstruction artifacts from the pylingual decompile (commit a225831) addressed Python correctness; non-English docstrings survived because they were syntactically valid. cutter.py carries 2 Vietnamese docstrings. merge.py and mixer.py carried 20 Vietnamese UI status strings (emit + comparison sites, translated in the v3.9 close-out batch, F-006) plus 14 user-facing message literals (exception text and command-echo labels, translated in the F-006b pass). Remaining in this ticket's scope: docstrings and QSS comments across all four apps (auto_render ~38 lines incl. the QSS block at ~1800, mixer ~29 + QSS ~517, merge 6, cutter 2) — non-user-facing only.
 - **Resolution:** Translate the 6 docstrings above (and optionally the 2 QSS comments) to English. NOT a two-line change as originally described. Verify no other Vietnamese strings exist via a Unicode-range grep over the Vietnamese-extended-Latin block.
 - **Trigger for pickup:** Opportunistic, OR before sharing the codebase with non-Vietnamese-reading contributors (which is now imminent with Junaid handoff).
 
@@ -101,7 +101,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 
 ## B-027: `THAY_THẾ_NỘI_DUNG` literal placeholder in 2 built-in drawtext presets
 
-- **Status:** Open, backlog
+- **Status:** RESOLVED — 2026-06-10, closed by the F-006b pass (commit hash pending backfill).
 - **Priority:** LOW–MEDIUM (user-visible: the literal string renders into the output video if the user runs the preset as-is without editing the param)
 - **Surfaced:** Codex post-completion review (2026-05-11) — searched `assets/Encoder.json` for non-ASCII content during the Vietnamese-strings sweep.
 - **Locations:**
@@ -113,6 +113,11 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
   - (b) Add a UI hint / pre-flight check that warns when a selected preset still contains a known placeholder token (`THAY_THẾ_NỘI_DUNG`, `YOUR_TEXT_HERE`, etc.) and prompts the user to edit before render.
   - (c) Move the text content out of the preset and require the user to enter it explicitly per render.
 - **Trigger for pickup:** When a user reports a rendered video containing the placeholder string, OR alongside B-025 Vietnamese cleanup, OR before Junaid's URL_DOWNLOADER feature lands its UI (since touching preset metadata is a related surface).
+- **Resolution (2026-06-10):** Closed by F-006b — the
+  THAY_THẾ_NỘI_DUNG placeholder was replaced with REPLACE_THIS_TEXT in
+  auto_render.py + tools/generate_encoder_json.py, with Encoder.json
+  regenerated (option (a): placeholder made English and obviously
+  editable; no prompt-on-use logic added).
 
 ## B-026: PyInstaller spec files untracked in git
 
@@ -250,6 +255,7 @@ Each item has a stable ID (B-NNN) referenceable in commit messages and CHANGELOG
 - **Context:** `.git/hooks/` contains only the stock `*.sample` files and `pre-commit` is not on PATH, so the configured guards (markdownlint, `check-changelog`, `check_adr_references`, ruff-format) only run when invoked manually — they are NOT enforced at commit time. Additionally `markdownlint` is not installed at all on this host (no binary, no `pymarkdown` module), so the markdown lint gate could not be run during this batch; `ruff` is only reachable via `python -m ruff` (not a bare `ruff` on PATH).
 - **Resolution:** run `pre-commit install` to wire the hooks into `.git/hooks/`; document the step in `setup.ps1` so a fresh clone gets them. Optionally add a markdownlint provider (npm `markdownlint-cli` or `pymarkdown`) to the dev-tooling docs so the markdown gate is actually runnable.
 - **Trigger for pickup:** next toolchain/setup hygiene cycle, OR the first time a guard-violating commit slips through because the hook was not enforced.
+- 2026-06-10 VERIFY pass: the venv ruff (0.15.x) and the pre-commit pin (v0.6.9) sit on opposite sides of ruff 0.15.0's 2026 style guide (released 2026-02-03), so `ruff format` baselines diverge — a 75-file would-reformat delta, none of them batch-touched. When B-047 is picked up, pin BOTH to one version and decide deliberately: staying on 0.6.9 keeps the current style; moving to 0.15.x means a one-time 75-file style-migration commit. Latest upstream is 0.15.16 (2026-06-04).
 
 ## B-048: `show_ffmpeg_command` + `open_output_when_done` Settings have no consumer (split from B-014)
 

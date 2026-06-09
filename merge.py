@@ -357,16 +357,16 @@ class MergeWorker(QRunnable):
                 raise ValueError("At least 1 video is required.")
             for video in self.input_files:
                 if not os.path.exists(video):
-                    raise FileNotFoundError(f"Không tìm thấy file: {video}")
+                    raise FileNotFoundError(f"File not found: {video}")
                 if os.path.getsize(video) == 0:
-                    raise ValueError(f"File rỗng: {video}")
+                    raise ValueError(f"File is empty: {video}")
             if self.custom_audio:
                 if not os.path.exists(self.custom_audio):
                     raise FileNotFoundError(
-                        f"Không tìm thấy file audio: {self.custom_audio}"
+                        f"Audio file not found: {self.custom_audio}"
                     )
                 if os.path.getsize(self.custom_audio) == 0:
-                    raise ValueError(f"File audio rỗng: {self.custom_audio}")
+                    raise ValueError(f"Audio file is empty: {self.custom_audio}")
             resolutions = []
             for file in self.input_files:
                 ext = os.path.splitext(file)[1].lower()
@@ -481,7 +481,7 @@ class MergeWorker(QRunnable):
             command.extend(self.get_ffmpeg_params())
             command.append(self.output_path)
             self.signals.output_updated.emit(
-                f"\nLệnh FFmpeg: {' '.join((str(x) for x in command))}\n\n"
+                f"\nFFmpeg command: {' '.join((str(x) for x in command))}\n\n"
             )
             self.process = _RunnerHandle()
             error_output = []
@@ -519,10 +519,12 @@ class MergeWorker(QRunnable):
                         os.path.basename(self.output_path)
                     )
                 else:
-                    raise RuntimeError("File đầu ra không tồn tại hoặc rỗng")
+                    raise RuntimeError("Output file is missing or empty")
             else:
                 error_msg = "\n".join(error_output[(-5):])
-                raise RuntimeError(f"FFmpeg trả về mã lỗi {return_code}\n{error_msg}")
+                raise RuntimeError(
+                    f"FFmpeg returned error code {return_code}\n{error_msg}"
+                )
         except Exception as e:
             error_msg = f"Error processing {os.path.basename(self.output_path)}: {str(e)}\n{traceback.format_exc()}"
             print(f"Merge Error: {error_msg}")
@@ -1514,16 +1516,19 @@ class VideoMergeTool(QMainWindow):
             audio_path,
         ]
         startupinfo = core_ffmpeg_runner.hidden_startupinfo()
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            startupinfo=startupinfo,
-            creationflags=core_ffmpeg_runner.hidden_creationflags(),
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                startupinfo=startupinfo,
+                creationflags=core_ffmpeg_runner.hidden_creationflags(),
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except Exception:
+            return "Unknown"
         try:
             duration_seconds = float(result.stdout.strip())
             hours, remainder = divmod(int(duration_seconds), 3600)
@@ -1583,16 +1588,19 @@ class VideoMergeTool(QMainWindow):
             video_path,
         ]
         startupinfo = core_ffmpeg_runner.hidden_startupinfo()
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            startupinfo=startupinfo,
-            creationflags=core_ffmpeg_runner.hidden_creationflags(),
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                startupinfo=startupinfo,
+                creationflags=core_ffmpeg_runner.hidden_creationflags(),
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except Exception:
+            return "Unknown"
         try:
             duration_seconds = float(result.stdout.strip())
             hours, remainder = divmod(int(duration_seconds), 3600)
@@ -1615,17 +1623,20 @@ class VideoMergeTool(QMainWindow):
             video_path,
         ]
         startupinfo = core_ffmpeg_runner.hidden_startupinfo()
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            startupinfo=startupinfo,
-            creationflags=core_ffmpeg_runner.hidden_creationflags(),
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
-        return result.stdout.strip() or "Unknown"
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                startupinfo=startupinfo,
+                creationflags=core_ffmpeg_runner.hidden_creationflags(),
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+            return result.stdout.strip() or "Unknown"
+        except Exception:
+            return "Unknown"
 
     def select_output_directory(self):
         try:

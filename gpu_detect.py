@@ -280,7 +280,7 @@ def detect(ffmpeg_path: Path) -> GPUCapabilities:
 def format_status(caps: GPUCapabilities) -> str:
     """One-line human-readable status suitable for a status bar."""
     if not caps.has_nvidia:
-        return f"⚠ GPU: not available ({caps.error or 'no NVIDIA GPU detected'})"
+        return f"GPU: not available ({caps.error or 'no NVIDIA GPU detected'})"
 
     primary = caps.primary_device
     assert primary is not None
@@ -324,7 +324,7 @@ def format_detailed_report(caps: GPUCapabilities) -> str:
     )
 
     lines.append("")
-    lines.append("Unlocked capabilities (hardware ∩ ffmpeg):")
+    lines.append("Unlocked capabilities (hardware AND ffmpeg):")
     lines.append(f"  H.264 NVENC: {'yes' if caps.h264_available else 'no'}")
     lines.append(f"  HEVC NVENC:  {'yes' if caps.hevc_available else 'no'}")
     lines.append(f"  AV1 NVENC:   {'yes' if caps.av1_available else 'no'}")

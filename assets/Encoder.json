@@ -1926,22 +1926,22 @@
       "id": "builtin:text/text-bottom-basic",
       "group": "Text",
       "name": "Text Bottom Basic",
-      "description": "Thêm chữ ở dưới với nền đen mờ",
-      "details": "Thêm chữ ở dưới video với nền đen mờ, font Arial, size 35px",
+      "description": "Add text at the bottom on a translucent black background",
+      "details": "Adds text at the bottom of the video on a translucent black background, Arial font, 35px",
       "params": [
         "-vf",
-        "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"
+        "drawtext=fontfile=Arial:text='REPLACE_THIS_TEXT':x=(w-text_w)/2:y=(h-text_h)/1.05:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"
       ]
     },
     {
       "id": "builtin:text/text-top-basic",
       "group": "Text",
       "name": "Text Top Basic",
-      "description": "Thêm chữ ở trên với nền đen mờ",
-      "details": "Thêm chữ ở trên video với nền đen mờ, font Arial, size 35px",
+      "description": "Add text at the top on a translucent black background",
+      "details": "Adds text at the top of the video on a translucent black background, Arial font, 35px",
       "params": [
         "-vf",
-        "drawtext=fontfile=Arial:text='THAY_THẾ_NỘI_DUNG':x=(w-text_w)/2:y=(h-text_h)/15:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"
+        "drawtext=fontfile=Arial:text='REPLACE_THIS_TEXT':x=(w-text_w)/2:y=(h-text_h)/15:fontsize=35:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10"
       ]
     }
   ]

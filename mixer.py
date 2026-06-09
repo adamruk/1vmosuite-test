@@ -239,9 +239,9 @@ class MergeWorker(QRunnable):
             )
             for video in self.input_files:
                 if not os.path.exists(video):
-                    raise FileNotFoundError(f"Không tìm thấy file: {video}")
+                    raise FileNotFoundError(f"File not found: {video}")
                 if os.path.getsize(video) == 0:
-                    raise ValueError(f"File rỗng: {video}")
+                    raise ValueError(f"File is empty: {video}")
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".txt", delete=False, encoding="utf-8"
             ) as tmp_file:
@@ -263,7 +263,7 @@ class MergeWorker(QRunnable):
                 str(self.output_path),
             ]
             self.signals.output_updated.emit(
-                f"Lệnh thực thi: {' '.join((str(x) for x in command))}\n\n"
+                f"FFmpeg command: {' '.join((str(x) for x in command))}\n\n"
             )
             error_output = []
 
@@ -288,7 +288,7 @@ class MergeWorker(QRunnable):
                         os.remove(temp_file_path)
                 except Exception as e:
                     self.logger.warning(
-                        f"Không thể xóa file tạm {temp_file_path}: {str(e)}"
+                        f"Could not delete temp file {temp_file_path}: {str(e)}"
                     )
                 return
             if return_code == 0:
@@ -305,16 +305,18 @@ class MergeWorker(QRunnable):
                         os.path.basename(self.output_path)
                     )
                 else:
-                    raise RuntimeError("File đầu ra không tồn tại hoặc rỗng")
+                    raise RuntimeError("Output file is missing or empty")
             else:
                 error_msg = "\n".join(error_output[(-5):])
-                raise RuntimeError(f"FFmpeg trả về mã lỗi {return_code}\n{error_msg}")
+                raise RuntimeError(
+                    f"FFmpeg returned error code {return_code}\n{error_msg}"
+                )
             try:
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)
             except Exception as e:
                 self.logger.warning(
-                    f"Không thể xóa file tạm {temp_file_path}: {str(e)}"
+                    f"Could not delete temp file {temp_file_path}: {str(e)}"
                 )
         except Exception as e:
             error_msg = (
@@ -861,16 +863,19 @@ class VideoMergerTool(QMainWindow):
             video_path,
         ]
         startupinfo = core_ffmpeg_runner.hidden_startupinfo()
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            startupinfo=startupinfo,
-            creationflags=core_ffmpeg_runner.hidden_creationflags(),
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                startupinfo=startupinfo,
+                creationflags=core_ffmpeg_runner.hidden_creationflags(),
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+        except Exception:
+            return "Unknown"
         try:
             duration_seconds = float(result.stdout.strip())
             hours, remainder = divmod(int(duration_seconds), 3600)
@@ -894,17 +899,20 @@ class VideoMergerTool(QMainWindow):
             video_path,
         ]
         startupinfo = core_ffmpeg_runner.hidden_startupinfo()
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            startupinfo=startupinfo,
-            creationflags=core_ffmpeg_runner.hidden_creationflags(),
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
-        return result.stdout.strip() or "Unknown"
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                startupinfo=startupinfo,
+                creationflags=core_ffmpeg_runner.hidden_creationflags(),
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+            return result.stdout.strip() or "Unknown"
+        except Exception:
+            return "Unknown"
 
     def select_output_directory(self):
         """Chọn thư mục đầu ra."""
