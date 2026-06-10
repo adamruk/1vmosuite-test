@@ -1254,6 +1254,7 @@ class VideoRendererTool(QMainWindow):
         # for the next batch, matching select_videos semantics.
         self.setAcceptDrops(True)
         self.setup_ui()
+        QApplication.styleHints().setColorScheme(Qt.ColorScheme.Light)
         self.setup_style()
 
         # Surface GPU status in the built-in QMainWindow status bar.
@@ -1449,7 +1450,7 @@ class VideoRendererTool(QMainWindow):
         self.tree_videos.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree_videos.setAlternatingRowColors(True)
         self.tree_videos.header().setDefaultAlignment(Qt.AlignCenter)
-        input_layout.addWidget(self.tree_videos)
+        input_layout.addWidget(self.tree_videos, 1)
         encoder_controls = FlowLayout(h_spacing=5, v_spacing=5)
         # 2c-c-4: edit/delete buttons must be instance attrs so the
         # selection-change handler can toggle their enabled state.
@@ -1532,7 +1533,7 @@ class VideoRendererTool(QMainWindow):
         self.tree_encoders.itemSelectionChanged.connect(
             self._update_encoder_status_label
         )
-        config_layout.addWidget(self.tree_encoders)
+        config_layout.addWidget(self.tree_encoders, 1)
         mode_frame = QFrame(objectName="mode_frame")
         mode_frame.setFrameStyle(QFrame.StyledPanel)
         mode_layout = QVBoxLayout(mode_frame)
@@ -1553,9 +1554,7 @@ class VideoRendererTool(QMainWindow):
         self.sequential_combos = []
         self.sequential_clear_btns = []
         sequential_frame = QFrame()
-        sequential_layout = QHBoxLayout(sequential_frame)
-        sequential_layout.setContentsMargins(0, 0, 0, 0)
-        sequential_layout.setSpacing(20)
+        sequential_layout = FlowLayout(sequential_frame, h_spacing=12, v_spacing=8)
         combo_colors = [
             "#FFCDD2",
             "#C8E6C9",
@@ -1580,11 +1579,15 @@ class VideoRendererTool(QMainWindow):
             combo_layout.addWidget(label)
             combo = QComboBox()
             combo.setEnabled(False)
-            combo.setFixedWidth(120)
+            combo.setMinimumWidth(110)
+            combo.setMaximumWidth(210)
+            combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(12)
             combo.setFixedHeight(25)
-            combo.setPlaceholderText("Drop preset here")
+            combo.setPlaceholderText("Select preset…")
             self.sequential_combos.append(combo)
             combo.currentTextChanged.connect(self._on_slot_text_changed)
+            combo.currentTextChanged.connect(lambda text, c=combo: c.setToolTip(text))
             combo_row = QHBoxLayout()
             combo_row.setContentsMargins(0, 0, 0, 0)
             combo_row.setSpacing(2)
@@ -1601,7 +1604,6 @@ class VideoRendererTool(QMainWindow):
             combo_row.addWidget(clear_btn)
             combo_layout.addLayout(combo_row)
             sequential_layout.addWidget(combo_container)
-        sequential_layout.addStretch()
         step_assign_label = QLabel(
             "Optional: Assign to slots (for Render All Variants only)"
         )
@@ -1609,7 +1611,9 @@ class VideoRendererTool(QMainWindow):
             "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
         )
         mode_layout.addWidget(step_assign_label)
-        self.empty_slots_hint = QLabel("Click a preset above, then click a slot")
+        self.empty_slots_hint = QLabel(
+            "Use the dropdowns below to assign presets to slots"
+        )
         self.empty_slots_hint.setAlignment(Qt.AlignCenter)
         self.empty_slots_hint.setStyleSheet(
             "color: #999; background: transparent; font-style: italic; font-weight: normal; padding: 6px;"
@@ -1750,7 +1754,7 @@ class VideoRendererTool(QMainWindow):
         self.tree_output.customContextMenuRequested.connect(
             self._show_output_context_menu
         )
-        output_layout.addWidget(self.tree_output)
+        output_layout.addWidget(self.tree_output, 1)
         self.resizeEvent = self.on_resize
 
         self._update_empty_hints()

@@ -428,6 +428,26 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] fix(ui): Batch UI-2 (v3.9 UI hardening) — the 8-slot preset
+  row (the last oversized content row) switches QHBoxLayout → FlowLayout
+  (h_spacing=12, v_spacing=8) so slots wrap instead of clipping off-window;
+  slot combos drop their 120px fixed width for min 110 / max 210 with
+  QComboBox.AdjustToMinimumContentsLengthWithIcon + 12-char minimum
+  contents length, and mirror the selected text into the combo's tooltip so
+  a truncated preset name is recoverable on hover (UI-07); slot copy now
+  describes the real interaction — placeholder "Drop preset here" →
+  "Select preset…", hint "Click a preset above, then click a slot" → "Use
+  the dropdowns below to assign presets to slots" (no drag-drop or
+  click-to-assign exists); the three trees (tree_videos / tree_encoders /
+  tree_output) get stretch factor 1 in their parent layouts so vertical
+  resize goes to content instead of dead space (UI-20 partial); and the app
+  forces Qt.ColorScheme.Light via QApplication.styleHints() before
+  setup_style() so the native-rendering dialogs from Batch UI-1 match the
+  QSS-light main window on dark-mode Windows (Qt 6.8+ API; env pinned
+  6.9.3). Window minimum unchanged by design: offscreen minimumSizeHint
+  stays 1585x766 (tests/smoke/test_ui_minsize.py — floor-locked by the 780
+  frame floors until Batch UI-3).
+
 - [5391488] fix(ui): Batch UI-1 (v3.9 UI hardening) — the window-level
   stylesheet moves to the central widget so child dialogs and QMessageBoxes
   render native instead of inheriting 120px-pinned buttons / bold blue body
