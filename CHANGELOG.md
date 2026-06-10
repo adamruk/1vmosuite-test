@@ -428,6 +428,44 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] fix(ui): Polish batch (v3.9 UI hardening) — eight small
+  independent fixes in auto_render.py, no layout restructuring. Tree
+  column shares in on_resize now use viewport().width() (excludes the
+  vertical scrollbar) and sum to 0.95 instead of 1.00/1.15 (tree_videos
+  0.067/0.57/0.142/0.171; tree_encoders 0.083/0.165/0.165/0.454/0.083;
+  tree_output 9-col 0.048/0.171/0.237/0.076/0.085/0.095/0.095/0.067/
+  0.076, 6-col fallback 0.083/0.207/0.289/0.124×3) so columns can no
+  longer outgrow the viewport — kills the always-on horizontal
+  scrollbars (UI-01). Terminal failure states stop reading
+  "Loading...": the update_video_list exception path, the three
+  get_video_resolution failure returns (empty stdout / timeout /
+  exception), and the render-error handler's duration+resolution cells
+  and encoder-name fallback now show "—" (in-progress "Loading..."
+  sites at row creation are unchanged) (UI-08). The GPU status-bar
+  label gets a PointingHandCursor at creation (its double-click tooltip
+  already existed) (UI-12). The Step 1 Delete button is
+  selection-gated: new _sync_delete_enabled() wired to
+  tree_videos.itemSelectionChanged plus an initial sync (existing
+  no-selection modal kept as dead-path fallback; existing self.btn_delete
+  attr reused). CLAUDE.md §6 minimum-fix within this edit: the five
+  legacy videos-exist enable lines (config restore in __init__, URL
+  finished, select_videos, dropEvent, batch resume) force-enabled
+  Delete with no selection right after every update_video_list() and
+  contradicted the gate (and the batch's own startup assert), so they
+  are removed — the selection signal owns the state now; the redundant
+  empty-list disable in delete_videos is left in place (UI-13). The progress header is created with the same
+  two-line shape the runtime writes ("Progress: 0/0 renders\nETA: —")
+  so the header no longer changes height at render start (UI-14). URL
+  cancel gets a _url_cancel_requested latch (init in __init__, reset at
+  batch start and in _on_url_finished/_on_url_error, set in
+  _on_url_cancel_clicked, guard at the top of _on_url_progress) so the
+  "Cancelling, please wait…" label survives the wind-down (UI-11). The
+  fifth dir_label site (batch-resume restore, the setText+setToolTip
+  pair) routes through _set_output_dir_label (Observation W). dir_label
+  gets QSizePolicy.Ignored horizontally so its elided text can no
+  longer push output_frame wider through the splitter (the Batch UI-3
+  G-widen, +64px at 1280x800). Ratchet file untouched this batch.
+
 - [_pending_] fix(ui): Batch UI-3 (v3.9 UI hardening) — the floor-drop
   batch. The five artificial frame minimums (4× setMinimumWidth(780) on
   input/config/progress/output frames + setMinimumHeight(450) on

@@ -1246,6 +1246,9 @@ class VideoRendererTool(QMainWindow):
             "gpu_max_concurrent", _d.gpu_max_concurrent
         )
         self._gpu_semaphore = QSemaphore(self.gpu_max_concurrent)
+        # Polish batch (UI-11): once the user cancels a URL batch, the
+        # progress handler must not overwrite the "Cancelling…" label.
+        self._url_cancel_requested = False
         self.encoder_options = self.load_encoder_options()
         # Phase 2d production-hardening fix (Issue 4): main window
         # accepts video file drops. Handlers are defined further down
@@ -1276,7 +1279,6 @@ class VideoRendererTool(QMainWindow):
             if valid_videos:
                 self.videos = valid_videos
                 self.update_video_list()
-                self.btn_delete.setEnabled(True)
         self.load_encoders_to_tree()
         self._apply_slot_defaults()
 
@@ -1458,6 +1460,11 @@ class VideoRendererTool(QMainWindow):
         self.tree_videos.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree_videos.setAlternatingRowColors(True)
         self.tree_videos.header().setDefaultAlignment(Qt.AlignCenter)
+        # Polish batch (UI-13): Delete only acts on a selection, so its
+        # enabled state follows the selection. The no-selection modal in
+        # delete_videos stays as a dead-path fallback.
+        self.tree_videos.itemSelectionChanged.connect(self._sync_delete_enabled)
+        self._sync_delete_enabled()
         input_layout.addWidget(self.tree_videos, 1)
         encoder_controls = FlowLayout(h_spacing=5, v_spacing=5)
         # 2c-c-4: edit/delete buttons must be instance attrs so the
@@ -1649,7 +1656,10 @@ class VideoRendererTool(QMainWindow):
         progress_info_frame = QFrame(objectName="progress_info_frame")
         progress_info_layout = QHBoxLayout(progress_info_frame)
         progress_info_layout.setContentsMargins(10, 2, 10, 2)
-        self.progress_label = QLabel("Progress: 0/0")
+        # Polish batch (UI-14): initial text carries the same two-line
+        # shape as the runtime updates ("Progress: a/b renders\nETA: x")
+        # so the header does not change height when a render starts.
+        self.progress_label = QLabel("Progress: 0/0 renders\nETA: —")
         self.current_label = QLabel("Idle")
         progress_info_layout.addWidget(self.progress_label)
         progress_info_layout.addWidget(self.current_label)
@@ -1706,6 +1716,10 @@ class VideoRendererTool(QMainWindow):
         dir_btn.setToolTip("Choose output folder")
         dir_btn.clicked.connect(self.select_output_directory)
         self.dir_label = QLabel()
+        # Polish batch (G-widen): Ignored horizontal policy — the label
+        # takes only the width the layout allocates, so its (elided)
+        # text can never push output_frame wider via the splitter.
+        self.dir_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         # Phase 2d follow-up fix (Issue 7 — fullscreen clipping): the
         # previous 10px right padding ran the text right up against the
         # adjacent "📂 Open" button when the window was maximised, so
@@ -1789,46 +1803,49 @@ class VideoRendererTool(QMainWindow):
         # Phase 2d production-hardening fix (Issue 9): Resolution column
         # (col 3) was 0.15 — narrow enough to truncate "3840x2160" on
         # smaller fullscreen widths. Re-balanced filename and resolution
-        # shares to leave 0.18 for resolution; total is still 1.0
-        # (0.07 + 0.60 + 0.15 + 0.18).
-        total_width = self.tree_videos.width()
-        self.tree_videos.setColumnWidth(0, int(total_width * 0.07))
-        self.tree_videos.setColumnWidth(1, int(total_width * 0.60))
-        self.tree_videos.setColumnWidth(2, int(total_width * 0.15))
-        self.tree_videos.setColumnWidth(3, int(total_width * 0.18))
-        total_width = self.tree_encoders.width()
-        self.tree_encoders.setColumnWidth(0, int(total_width * 0.1))
-        self.tree_encoders.setColumnWidth(1, int(total_width * 0.2))
-        self.tree_encoders.setColumnWidth(2, int(total_width * 0.2))
-        self.tree_encoders.setColumnWidth(3, int(total_width * 0.55))
-        self.tree_encoders.setColumnWidth(4, int(total_width * 0.1))
+        # shares to leave the resolution column its proportional share.
+        # Polish batch (UI-01): width base is the VIEWPORT (excludes any
+        # vertical scrollbar) and shares sum to 0.95 so columns can never
+        # outgrow the viewport — kills the always-on horizontal scrollbars.
+        total_width = self.tree_videos.viewport().width()
+        self.tree_videos.setColumnWidth(0, int(total_width * 0.067))
+        self.tree_videos.setColumnWidth(1, int(total_width * 0.57))
+        self.tree_videos.setColumnWidth(2, int(total_width * 0.142))
+        self.tree_videos.setColumnWidth(3, int(total_width * 0.171))
+        total_width = self.tree_encoders.viewport().width()
+        self.tree_encoders.setColumnWidth(0, int(total_width * 0.083))
+        self.tree_encoders.setColumnWidth(1, int(total_width * 0.165))
+        self.tree_encoders.setColumnWidth(2, int(total_width * 0.165))
+        self.tree_encoders.setColumnWidth(3, int(total_width * 0.454))
+        self.tree_encoders.setColumnWidth(4, int(total_width * 0.083))
         if hasattr(self, "empty_videos_hint"):
             self.empty_videos_hint.setGeometry(self.tree_videos.viewport().rect())
-        total_width = self.tree_output.width()
+        total_width = self.tree_output.viewport().width()
         # Phase 3.2 — column count grew from 6 to 9 (+VMAF/pHash/SSIM).
         # Re-balanced shares; pre-existing 6 columns each lose ~30% of
-        # their share to make room. Sums to 1.0. The user can still
-        # drag-resize at runtime; this just sets the initial split.
+        # their share to make room. Polish batch (UI-01): viewport base
+        # + shares sum to 0.95 (see tree_videos note above). The user
+        # can still drag-resize at runtime; this just sets the split.
         if self.tree_output.columnCount() >= 9:
-            self.tree_output.setColumnWidth(0, int(total_width * 0.05))
-            self.tree_output.setColumnWidth(1, int(total_width * 0.18))
-            self.tree_output.setColumnWidth(2, int(total_width * 0.25))
-            self.tree_output.setColumnWidth(3, int(total_width * 0.08))
-            self.tree_output.setColumnWidth(4, int(total_width * 0.09))
-            self.tree_output.setColumnWidth(5, int(total_width * 0.10))
-            self.tree_output.setColumnWidth(6, int(total_width * 0.10))  # VMAF
-            self.tree_output.setColumnWidth(7, int(total_width * 0.07))  # pHash
-            self.tree_output.setColumnWidth(8, int(total_width * 0.08))  # SSIM
+            self.tree_output.setColumnWidth(0, int(total_width * 0.048))
+            self.tree_output.setColumnWidth(1, int(total_width * 0.171))
+            self.tree_output.setColumnWidth(2, int(total_width * 0.237))
+            self.tree_output.setColumnWidth(3, int(total_width * 0.076))
+            self.tree_output.setColumnWidth(4, int(total_width * 0.085))
+            self.tree_output.setColumnWidth(5, int(total_width * 0.095))
+            self.tree_output.setColumnWidth(6, int(total_width * 0.095))  # VMAF
+            self.tree_output.setColumnWidth(7, int(total_width * 0.067))  # pHash
+            self.tree_output.setColumnWidth(8, int(total_width * 0.076))  # SSIM
         else:
             # Fallback to the pre-3.2 layout if the tree was built
             # with only the legacy 6 columns (defensive — should not
             # happen at runtime, but covers test harnesses).
-            self.tree_output.setColumnWidth(0, int(total_width * 0.1))
-            self.tree_output.setColumnWidth(1, int(total_width * 0.25))
-            self.tree_output.setColumnWidth(2, int(total_width * 0.35))
-            self.tree_output.setColumnWidth(3, int(total_width * 0.15))
-            self.tree_output.setColumnWidth(4, int(total_width * 0.15))
-            self.tree_output.setColumnWidth(5, int(total_width * 0.15))
+            self.tree_output.setColumnWidth(0, int(total_width * 0.083))
+            self.tree_output.setColumnWidth(1, int(total_width * 0.207))
+            self.tree_output.setColumnWidth(2, int(total_width * 0.289))
+            self.tree_output.setColumnWidth(3, int(total_width * 0.124))
+            self.tree_output.setColumnWidth(4, int(total_width * 0.124))
+            self.tree_output.setColumnWidth(5, int(total_width * 0.124))
         # Batch UI-3 (UI-02/UI-09): reflow the progress grid to the live
         # canvas width and re-elide the output-directory label.
         if hasattr(self, "progress_boxes"):
@@ -2032,6 +2049,9 @@ class VideoRendererTool(QMainWindow):
         status = gpu_detect.format_status(self.gpu_caps)
         bar = self.statusBar()
         self._gpu_status_label = QLabel(status)
+        # Polish batch (UI-12): hand cursor signals the double-click
+        # affordance; the tooltip below already explains it.
+        self._gpu_status_label.setCursor(Qt.PointingHandCursor)
         self._gpu_status_label.setToolTip(
             "Double-click for full GPU / NVENC diagnostic report"
         )
@@ -2193,6 +2213,10 @@ class VideoRendererTool(QMainWindow):
             return
         for combo, btn in zip(self.sequential_combos, self.sequential_clear_btns):
             btn.setVisible(bool(combo.currentText()))
+
+    def _sync_delete_enabled(self):
+        """Polish batch (UI-13): Step 1 Delete enabled only with a selection."""
+        self.btn_delete.setEnabled(bool(self.tree_videos.selectedItems()))
 
     def _update_start_button_state(self):
         """Disable Start unless videos, a preset, and a valid output dir are all present."""
@@ -2429,6 +2453,9 @@ class VideoRendererTool(QMainWindow):
         The dialog is closed by `_on_url_finished` / `_on_url_error`
         once the worker emits its terminal signal.
         """
+        # Polish batch (UI-11): block _on_url_progress from overwriting
+        # the "Cancelling…" label until the batch terminates.
+        self._url_cancel_requested = True
         worker = getattr(self, "_url_worker", None)
         if worker is not None:
             try:
@@ -2555,6 +2582,8 @@ class VideoRendererTool(QMainWindow):
             # signal reports per-URL percentages, not batch position).
             self._url_finished_count = 0
             self._url_total_count = n_urls
+            # Polish batch (UI-11): fresh batch, clear any stale cancel.
+            self._url_cancel_requested = False
 
             self.update_ffmpeg_output(
                 f"\n[URL] Starting batch of {n_urls} URL(s) "
@@ -2591,6 +2620,10 @@ class VideoRendererTool(QMainWindow):
         accumulate one URL's share at a time, with intra-URL progress
         adding fractional movement within that slice.
         """
+        # Polish batch (UI-11): after Cancel, the wind-down still emits
+        # progress; do not overwrite the "Cancelling…" label or bar.
+        if self._url_cancel_requested:
+            return
         total = max(1, self._url_total_count)
         if status == "downloading":
             self.update_ffmpeg_output(f"[URL {idx + 1}] {pct:5.1f}%  {url}\n")
@@ -2616,6 +2649,8 @@ class VideoRendererTool(QMainWindow):
     @Slot(list)
     def _on_url_finished(self, results: list) -> None:
         """Batch complete: append successful paths to self.videos."""
+        # Polish batch (UI-11): batch is over; clear the cancel latch.
+        self._url_cancel_requested = False
         # Close the progress dialog before showing the summary modal.
         if hasattr(self, "_url_progress") and self._url_progress is not None:
             # Phase 2d production-hardening fix (Issue 5): dialog max is
@@ -2646,7 +2681,6 @@ class VideoRendererTool(QMainWindow):
         if new_paths:
             self.videos.extend(new_paths)
             self.update_video_list()
-            self.btn_delete.setEnabled(True)
             self.update_ffmpeg_output(
                 f"\n[URL] Added {len(new_paths)} downloaded video(s) to the queue.\n"
             )
@@ -2665,6 +2699,8 @@ class VideoRendererTool(QMainWindow):
     @Slot(str)
     def _on_url_error(self, message: str) -> None:
         """Hard failure during batch (argument validation, etc.)."""
+        # Polish batch (UI-11): batch is over; clear the cancel latch.
+        self._url_cancel_requested = False
         # Close the progress dialog so the user can see the modal cleanly.
         if hasattr(self, "_url_progress") and self._url_progress is not None:
             self._url_progress.close()
@@ -2691,7 +2727,6 @@ class VideoRendererTool(QMainWindow):
                     return
                 self.videos.extend(new_files)
                 self.update_video_list()
-                self.btn_delete.setEnabled(True)
                 print(f"Added {len(new_files)} videos.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot select videos: {str(e)}")
@@ -2721,8 +2756,8 @@ class VideoRendererTool(QMainWindow):
                 resolution = self.get_video_resolution(video_path)
                 item.setText(3, resolution)
             except Exception as e:
-                item.setText(2, "Loading...")
-                item.setText(3, "Loading...")
+                item.setText(2, "—")
+                item.setText(3, "—")
                 print(f"Error getting video info for {video_path}: {str(e)}")
             # Yield to the event loop so this row paints before the
             # next ffprobe call blocks. Safe — we are between rows,
@@ -2793,9 +2828,9 @@ class VideoRendererTool(QMainWindow):
         """Lấy độ phân giải video sử dụng FFprobe.
 
         Phase 2d follow-up fix (Item 6): same finite-timeout treatment as
-        get_video_duration. On TimeoutExpired we return "Loading..." (the
-        same placeholder the existing exception branch returns) so the
-        tree row still renders cleanly.
+        get_video_duration. On TimeoutExpired we return "—" (the same
+        placeholder the existing exception branch returns) so the tree
+        row still renders cleanly.
         """
         command = [
             str(self.FFPROBE_PATH),
@@ -2819,13 +2854,13 @@ class VideoRendererTool(QMainWindow):
                 creationflags=core_ffmpeg_runner.hidden_creationflags(),
                 timeout=10,
             )
-            return result.stdout.strip() or "Loading..."
+            return result.stdout.strip() or "—"
         except subprocess.TimeoutExpired:
             print(f"ffprobe resolution timed out (>10s) for: {video_path}")
-            return "Loading..."
+            return "—"
         except Exception as e:
             print(f"Failed to get video resolution: {str(e)}")
-            return "Loading..."
+            return "—"
 
     def delete_videos(self):
         """Xóa các video đã chọn."""
@@ -3567,17 +3602,15 @@ class VideoRendererTool(QMainWindow):
             self._worker_state[worker.thread_index]["state"] = "failed"
             self._render_worker_label(worker.thread_index)
         if worker:
-            encoder_name = (
-                worker.encoder_names[0] if worker.encoder_names else "Loading..."
-            )
+            encoder_name = worker.encoder_names[0] if worker.encoder_names else "—"
             error_detail = error_message.split(":")[(-1)].strip()
             if len(error_detail) > 50:
                 error_detail = error_detail[:47] + "..."
             item = getattr(worker, "tree_item", None)
             if item is not None and item.text(5) == "🟡 Processing":
                 item.setText(2, f"Error - {encoder_name} ({error_detail})")
-                item.setText(3, "Loading...")
-                item.setText(4, "Loading...")
+                item.setText(3, "—")
+                item.setText(4, "—")
                 item.setText(5, "🔴 Error")
             else:
                 print("Warning: tree item missing for failed task")
@@ -3703,7 +3736,6 @@ class VideoRendererTool(QMainWindow):
         if new_paths:
             self.videos.extend(new_paths)
             self.update_video_list()
-            self.btn_delete.setEnabled(True)
         event.acceptProposedAction()
 
     def closeEvent(self, event):
@@ -4452,15 +4484,14 @@ class VideoRendererTool(QMainWindow):
         # Apply output_directory + videos from the saved batch.
         self.output_directory = batch.output_directory
         if self.output_directory:
-            self.dir_label.setText(f"Output Directory: {self.output_directory}")
-            self.dir_label.setToolTip(self.output_directory)
+            # Polish batch (Observation W): fifth dir_label site routed
+            # through the shared formatter (elide + tooltip in one place).
+            self._set_output_dir_label(self.output_directory)
 
         # Restore the unique input list (preserve order, dedupe).
         seen: set[str] = set()
         self.videos = [v for v in resumable_videos if not (v in seen or seen.add(v))]
         self.update_video_list()
-        if self.videos:
-            self.btn_delete.setEnabled(True)
 
         # H-1: the explicit task pairs handed to start_render. The
         # video_idx slot is recomputed against the deduped list —
