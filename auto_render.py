@@ -61,6 +61,7 @@ from core import preset_loader as core_preset_loader
 from core import url_downloader as core_url_downloader
 from core import version_state as core_version_state
 from core import widgets as core_widgets
+from core.flow_layout import FlowLayout
 from core.preset_loader import (
     derive_slug,
     load_user_presets_json,
@@ -1360,7 +1361,7 @@ class VideoRendererTool(QMainWindow):
         bottom_layout.addWidget(output_frame)
         main_layout.addWidget(top_frame)
         main_layout.addWidget(bottom_frame)
-        video_controls = QHBoxLayout()
+        video_controls = FlowLayout(h_spacing=5, v_spacing=5)
         select_btn = self.create_video_button(
             "📥 Select (0)", self.select_videos, "#e3f2fd", "#1976d2", "#bbdefb"
         )
@@ -1382,7 +1383,6 @@ class VideoRendererTool(QMainWindow):
         video_controls.addWidget(select_btn)
         video_controls.addWidget(self.add_url_btn)
         video_controls.addWidget(delete_btn)
-        video_controls.addStretch()
         settings_btn = self.create_video_button(
             "Settings", self.open_settings, "#fff3e0", "#e65100", "#ffe0b2"
         )
@@ -1450,7 +1450,7 @@ class VideoRendererTool(QMainWindow):
         self.tree_videos.setAlternatingRowColors(True)
         self.tree_videos.header().setDefaultAlignment(Qt.AlignCenter)
         input_layout.addWidget(self.tree_videos)
-        encoder_controls = QHBoxLayout()
+        encoder_controls = FlowLayout(h_spacing=5, v_spacing=5)
         # 2c-c-4: edit/delete buttons must be instance attrs so the
         # selection-change handler can toggle their enabled state.
         self.btn_add_encoder = self.create_video_button(
@@ -1498,7 +1498,6 @@ class VideoRendererTool(QMainWindow):
         encoder_controls.addWidget(self.btn_delete_encoder)
         encoder_controls.addWidget(self.btn_clone_encoder)
         encoder_controls.addWidget(update_btn)
-        encoder_controls.addStretch()
         encoder_controls.addWidget(QLabel("Filter"))
         encoder_controls.addWidget(self.group_combo)
         step2_label = QLabel("🎬 Step 2: Pick presets")
@@ -1805,8 +1804,160 @@ class VideoRendererTool(QMainWindow):
         super().resizeEvent(event)
 
     def setup_style(self):
-        self.setStyleSheet(
-            '\n            QMainWindow { background-color: #f8f9fa; }\n            QFrame#top_frame, QFrame#bottom_frame { background-color: transparent; border: none; }\n            QFrame#input_frame, QFrame#config_frame, QFrame#progress_frame, QFrame#output_frame, QFrame#mode_frame {\n                background-color: white; border: 2px solid #dee2e6; border-radius: 8px;\n            }\n            QFrame#progress_info_frame { \n                background-color: #e3f2fd; \n                border: 1px solid #bbdefb; \n                border-radius: 4px;\n            }\n            QFrame#canvas { background-color: #f0f0f0; border: none; }\n            QPushButton {\n                background-color: #007bff; \n                color: white; \n                border: none; \n                border-radius: 4px; \n                padding: 4px 8px;\n                min-width: 120px; \n                max-width: 120px; \n                font-weight: bold;\n                font-size: 12px;\n            }\n            QPushButton:hover { background-color: #0056b3; }\n            QPushButton:disabled { background-color: #6c757d; }\n            QPushButton[delete="true"] { background-color: #dc3545; }\n            QPushButton[delete="true"]:hover { background-color: #c82333; }\n            QTreeWidget { \n                border: 1px solid #dee2e6; \n                border-radius: 4px;\n                background-color: white;\n                alternate-background-color: #f8f9fa;\n                color: #212529;\n            }\n            QTreeWidget::item { \n                padding: 2px; \n                border-bottom: 1px solid #dee2e6;\n                height: 25px;\n                min-height: 25px;\n                color: #212529;\n                background-color: transparent;\n            }\n            QTreeWidget::item:selected { \n                background-color: #007bff; \n                color: white; \n            }\n            QHeaderView::section { \n                background-color: #e3f2fd; \n                padding: 2px; \n                border: 1px solid #bbdefb; \n                font-weight: bold; \n                text-align: center; \n                color: #1976d2;\n                height: 25px;\n            }\n            QProgressBar { \n                border: 1px solid #dee2e6; \n                border-radius: 2px; \n                text-align: center; \n                height: 15px; \n            }\n            QProgressBar::chunk { background-color: #007bff; }\n            QTextEdit { \n                background-color: black; \n                color: white; \n                font-family: Consolas; \n                border-radius: 4px;\n                border: 2px solid #1976d2;  /* Thêm viền xanh */\n                padding: 5px;  /* Thêm padding */\n            }\n            QLabel {\n                color: #1976d2;\n                font-weight: bold;\n                padding: 5px;\n            }\n            QComboBox {\n                border: 1px solid #ced4da;\n                border-radius: 4px;\n                padding: 2px 4px;\n                background-color: white;\n                color: #212529;\n                font-size: 12px;\n            }\n            QComboBox QAbstractItemView {\n                background-color: white;\n                color: #212529;\n                selection-background-color: #007bff;\n                selection-color: white;\n            }\n            QComboBox:hover { border: 1px solid #80bdff; }\n            QComboBox:focus { border: 1px solid #80bdff; outline: none; }\n            QComboBox::drop-down {\n                border: none;\n                width: 20px;\n            }\n            QComboBox::down-arrow {\n                width: 12px;\n                height: 12px;\n                margin-right: 5px;\n            }\n            QSpinBox {\n                border: 1px solid #ced4da;\n                border-radius: 4px;\n                padding: 5px;\n                background-color: white;\n                color: #212529;\n            }\n            QLineEdit {\n                background-color: white;\n                color: #212529;\n                border: 1px solid #ced4da;\n                border-radius: 4px;\n                padding: 4px;\n            }\n            QSpinBox:hover { border: 1px solid #80bdff; }\n            QSpinBox:focus { border: 1px solid #80bdff; outline: none; }\n        '
+        # Batch UI-1 (v3.9 UI hardening). Three structural changes:
+        #
+        # 1) The sheet moves from the QMainWindow to the CENTRAL WIDGET.
+        #    Qt stylesheets cascade down the parent chain, so the old
+        #    window-level sheet restyled every child dialog and
+        #    QMessageBox: 120px-pinned OK/Cancel buttons, bold blue body
+        #    text, black text editors in EncoderDialog (UI-04). Dialogs
+        #    are parented to the window, not the central widget, so they
+        #    now render native.
+        #
+        # 2) Width pinning removed from the QPushButton base rule. QSS
+        #    min/max-width bound the CONTENT box; padding (2x8) and
+        #    border (2x1) are added on top — which is why every button
+        #    measured 138px and why setFixedWidth(150) lost (recon
+        #    B3/B7/D). Toolbar buttons keep a 120px content FLOOR via
+        #    the [toolbar="true"] dynamic property (set in
+        #    create_video_button); nothing pins a maximum any more, so
+        #    captions like "Diagnostics" and "Select (5)" stop
+        #    truncating and Start/Stop's setFixedWidth(150) finally
+        #    takes effect.
+        #
+        # 3) Explicit colors for QRadioButton/QCheckBox text and the
+        #    QProgressBar groove. The old sheet styled only some widget
+        #    types; anything unstyled inherited the platform palette,
+        #    which on dark-mode Windows 11 rendered the "Render Once" /
+        #    "Render All Variants" labels white-on-white and the worker
+        #    progress grooves near-black (UI-19, screenshot 2026-06-10).
+        #
+        # Also: [delete="true"] gains an explicit :disabled state. The
+        # old cascade declared the red rule AFTER :disabled at equal
+        # specificity, so a disabled Stop button stayed red and looked
+        # clickable while the enabled path was gray (UI-18).
+        self.setStyleSheet("QMainWindow { background-color: #f8f9fa; }")
+        self.centralWidget().setObjectName("central_root")
+        self.centralWidget().setStyleSheet(
+            """
+            QWidget#central_root { background-color: #f8f9fa; }
+            QFrame#top_frame, QFrame#bottom_frame {
+                background-color: transparent; border: none;
+            }
+            QFrame#input_frame, QFrame#config_frame, QFrame#progress_frame,
+            QFrame#output_frame, QFrame#mode_frame {
+                background-color: white; border: 2px solid #dee2e6;
+                border-radius: 8px;
+            }
+            QFrame#progress_info_frame {
+                background-color: #e3f2fd;
+                border: 1px solid #bbdefb;
+                border-radius: 4px;
+            }
+            QFrame#canvas { background-color: #f0f0f0; border: none; }
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton[toolbar="true"] { min-width: 120px; }
+            QPushButton:hover { background-color: #0056b3; }
+            QPushButton:disabled { background-color: #6c757d; }
+            QPushButton[delete="true"] { background-color: #dc3545; }
+            QPushButton[delete="true"]:hover { background-color: #c82333; }
+            QPushButton[delete="true"]:disabled { background-color: #6c757d; }
+            QTreeWidget {
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                background-color: white;
+                alternate-background-color: #f8f9fa;
+                color: #212529;
+            }
+            QTreeWidget::item {
+                padding: 2px;
+                border-bottom: 1px solid #dee2e6;
+                height: 25px;
+                min-height: 25px;
+                color: #212529;
+                background-color: transparent;
+            }
+            QTreeWidget::item:selected {
+                background-color: #007bff;
+                color: white;
+            }
+            QHeaderView::section {
+                background-color: #e3f2fd;
+                padding: 2px;
+                border: 1px solid #bbdefb;
+                font-weight: bold;
+                text-align: center;
+                color: #1976d2;
+                height: 25px;
+            }
+            QProgressBar {
+                background-color: #ffffff;
+                border: 1px solid #dee2e6;
+                border-radius: 2px;
+                text-align: center;
+                height: 15px;
+                color: #212529;
+            }
+            QProgressBar::chunk { background-color: #007bff; }
+            QTextEdit {
+                background-color: black;
+                color: white;
+                font-family: Consolas, Menlo, monospace;
+                border-radius: 4px;
+                border: 2px solid #1976d2;
+                padding: 5px;
+            }
+            QLabel {
+                color: #1976d2;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QRadioButton, QCheckBox { color: #212529; }
+            QComboBox {
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                padding: 2px 4px;
+                background-color: white;
+                color: #212529;
+                font-size: 12px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: white;
+                color: #212529;
+                selection-background-color: #007bff;
+                selection-color: white;
+            }
+            QComboBox:hover { border: 1px solid #80bdff; }
+            QComboBox:focus { border: 1px solid #80bdff; outline: none; }
+            QComboBox::drop-down { border: none; width: 20px; }
+            QComboBox::down-arrow {
+                width: 12px; height: 12px; margin-right: 5px;
+            }
+            QSpinBox {
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                padding: 5px;
+                background-color: white;
+                color: #212529;
+            }
+            QSpinBox:hover { border: 1px solid #80bdff; }
+            QSpinBox:focus { border: 1px solid #80bdff; outline: none; }
+            QLineEdit {
+                background-color: white;
+                color: #212529;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            """
         )
 
     def _check_dependencies(self) -> None:
@@ -3988,6 +4139,7 @@ class VideoRendererTool(QMainWindow):
     ) -> QPushButton:
         """Tạo nút video với style tùy chỉnh."""
         button = QPushButton(text)
+        button.setProperty("toolbar", True)
         button.clicked.connect(callback)
         button.setStyleSheet(
             f"\n            QPushButton {{\n                background-color: {bg_color};\n                color: {text_color};\n                border: 1px solid {border_color};\n            }}\n            QPushButton:hover {{\n                background-color: {border_color};\n            }}\n        "

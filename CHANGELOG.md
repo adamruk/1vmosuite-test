@@ -428,6 +428,25 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] fix(ui): Batch UI-1 (v3.9 UI hardening) — the window-level
+  stylesheet moves to the central widget so child dialogs and QMessageBoxes
+  render native instead of inheriting 120px-pinned buttons / bold blue body
+  text / black editors (UI-04); the QPushButton min/max content-width pin is
+  removed in favor of a [toolbar="true"] 120px floor set in
+  create_video_button, so toolbar captions stop truncating at 138px and
+  Start/Stop's setFixedWidth(150) finally takes effect; [delete="true"]
+  gains an explicit :disabled state so a disabled Stop renders gray, not
+  red (UI-18); explicit QRadioButton/QCheckBox text color and a white
+  QProgressBar groove fix the dark-mode-Windows palette leak (invisible
+  "Render Once"/"Render All Variants" labels, near-black grooves — UI-19);
+  both toolbar rows switch QHBoxLayout → FlowLayout (new
+  core/flow_layout.py, vendored from the Qt for Python flow-layout example,
+  BSD-3-Clause) so they wrap instead of clipping at the frame edge; the two
+  Vietnamese QSS comments in setup_style are gone. New ratchet gate
+  tests/smoke/test_ui_minsize.py asserts the offscreen minimumSizeHint stays
+  ≤ 1600x820 (measured 1585x766 — unchanged by design: the 780 frame floors
+  stay until Batches UI-2/UI-3, which the ratchet tightens with).
+
 - [d407fbe] fix(auto_render): flagship-audit batch 1 — resume now
   replays the saved batch's exact task pairs via a keyword-only
   resume_tasks payload (previously the queue was cleared and selection
