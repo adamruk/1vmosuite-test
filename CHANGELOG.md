@@ -428,7 +428,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
-- [_pending_] fix(auto_render): flagship-audit batch 1 — resume now
+- [d407fbe] fix(auto_render): flagship-audit batch 1 — resume now
   replays the saved batch's exact task pairs via a keyword-only
   resume_tasks payload (previously the queue was cleared and selection
   rebuilt from an empty UI, silently destroying the batch); dispatch
