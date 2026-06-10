@@ -43,8 +43,10 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QSplitter,
     QTextEdit,
     QTreeWidget,
     QTreeWidgetItem,
@@ -1262,16 +1264,12 @@ class VideoRendererTool(QMainWindow):
         ultimate_dir = self.SCRIPT_DIR / "🕹️ 1vmo Ultimate"
         if ultimate_dir.exists():
             self.output_directory = str(ultimate_dir)
-            self.dir_label.setText(f"Output Directory: {self.output_directory}")
-            # Phase 2d follow-up fix (Issue 7): full path always reachable
-            # via tooltip when the visible label clips at the right edge.
-            self.dir_label.setToolTip(self.output_directory)
+            self._set_output_dir_label(self.output_directory)
         else:
             last_output = self.config.get("output_dir", "")
             if last_output and os.path.isdir(last_output):
                 self.output_directory = last_output
-                self.dir_label.setText(f"Output Directory: {self.output_directory}")
-                self.dir_label.setToolTip(self.output_directory)
+                self._set_output_dir_label(self.output_directory)
         last_videos = self.config.get("input_files", [])
         if last_videos:
             valid_videos = [video for video in last_videos if os.path.isfile(video)]
@@ -1324,44 +1322,54 @@ class VideoRendererTool(QMainWindow):
         input_frame = QFrame(objectName="input_frame")
         input_frame.setFrameStyle(QFrame.StyledPanel)
         input_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        input_frame.setMinimumWidth(780)
         input_layout = QVBoxLayout(input_frame)
         input_layout.setSpacing(2)
         input_layout.setContentsMargins(5, 2, 5, 2)
         config_frame = QFrame(objectName="config_frame")
         config_frame.setFrameStyle(QFrame.StyledPanel)
         config_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        config_frame.setMinimumWidth(780)
         config_layout = QVBoxLayout(config_frame)
         config_layout.setSpacing(2)
         config_layout.setContentsMargins(5, 2, 5, 2)
-        top_layout.addWidget(input_frame)
-        top_layout.addWidget(config_frame)
+        top_split = QSplitter(Qt.Horizontal)
+        top_split.addWidget(input_frame)
+        top_split.addWidget(config_frame)
+        top_split.setChildrenCollapsible(False)
+        top_split.setStretchFactor(0, 1)
+        top_split.setStretchFactor(1, 1)
+        top_layout.addWidget(top_split)
         bottom_frame = QFrame(objectName="bottom_frame")
         bottom_frame.setFrameStyle(QFrame.StyledPanel)
         bottom_frame.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        bottom_frame.setMinimumHeight(450)
         bottom_layout = QHBoxLayout(bottom_frame)
         bottom_layout.setContentsMargins(5, 5, 5, 5)
         bottom_layout.setSpacing(5)
         progress_frame = QFrame(objectName="progress_frame")
         progress_frame.setFrameStyle(QFrame.StyledPanel)
         progress_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        progress_frame.setMinimumWidth(780)
         progress_layout = QVBoxLayout(progress_frame)
         progress_layout.setSpacing(2)
         progress_layout.setContentsMargins(5, 2, 5, 2)
         output_frame = QFrame(objectName="output_frame")
         output_frame.setFrameStyle(QFrame.StyledPanel)
         output_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        output_frame.setMinimumWidth(780)
         output_layout = QVBoxLayout(output_frame)
         output_layout.setSpacing(5)
         output_layout.setContentsMargins(5, 5, 5, 5)
-        bottom_layout.addWidget(progress_frame)
-        bottom_layout.addWidget(output_frame)
-        main_layout.addWidget(top_frame)
-        main_layout.addWidget(bottom_frame)
+        bottom_split = QSplitter(Qt.Horizontal)
+        bottom_split.addWidget(progress_frame)
+        bottom_split.addWidget(output_frame)
+        bottom_split.setChildrenCollapsible(False)
+        bottom_split.setStretchFactor(0, 1)
+        bottom_split.setStretchFactor(1, 1)
+        bottom_layout.addWidget(bottom_split)
+        main_split = QSplitter(Qt.Vertical)
+        main_split.addWidget(top_frame)
+        main_split.addWidget(bottom_frame)
+        main_split.setChildrenCollapsible(False)
+        main_split.setStretchFactor(0, 1)
+        main_split.setStretchFactor(1, 1)
+        main_layout.addWidget(main_split)
         video_controls = FlowLayout(h_spacing=5, v_spacing=5)
         select_btn = self.create_video_button(
             "📥 Select (0)", self.select_videos, "#e3f2fd", "#1976d2", "#bbdefb"
@@ -1554,7 +1562,9 @@ class VideoRendererTool(QMainWindow):
         self.sequential_combos = []
         self.sequential_clear_btns = []
         sequential_frame = QFrame()
-        sequential_layout = FlowLayout(sequential_frame, h_spacing=12, v_spacing=8)
+        sequential_layout = QHBoxLayout(sequential_frame)
+        sequential_layout.setContentsMargins(0, 0, 0, 0)
+        sequential_layout.setSpacing(12)
         combo_colors = [
             "#FFCDD2",
             "#C8E6C9",
@@ -1620,7 +1630,21 @@ class VideoRendererTool(QMainWindow):
         )
         mode_layout.addWidget(self.empty_slots_hint)
         self.empty_slots_hint.hide()
-        mode_layout.addWidget(sequential_frame)
+        self.slot_scroll = QScrollArea()
+        self.slot_scroll.setWidget(sequential_frame)
+        self.slot_scroll.setWidgetResizable(True)
+        self.slot_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.slot_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.slot_scroll.setFrameShape(QFrame.NoFrame)
+        self.slot_scroll.setFixedHeight(
+            sequential_frame.sizeHint().height()
+            + self.slot_scroll.horizontalScrollBar().sizeHint().height()
+            + 4
+        )
+        mode_layout.addWidget(self.slot_scroll)
+        # Render Once is the default mode (mode_all.setChecked(True) above),
+        # so the slot strip starts hidden; on_mode_changed keeps it in sync.
+        self.slot_scroll.setVisible(False)
         config_layout.addWidget(mode_frame)
         progress_info_frame = QFrame(objectName="progress_info_frame")
         progress_info_layout = QHBoxLayout(progress_info_frame)
@@ -1633,12 +1657,11 @@ class VideoRendererTool(QMainWindow):
         self.canvas = QFrame(objectName="canvas")
         self.canvas.setFixedHeight(80)
         progress_layout.addWidget(self.canvas)
-        canvas_width = 780
-        box_size = 15
-        padding = 2
-        self.boxes_per_row = (canvas_width - padding) // (box_size + padding)
-        self.box_size = box_size
-        self.padding = padding
+        self.box_size = 15
+        self.padding = 2
+        # Initial value only — _layout_progress_boxes recomputes from the
+        # live canvas width at render start and on every resize (UI-02).
+        self.boxes_per_row = (780 - self.padding) // (self.box_size + self.padding)
         self.progress_boxes = []
         thread_frame = QFrame()
         thread_frame.setFixedHeight(120)
@@ -1682,7 +1705,7 @@ class VideoRendererTool(QMainWindow):
         dir_btn.setFixedHeight(35)
         dir_btn.setToolTip("Choose output folder")
         dir_btn.clicked.connect(self.select_output_directory)
-        self.dir_label = QLabel("Not selected")
+        self.dir_label = QLabel()
         # Phase 2d follow-up fix (Issue 7 — fullscreen clipping): the
         # previous 10px right padding ran the text right up against the
         # adjacent "📂 Open" button when the window was maximised, so
@@ -1690,6 +1713,7 @@ class VideoRendererTool(QMainWindow):
         # also enable a tooltip whose text we keep in sync with the
         # path via select_output_directory / __init__ assignments.
         self.dir_label.setStyleSheet("padding-left: 10px; padding-right: 24px;")
+        self._set_output_dir_label("")
         open_btn = QPushButton("📂 Open")
         open_btn.setFixedWidth(150)
         open_btn.setFixedHeight(35)
@@ -1805,7 +1829,25 @@ class VideoRendererTool(QMainWindow):
             self.tree_output.setColumnWidth(3, int(total_width * 0.15))
             self.tree_output.setColumnWidth(4, int(total_width * 0.15))
             self.tree_output.setColumnWidth(5, int(total_width * 0.15))
+        # Batch UI-3 (UI-02/UI-09): reflow the progress grid to the live
+        # canvas width and re-elide the output-directory label.
+        if hasattr(self, "progress_boxes"):
+            self._layout_progress_boxes()
+        if getattr(self, "output_directory", ""):
+            self._set_output_dir_label(self.output_directory)
         super().resizeEvent(event)
+
+    def _set_output_dir_label(self, path):
+        if not path:
+            self.dir_label.setText("Output: not selected")
+            self.dir_label.setToolTip("")
+            return
+        fm = self.dir_label.fontMetrics()
+        elided = fm.elidedText(
+            path, Qt.ElideMiddle, max(80, self.dir_label.width() - 16)
+        )
+        self.dir_label.setText(f"Output: {elided}")
+        self.dir_label.setToolTip(path)
 
     def setup_style(self):
         # Batch UI-1 (v3.9 UI hardening). Three structural changes:
@@ -2814,26 +2856,33 @@ class VideoRendererTool(QMainWindow):
             )
             if output_dir:
                 self.output_directory = output_dir
-                self.dir_label.setText(f"{self.output_directory}")
-                # Phase 2d follow-up fix (Issue 7): keep tooltip in sync
-                # so the full path is recoverable even when the visible
-                # label clips at the fullscreen right edge.
-                self.dir_label.setToolTip(self.output_directory)
+                self._set_output_dir_label(self.output_directory)
                 self._update_start_button_state()
         except Exception as e:
             QMessageBox.critical(
                 self, "Error", f"Cannot select output directory: {str(e)}"
             )
 
+    def _layout_progress_boxes(self):
+        cell = self.box_size + self.padding
+        self.boxes_per_row = max(1, (self.canvas.width() - self.padding) // cell)
+        rows_needed = (
+            -(-len(self.progress_boxes) // self.boxes_per_row)
+            if self.progress_boxes
+            else 1
+        )
+        self.canvas.setFixedHeight(min(rows_needed, 8) * cell + self.padding)
+        for i, box in enumerate(self.progress_boxes):
+            box.setGeometry(
+                (i % self.boxes_per_row) * cell,
+                (i // self.boxes_per_row) * cell,
+                self.box_size,
+                self.box_size,
+            )
+
     def create_progress_box(self, index: int) -> QFrame:
         """Tạo một progress box."""
         box = QFrame(self.canvas)
-        box.setGeometry(
-            index % self.boxes_per_row * (self.box_size + self.padding),
-            index // self.boxes_per_row * (self.box_size + self.padding),
-            self.box_size,
-            self.box_size,
-        )
         box.setStyleSheet(
             "\n            background-color: lightgray; border: 1px solid #666666; border-radius: 2px;\n        "
         )
@@ -2994,6 +3043,7 @@ class VideoRendererTool(QMainWindow):
             for i in range(total_tasks):
                 box = self.create_progress_box(i)
                 self.progress_boxes.append(box)
+            self._layout_progress_boxes()
             self.render_threads = []
             self.render_workers = []
             self.current_task_index = 0
@@ -4164,6 +4214,9 @@ class VideoRendererTool(QMainWindow):
         a mode flip and the next render.
         """
         self.sequential_mode = self.mode_sequential.isChecked()
+        # Batch UI-3: the slot strip only exists for Render All Variants;
+        # hiding it in Render Once mode returns its height to the trees.
+        self.slot_scroll.setVisible(self.sequential_mode)
         for combo in self.sequential_combos:
             combo.setEnabled(self.sequential_mode)
         if self.sequential_mode:

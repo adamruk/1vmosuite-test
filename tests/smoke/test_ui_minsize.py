@@ -46,8 +46,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 # Ratchet values — tighten with each landed UI batch (see module docstring).
-CEILING_W = 1600
-CEILING_H = 820
+CEILING_W = 1280
+CEILING_H = 800
 
 
 @pytest.fixture(scope="module")
@@ -70,8 +70,10 @@ def test_main_window_minimum_size_ratchet(qapp):
 
     # Always print the measured value so recon/VERIFY records have the
     # actual number, not just pass/fail.
-    print(f"minimumSizeHint = {hint.width()} x {hint.height()} "
-          f"(ceiling {CEILING_W} x {CEILING_H})")
+    print(
+        f"minimumSizeHint = {hint.width()} x {hint.height()} "
+        f"(ceiling {CEILING_W} x {CEILING_H})"
+    )
 
     assert hint.width() <= CEILING_W, (
         f"window minimum width regressed: {hint.width()} > {CEILING_W}"

@@ -428,6 +428,32 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] fix(ui): Batch UI-3 (v3.9 UI hardening) — the floor-drop
+  batch. The five artificial frame minimums (4× setMinimumWidth(780) on
+  input/config/progress/output frames + setMinimumHeight(450) on
+  bottom_frame) are deleted, so the offscreen minimumSizeHint falls
+  1585x766 → 1099x685 and the window genuinely fits 1280x800 (UI-05;
+  the window's own setMinimumSize(1280, 800) is unchanged). The four
+  panes are now wrapped in user-draggable QSplitters (input|config and
+  progress|output horizontal, the two halves in one vertical splitter;
+  non-collapsible, equal stretch). The progress-box grid stops assuming
+  a 780px canvas: a new _layout_progress_boxes() recomputes
+  boxes_per_row from the live canvas width, repositions every box, and
+  bounds canvas height at 8 rows; it runs after box creation in
+  start_render and on every resize (UI-02 — mandatory once the floors
+  dropped). The output-directory label is unified through a new
+  _set_output_dir_label() (always "Output: <path>", middle-elided to
+  the label's live width, full path in the tooltip, re-elided on
+  resize), replacing the three divergent setText formats (UI-09). The
+  8-slot row becomes a single-line horizontally-scrollable strip
+  (QScrollArea, vertical bar off) that is HIDDEN in Render Once mode
+  and shown by on_mode_changed for Render All Variants — fixing the
+  Batch UI-2 regression where the wrapped slot row ate the preset
+  tree's rows in a mode that never uses slots (UI-20). Slot combo
+  policies/tooltips/copy from Batch UI-2 are untouched. Ratchet gate
+  tightened: tests/smoke/test_ui_minsize.py ceilings 1600x820 →
+  1280x800 (measured 1099x685, headroom for the next batch).
+
 - [6a56779] fix(ui): Batch UI-2 (v3.9 UI hardening) — the 8-slot preset
   row (the last oversized content row) switches QHBoxLayout → FlowLayout
   (h_spacing=12, v_spacing=8) so slots wrap instead of clipping off-window;
