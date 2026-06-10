@@ -428,7 +428,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
-- [_pending_] fix(ui): Batch UI-1 (v3.9 UI hardening) — the window-level
+- [5391488] fix(ui): Batch UI-1 (v3.9 UI hardening) — the window-level
   stylesheet moves to the central widget so child dialogs and QMessageBoxes
   render native instead of inheriting 120px-pinned buttons / bold blue body
   text / black editors (UI-04); the QPushButton min/max content-width pin is
