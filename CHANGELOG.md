@@ -428,7 +428,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
-- [_pending_] fix(ui): Batch UI-2 (v3.9 UI hardening) — the 8-slot preset
+- [6a56779] fix(ui): Batch UI-2 (v3.9 UI hardening) — the 8-slot preset
   row (the last oversized content row) switches QHBoxLayout → FlowLayout
   (h_spacing=12, v_spacing=8) so slots wrap instead of clipping off-window;
   slot combos drop their 120px fixed width for min 110 / max 210 with
