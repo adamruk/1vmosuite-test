@@ -61,6 +61,7 @@ def score_vmaf(
     should_cancel: Optional[Callable[[], bool]] = None,
     progress_cb: Optional[Callable[[int], None]] = None,
     timeout_seconds: float = 1800.0,
+    base_result: Optional[ScoreResult] = None,
 ) -> ScoreResult:
     """Compute VMAF mean / p5 / min / max for (reference, distorted).
 
@@ -86,13 +87,16 @@ def score_vmaf(
     to detect via ScoringCapabilities; this runner will still run and
     just return ERROR with the ffmpeg stderr tail.
     """
-    result = ScoreResult(
-        reference_path=str(reference),
-        reference_mtime=_stat_or_zero(reference),
-        distorted_path=str(distorted),
-        distorted_mtime=_stat_or_zero(distorted),
-        computed_at=time.time(),
-    )
+    if base_result is None:
+        result = ScoreResult(
+            reference_path=str(reference),
+            reference_mtime=_stat_or_zero(reference),
+            distorted_path=str(distorted),
+            distorted_mtime=_stat_or_zero(distorted),
+            computed_at=time.time(),
+        )
+    else:
+        result = base_result
 
     if not ffmpeg_path.is_file():
         result.vmaf_status = ScoreAxisStatus.ERROR

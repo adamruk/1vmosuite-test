@@ -15,7 +15,15 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QObject, QSemaphore, Qt, QThread, Signal, Slot
+from PySide6.QtCore import (
+    QObject,
+    QSemaphore,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -1034,6 +1042,7 @@ class ScoreWorker(QObject):
                     self._reference,
                     self._distorted,
                     should_cancel=cancelled,
+                    base_result=result,
                 )
                 self.axis_progress.emit(self._task_index, "vmaf", 100)
 
@@ -2704,7 +2713,7 @@ class VideoRendererTool(QMainWindow):
             box.deleteLater()
         self.progress_boxes.clear()
 
-    def start_render(self):
+    def start_render(self, *, resume_tasks: Optional[list] = None):
         """Bắt đầu quá trình render."""
         if self.is_rendering:
             reply = QMessageBox.question(
@@ -2728,7 +2737,19 @@ class VideoRendererTool(QMainWindow):
         if not self._encoder_intel_preflight():
             return
         else:
-            if self.sequential_mode:
+            if resume_tasks is not None:
+                # H-1: selection identity travels in resume_tasks as
+                # (video_path, encoder_ids, video_idx) tuples built by
+                # _resume_batch, which also populated
+                # selected_encoders / encoder_params. Skip the UI
+                # rebuild — on a fresh launch the tree has no
+                # selection and the old code aborted with a "select
+                # at least one Encoder" warning AFTER the saved batch
+                # had already been cleared. Preflight above sees an
+                # empty UI selection and passes through; the batch
+                # was preflighted when originally started.
+                pass
+            elif self.sequential_mode:
                 # Phase 2d follow-up fix (Item 5): sequential slot
                 # identity is the preset id (stored as combo userData),
                 # not the display text. Falsy currentData() means an
@@ -2785,7 +2806,9 @@ class VideoRendererTool(QMainWindow):
             self.is_rendering = True
             self.btn_start.setEnabled(False)
             self.btn_cancel.setEnabled(True)
-            if self.sequential_mode:
+            if resume_tasks is not None:
+                total_tasks = len(resume_tasks)
+            elif self.sequential_mode:
                 total_tasks = len(self.videos)
             else:
                 total_tasks = len(self.videos) * len(self.selected_encoders)
@@ -2826,7 +2849,13 @@ class VideoRendererTool(QMainWindow):
             self.task_durations: list[float] = []
             self.last_task_start_time = self.batch_start_time
             self.all_tasks = []
-            if self.sequential_mode:
+            if resume_tasks is not None:
+                # H-1: the saved batch's per-task pairs, replayed
+                # verbatim. Rebuilding videos×presets here would both
+                # re-run already-completed pairs and invent pairs the
+                # original batch never contained.
+                self.all_tasks = [tuple(t) for t in resume_tasks]
+            elif self.sequential_mode:
                 for video_idx, video_path in enumerate(self.videos):
                     self.all_tasks.append(
                         (video_path, self.sequential_encoders, video_idx)
@@ -2959,8 +2988,21 @@ class VideoRendererTool(QMainWindow):
                             if params:
                                 encoder_params_list.append(params)
                     if not encoder_params_list:
+                        # H-2: advance the cursor BEFORE invoking the
+                        # error handler — its tail re-enters
+                        # _start_next_task, and without this line the
+                        # same task is re-dispatched forever
+                        # (RecursionError). The freshly created tree
+                        # row would otherwise sit at "🟡 Processing"
+                        # permanently (worker=None skips row updates
+                        # inside the handler), so paint it here.
+                        failed_index = self.current_task_index
+                        self.current_task_index += 1
+                        item.setText(2, "Error - preset missing")
+                        item.setText(5, "🔴 Error")
                         self.on_render_error(
-                            f"Encoder parameters not found for {encoder_ids}"
+                            f"Encoder parameters not found for {encoder_ids}",
+                            task_index=failed_index,
                         )
                         return
                     else:
@@ -3304,7 +3346,7 @@ class VideoRendererTool(QMainWindow):
             )
             self.save_config()
 
-    def on_render_error(self, error_message: str):
+    def on_render_error(self, error_message: str, task_index: Optional[int] = None):
         """Xử lý khi có lỗi render."""
         self.output_text.append(f"\n[ERROR] {error_message}\n")
         self.output_text.verticalScrollBar().setValue(
@@ -3334,7 +3376,14 @@ class VideoRendererTool(QMainWindow):
                 item.setText(5, "🔴 Error")
             else:
                 print("Warning: tree item missing for failed task")
-        box_index = getattr(worker, "task_index", self.completed_tasks)
+        # H-2: an explicit task_index (direct-call path) wins; the
+        # completed_tasks fallback only equals the dispatch slot when
+        # nothing else has finished yet, so it mis-marked the wrong
+        # task FAILED in the queue on any out-of-order batch.
+        if task_index is not None:
+            box_index = task_index
+        else:
+            box_index = getattr(worker, "task_index", self.completed_tasks)
         self.update_box_color(box_index, "red")
         self.completed_tasks += 1
         # Phase 3.1 — persist FAILED transition. `box_index` is the
@@ -3375,7 +3424,10 @@ class VideoRendererTool(QMainWindow):
                     # error-handler path too (mirror of on_render_completed).
                     self.render_threads[thread_index].wait(5000)
             self.active_threads -= 1
-        self._start_next_task()
+        # H-2: dispatch on the next event-loop turn instead of
+        # synchronously — a consecutive-failure chain unwinds
+        # iteratively instead of growing the Python stack.
+        QTimer.singleShot(0, self._start_next_task)
 
     # Phase 2d production-hardening fix (Issue 4): real drag-and-drop
     # support. The previous "Drag videos here" placeholder text was
@@ -4174,6 +4226,20 @@ class VideoRendererTool(QMainWindow):
             )
             return
 
+        # H-1: restore the saved batch's mode BEFORE dispatch — the
+        # sequential branch resolves params via the preset registry,
+        # the tree branch via encoder_params; resuming a sequential
+        # batch under tree mode would look params up in the wrong
+        # place. Radios sync silently so on_mode_changed cannot
+        # rebuild sequential_encoders from the current UI.
+        self.sequential_mode = bool(batch.sequential_mode)
+        self.mode_sequential.blockSignals(True)
+        self.mode_all.blockSignals(True)
+        self.mode_sequential.setChecked(self.sequential_mode)
+        self.mode_all.setChecked(not self.sequential_mode)
+        self.mode_sequential.blockSignals(False)
+        self.mode_all.blockSignals(False)
+
         # Apply output_directory + videos from the saved batch.
         self.output_directory = batch.output_directory
         if self.output_directory:
@@ -4186,6 +4252,15 @@ class VideoRendererTool(QMainWindow):
         self.update_video_list()
         if self.videos:
             self.btn_delete.setEnabled(True)
+
+        # H-1: the explicit task pairs handed to start_render. The
+        # video_idx slot is recomputed against the deduped list —
+        # it is only consumed by the queue snapshot.
+        path_to_idx = {v: i for i, v in enumerate(self.videos)}
+        resume_pairs = [
+            (vp, ids, path_to_idx.get(vp, 0))
+            for vp, ids in zip(resumable_videos, resumable_encoder_id_lists)
+        ]
 
         # Restore selection identity for the renderer. We bypass the
         # tree-mode UI by directly populating selected_encoders /
@@ -4228,16 +4303,12 @@ class VideoRendererTool(QMainWindow):
                 + "\n\nThe remaining tasks will start now.",
             )
 
-        # Clear the on-disk batch — start_render() will write a fresh
-        # snapshot below. This is intentional: the resumed batch is a
-        # new batch_uuid with new task_uuids in the eyes of the queue
-        # store. Original batch identity is captured in the log only.
-        self._clear_queue_snapshot()
-
-        # Kick off the render. start_render() reads selected_encoders
-        # + videos exactly the way the user would have triggered it
-        # via ▶️ Start.
-        self.start_render()
+        # H-1: no pre-clear. start_render's _save_queue_snapshot()
+        # atomically overwrites the queue file with the resumed
+        # batch (fresh batch_uuid + task_uuids), so the saved batch
+        # is never destroyed before its replacement exists — a crash
+        # in the gap can no longer lose the work.
+        self.start_render(resume_tasks=resume_pairs)
 
     # ------------------------------------------------------------------
     # Phase 3.2 — local-only scoring helpers

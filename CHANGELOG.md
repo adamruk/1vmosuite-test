@@ -428,6 +428,15 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] fix(auto_render): flagship-audit batch 1 — resume now
+  replays the saved batch's exact task pairs via a keyword-only
+  resume_tasks payload (previously the queue was cleared and selection
+  rebuilt from an empty UI, silently destroying the batch); dispatch
+  params-miss no longer recurses (cursor advances, real task index
+  recorded, tail re-dispatch deferred via QTimer.singleShot(0));
+  score_vmaf gains base_result chaining so seeded re-scores stop
+  regressing cached axes to PENDING.
+
 - **F-006b — residual user-facing Vietnamese sweep.** Follow-up to F-006, covering the user-visible Vietnamese that the status-string pass left behind:
   - 14 message literals translated to English (`merge.py` 7, `mixer.py` 7): file-validation errors (`File not found:` / `File is empty:` / `Audio file not found:` / `Audio file is empty:`), the FFmpeg command echo (`FFmpeg command:`), output/exit-code errors (`Output file is missing or empty` / `FFmpeg returned error code`), and the temp-file cleanup warnings (`Could not delete temp file`).
   - The two built-in **Text** presets (`Text Bottom Basic` / `Text Top Basic`) English-ified in `auto_render.py` AND the `tools/generate_encoder_json.py` `TEXT_DEFAULTS` (the two halves of one contract), then `assets/Encoder.json` regenerated — diff confined to the two `builtin:text/*` entries (description, details, drawtext param each). The on-screen placeholder changed `THAY_THẾ_NỘI_DUNG` → `REPLACE_THIS_TEXT`: users who previously saved a Text-overlay preset without editing the placeholder must now edit `REPLACE_THIS_TEXT` instead. Preset ids/names/groups/params structure unchanged.
