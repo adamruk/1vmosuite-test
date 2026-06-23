@@ -428,6 +428,19 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] **M-4 (pause traps):** Starting a batch while a stale pause
+  flag persisted from a prior session no longer produces a silently dead
+  queue with Cancel lit — start now clears the persisted pause first.
+  Resuming a paused batch refills every free worker slot instead of
+  dispatching one task and collapsing to serial. Pause state (flag,
+  persisted queue_state, button label) now flows through a single
+  `_set_paused` helper.
+
+- [_pending_] **M-3 (worker-row desync):** Worker progress rows regenerate
+  to match the configured thread count via a single `_rebuild_worker_rows`,
+  fixing invisible workers when the thread count is raised and dead "Ready"
+  rows when it is lowered.
+
 - [fca7dc0] fix(render): C1 — extract the render-thread teardown triple
   (started.disconnect() → quit() → bounded 5s wait, Phase 2d Item 7) into a
   single `_join_render_thread()` helper, replacing six identical inline copies

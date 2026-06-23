@@ -1681,30 +1681,12 @@ class VideoRendererTool(QMainWindow):
         self.progress_boxes = []
         thread_frame = QFrame()
         thread_frame.setFixedHeight(120)
-        thread_layout = QVBoxLayout(thread_frame)
-        thread_layout.setSpacing(2)
-        thread_layout.setContentsMargins(5, 2, 5, 2)
-        self.thread_bars = []
-        self.thread_labels = []
-        self._worker_state = [
-            {"state": "idle", "basename": "", "percent": 0, "error": ""}
-            for _ in range(self.num_threads)
-        ]
-        for i in range(self.num_threads):
-            thread_row = QHBoxLayout()
-            thread_row.setSpacing(5)
-            label = QLabel(f"#{i + 1}")
-            label.setFixedWidth(30)
-            thread_row.addWidget(label)
-            status = QLabel(f"\U0001f7e2 Worker {i + 1} \u2014 Ready")
-            status.setMinimumWidth(280)
-            status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            thread_row.addWidget(status)
-            progress = QProgressBar()
-            thread_row.addWidget(progress, stretch=1)
-            thread_layout.addLayout(thread_row)
-            self.thread_bars.append(progress)
-            self.thread_labels.append(status)
+        self.thread_layout = QVBoxLayout(thread_frame)
+        self.thread_layout.setSpacing(2)
+        self.thread_layout.setContentsMargins(5, 2, 5, 2)
+        # M-3: single builder for the worker rows; start_render calls the same
+        # method to regenerate them when num_threads changes.
+        self._rebuild_worker_rows(self.num_threads)
         progress_layout.addWidget(thread_frame)
         self.output_text = QTextEdit()
         self.output_text.document().setMaximumBlockCount(2000)
@@ -3064,6 +3046,12 @@ class VideoRendererTool(QMainWindow):
             self.tree_output.clear()
             self.clear_progress_boxes()
 
+            # M-3: regenerate worker rows to match the (possibly changed)
+            # num_threads BEFORE the resets below, so the worker-indexed UI
+            # (bars/labels/_worker_state) is aligned with the
+            # render_threads/render_workers created later in this method.
+            self._rebuild_worker_rows(self.num_threads)
+
             # Reset every worker label back to Ready before a new batch begins.
             if hasattr(self, "_worker_state"):
                 for idx, st in enumerate(self._worker_state):
@@ -3121,6 +3109,13 @@ class VideoRendererTool(QMainWindow):
                 thread = QThread()
                 self.render_threads.append(thread)
                 self.render_workers.append(None)
+            # M-4a: a pause flag persisted from a prior session would make
+            # every _start_next_task() below no-op at the pause gate, leaving
+            # a silently dead batch with Cancel lit. Starting a batch is an
+            # explicit "go" — clear any stale pause (and its persisted state)
+            # before dispatching.
+            if getattr(self, "is_paused", False):
+                self._set_paused(False)
             for i in range(min(self.num_threads, total_tasks)):
                 self._start_next_task()
 
@@ -3318,6 +3313,54 @@ class VideoRendererTool(QMainWindow):
         self._parked_threads = [
             (t, w) for (t, w) in self._parked_threads if t.isRunning()
         ]
+
+    def _rebuild_worker_rows(self, count: int) -> None:
+        """Regenerate the worker-indexed UI to exactly ``count`` rows (M-3).
+
+        Worker rows (thread_bars/thread_labels) and ``_worker_state`` were
+        built once in setup_ui for the initial num_threads, but
+        render_threads/render_workers are rebuilt to the current num_threads
+        on every batch. If num_threads changed in between they desynced:
+        raising it left new workers with no row (their bounds-guarded UI
+        updates silently dropped — "invisible workers"); lowering it left
+        dead "Ready" rows. setup_ui and start_render both call this so the
+        rows always match the thread count. It is the single row builder, so
+        a fresh call (empty layout) simply builds the rows.
+        """
+        if not hasattr(self, "thread_layout"):
+            return
+        # Tear down existing rows — each is a QHBoxLayout of widgets.
+        while self.thread_layout.count():
+            item = self.thread_layout.takeAt(0)
+            row = item.layout()
+            if row is not None:
+                while row.count():
+                    w = row.takeAt(0).widget()
+                    if w is not None:
+                        w.setParent(None)
+                        w.deleteLater()
+                row.deleteLater()
+        self.thread_bars = []
+        self.thread_labels = []
+        self._worker_state = [
+            {"state": "idle", "basename": "", "percent": 0, "error": ""}
+            for _ in range(count)
+        ]
+        for i in range(count):
+            thread_row = QHBoxLayout()
+            thread_row.setSpacing(5)
+            label = QLabel(f"#{i + 1}")
+            label.setFixedWidth(30)
+            thread_row.addWidget(label)
+            status = QLabel(f"\U0001f7e2 Worker {i + 1} \u2014 Ready")
+            status.setMinimumWidth(280)
+            status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            thread_row.addWidget(status)
+            progress = QProgressBar()
+            thread_row.addWidget(progress, stretch=1)
+            self.thread_layout.addLayout(thread_row)
+            self.thread_bars.append(progress)
+            self.thread_labels.append(status)
 
     def cancel_render(self):
         """Hủy quá trình render."""
@@ -4942,12 +4985,12 @@ class VideoRendererTool(QMainWindow):
     # Phase 3.4 — orchestration / performance helpers
     # ------------------------------------------------------------------
 
-    def _toggle_pause(self) -> None:
-        """Toggle the queue pause flag. Persisted to queue_state.json.
+    def _set_paused(self, paused: bool) -> bool:
+        """Set the pause flag, persist it to queue_state, and sync the button.
 
-        Currently-running tasks NEVER get interrupted; pause only
-        gates future _start_next_task dispatches. Cancel still
-        works as before.
+        Shared by _toggle_pause and the M-4a guard in start_render so the
+        in-memory flag, the persisted queue_state, and the button label can
+        never drift. Returns False (after warning) if persistence fails.
         """
         try:
             from core.orchestration.queue_state import (
@@ -4957,28 +5000,43 @@ class VideoRendererTool(QMainWindow):
             )
         except Exception as exc:
             QMessageBox.warning(self, "Pause", f"Pause unavailable: {exc}")
-            return
+            return False
         state = load_queue_state(self.USER_DATA_DIR) or QueueState()
-        state.paused = not state.paused
-        state.paused_at = time.time() if state.paused else None
+        state.paused = paused
+        state.paused_at = time.time() if paused else None
         try:
             save_queue_state(self.USER_DATA_DIR, state)
         except OSError as exc:
             QMessageBox.warning(self, "Pause", f"Could not persist: {exc}")
-            return
-        self.is_paused = bool(state.paused)
+            return False
+        self.is_paused = paused
         if hasattr(self, "pause_btn"):
-            self.pause_btn.setText("▶ Resume" if self.is_paused else "⏸️ Pause")
+            self.pause_btn.setText("▶ Resume" if paused else "⏸️ Pause")
+        return True
+
+    def _toggle_pause(self) -> None:
+        """Toggle the queue pause flag. Persisted to queue_state.json.
+
+        Currently-running tasks NEVER get interrupted; pause only
+        gates future _start_next_task dispatches. Cancel still
+        works as before.
+        """
+        if not self._set_paused(not getattr(self, "is_paused", False)):
+            return
         if self.is_paused:
             self.output_text.append(
                 "[INFO] Queue paused. Current task finishes; next dispatch waits."
             )
         else:
             self.output_text.append("[INFO] Queue resumed.")
-            # Wake the dispatcher if we have capacity + tasks.
+            # M-4b: refill EVERY free slot, not just one — otherwise resume
+            # collapses the render pool to serial (one task at a time) until
+            # each completion re-triggers the next dispatch. Mirrors the
+            # fan-out start_render does on a fresh batch.
             if self.is_rendering:
                 try:
-                    self._start_next_task()
+                    for _ in range(self.num_threads):
+                        self._start_next_task()
                 except Exception:
                     pass
 
