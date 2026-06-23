@@ -428,6 +428,25 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] fix(render): C1 — extract the render-thread teardown triple
+  (started.disconnect() → quit() → bounded 5s wait, Phase 2d Item 7) into a
+  single `_join_render_thread()` helper, replacing six identical inline copies
+  in auto_render.py (cancel_render, _start_next_task queue-drain terminal,
+  on_render_completed per-task + batch-terminal, on_render_error per-task,
+  closeEvent). M-1 reliability fix: a render thread that does not stop within
+  the join timeout (a wedged ffmpeg child still holds it) is now *parked* —
+  its (thread, worker) pair is retained in a new app-lifetime
+  `self._parked_threads` list so the caller's subsequent
+  render_threads.clear() cannot drop the last reference to a still-running
+  QThread, which aborts the process with "QThread: Destroyed while thread is
+  still running". `_reap_parked_threads()` releases parked pairs once their
+  thread reports stopped. The three non-render join sites (URL-download
+  thread, score-cancel thread, score-prune wait(500)) are deliberately
+  untouched. Guarded by `tests/smoke/test_join_render_thread_parking.py`
+  (3 deterministic pure-logic cases: stuck→parked, stopped→not-parked,
+  reap-once-stopped; no QApplication/ffmpeg/GPU). [_pending_]
+  [tests/smoke/test_join_render_thread_parking.py]
+
 - [_pending_] fix(ui): Polish batch (v3.9 UI hardening) — eight small
   independent fixes in auto_render.py, no layout restructuring. Tree
   column shares in on_resize now use viewport().width() (excludes the

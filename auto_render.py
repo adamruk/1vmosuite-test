@@ -1154,6 +1154,12 @@ class VideoRendererTool(QMainWindow):
         self.selected_encoders = []
         self.encoder_params = {}
         self.is_rendering = False
+        # M-1: render threads that fail to stop within the join timeout are
+        # parked here as (thread, worker) pairs so their last reference is
+        # never dropped while still running. App-lifetime list — never reset
+        # per batch, or a still-running parked thread could be GC'd and abort
+        # the process ("QThread: Destroyed while thread is still running").
+        self._parked_threads: list = []
         self.num_threads = 3
         self.sequential_mode = False
         self.sequential_encoders = [None] * SEQUENTIAL_SLOT_COUNT
@@ -3132,19 +3138,11 @@ class VideoRendererTool(QMainWindow):
                     # Queue exhausted but in-flight tasks still pending; do not dispatch.
                     return
                 # Both queue exhausted AND all tasks done; fall through to terminal cleanup.
-                for thread in self.render_threads:
+                for thread, slot_worker in zip(
+                    self.render_threads, self.render_workers
+                ):
                     if thread.isRunning():
-                        try:
-                            thread.started.disconnect()
-                        except TypeError:
-                            pass
-                        thread.quit()
-                        # Phase 2d follow-up fix (Item 7): bounded wait so a
-                        # stuck ffmpeg child cannot freeze the queue-drain
-                        # terminal cleanup. 5 s matches the existing URL
-                        # close path; in practice quit() returns immediately
-                        # because the worker has already emitted finished.
-                        thread.wait(5000)
+                        self._join_render_thread(thread, slot_worker)
                 self.render_threads.clear()
                 self.render_workers.clear()
                 self.is_rendering = False
@@ -3294,6 +3292,33 @@ class VideoRendererTool(QMainWindow):
                         )
                         self.current_task_index += 1
 
+    def _join_render_thread(self, thread, worker=None, timeout_ms: int = 5000) -> None:
+        """Detach `started`, ask the thread to quit, and wait a bounded time.
+
+        Extracted from six identical render-thread teardown sites (Phase 2d
+        Item 7); the disconnect -> quit -> bounded-wait triple is unchanged.
+        M-1: if the thread does not stop within the timeout (a wedged ffmpeg
+        child still holds it), keep BOTH the thread and its worker alive in
+        ``_parked_threads`` so the caller's later list-clear cannot drop the
+        last reference to a running QThread / live worker — that drop aborts
+        the process with "QThread: Destroyed while thread is still running".
+        Parked pairs are reaped once their thread finally stops.
+        """
+        try:
+            thread.started.disconnect()
+        except TypeError:
+            pass
+        thread.quit()
+        if not thread.wait(timeout_ms):
+            self._parked_threads.append((thread, worker))
+        self._reap_parked_threads()
+
+    def _reap_parked_threads(self) -> None:
+        """Release parked (thread, worker) pairs whose thread has stopped."""
+        self._parked_threads = [
+            (t, w) for (t, w) in self._parked_threads if t.isRunning()
+        ]
+
     def cancel_render(self):
         """Hủy quá trình render."""
         if self.is_rendering:
@@ -3331,20 +3356,11 @@ class VideoRendererTool(QMainWindow):
                     if worker is not None:
                         worker.is_cancelled = True
             if hasattr(self, "render_threads"):
-                for thread in self.render_threads:
+                for thread, slot_worker in zip(
+                    self.render_threads, self.render_workers
+                ):
                     if thread.isRunning():
-                        try:
-                            thread.started.disconnect()
-                        except TypeError:
-                            pass
-                        thread.quit()
-                        # Phase 2d follow-up fix (Item 7): bounded wait so a
-                        # stuck ffmpeg subprocess cannot freeze cancel_render.
-                        # Cancel already set is_cancelled=True; the worker
-                        # checks that flag in its loop and via should_cancel
-                        # passed to ffmpeg_runner. 5 s is the same cap used
-                        # in the URL-download close path.
-                        thread.wait(5000)
+                        self._join_render_thread(thread, slot_worker)
                 self.render_threads.clear()
                 self.render_workers.clear()
             if hasattr(self, "progress_boxes"):
@@ -3549,25 +3565,13 @@ class VideoRendererTool(QMainWindow):
         if 0 <= thread_index < len(self.render_workers):
             self.render_workers[thread_index] = None
             if thread_index < len(self.render_threads):
-                try:
-                    self.render_threads[thread_index].started.disconnect()
-                except TypeError:
-                    pass
-                self.render_threads[thread_index].quit()
-                # Phase 2d follow-up fix (Item 7): bounded per-task wait.
-                self.render_threads[thread_index].wait(5000)
+                self._join_render_thread(self.render_threads[thread_index], worker)
         if self.current_task_index < self.total_tasks:
             self._start_next_task()
         if self.completed_tasks >= self.total_tasks:
-            for thread in self.render_threads:
+            for thread, slot_worker in zip(self.render_threads, self.render_workers):
                 if thread.isRunning():
-                    try:
-                        thread.started.disconnect()
-                    except TypeError:
-                        pass
-                    thread.quit()
-                    # Phase 2d follow-up fix (Item 7): bounded batch-terminal wait.
-                    thread.wait(5000)
+                    self._join_render_thread(thread, slot_worker)
             self.render_threads.clear()
             self.render_workers.clear()
             self.is_rendering = False
@@ -3653,14 +3657,7 @@ class VideoRendererTool(QMainWindow):
             if 0 <= thread_index < len(self.render_workers):
                 self.render_workers[thread_index] = None
                 if thread_index < len(self.render_threads):
-                    try:
-                        self.render_threads[thread_index].started.disconnect()
-                    except TypeError:
-                        pass
-                    self.render_threads[thread_index].quit()
-                    # Phase 2d follow-up fix (Item 7): bounded wait on the
-                    # error-handler path too (mirror of on_render_completed).
-                    self.render_threads[thread_index].wait(5000)
+                    self._join_render_thread(self.render_threads[thread_index], worker)
             self.active_threads -= 1
         # H-2: dispatch on the next event-loop turn instead of
         # synchronously — a consecutive-failure chain unwinds
@@ -3789,14 +3786,10 @@ class VideoRendererTool(QMainWindow):
                         if worker is not None:
                             worker.is_cancelled = True
                 if hasattr(self, "render_threads"):
-                    for thread in self.render_threads:
-                        try:
-                            thread.started.disconnect()
-                        except TypeError:
-                            pass
-                        thread.quit()
-                        # Phase 2d follow-up fix (Item 7): bounded close-event wait.
-                        thread.wait(5000)
+                    for thread, slot_worker in zip(
+                        self.render_threads, self.render_workers
+                    ):
+                        self._join_render_thread(thread, slot_worker)
                     self.render_threads.clear()
                     self.render_workers.clear()
                 # Phase 3.1 — exit-during-render is INTENTIONALLY a
