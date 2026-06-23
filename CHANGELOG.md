@@ -428,7 +428,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
-- [_pending_] fix(render): C1 — extract the render-thread teardown triple
+- [fca7dc0] fix(render): C1 — extract the render-thread teardown triple
   (started.disconnect() → quit() → bounded 5s wait, Phase 2d Item 7) into a
   single `_join_render_thread()` helper, replacing six identical inline copies
   in auto_render.py (cancel_render, _start_next_task queue-drain terminal,
@@ -444,7 +444,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
   thread, score-cancel thread, score-prune wait(500)) are deliberately
   untouched. Guarded by `tests/smoke/test_join_render_thread_parking.py`
   (3 deterministic pure-logic cases: stuck→parked, stopped→not-parked,
-  reap-once-stopped; no QApplication/ffmpeg/GPU). [_pending_]
+  reap-once-stopped; no QApplication/ffmpeg/GPU). [fca7dc0]
   [tests/smoke/test_join_render_thread_parking.py]
 
 - [_pending_] fix(ui): Polish batch (v3.9 UI hardening) — eight small
