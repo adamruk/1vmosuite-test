@@ -54,6 +54,8 @@ from core.user_data import (
 )
 from help_dialog import HelpDialog
 
+logger = logging.getLogger(__name__)
+
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / "assets" / "Merge.ico"
@@ -86,7 +88,9 @@ def _setup_file_logging(install_dir, log_filename):
                 and handler.baseFilename == log_path
             ):
                 return log_path
-        file_handler = logging.FileHandler(log_path)
+        # utf-8 so non-ASCII filenames in log messages cannot raise a cp1252
+        # UnicodeEncodeError on Windows (FileHandler defaults to locale encoding).
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         )
@@ -277,12 +281,12 @@ class MergeCoordinator(QObject):
                     self.thread_pool.start(worker)
                 except Exception as e:
                     error_msg = f"Error processing video {output_index + 1}: {str(e)}"
-                    print(f"Merge Error: {error_msg}")
+                    logger.error(f"Merge Error: {error_msg}")
                     self.logger.error(error_msg)
                     self.per_video_error.emit(error_msg)
         except Exception as e:
             error_msg = f"Error merging: {str(e)}\n{traceback.format_exc()}"
-            print(f"Merge Error: {error_msg}")
+            logger.error(f"Merge Error: {error_msg}")
             self.logger.error(error_msg)
             self.error_occurred.emit(error_msg)
         finally:
@@ -527,7 +531,7 @@ class MergeWorker(QRunnable):
                 )
         except Exception as e:
             error_msg = f"Error processing {os.path.basename(self.output_path)}: {str(e)}\n{traceback.format_exc()}"
-            print(f"Merge Error: {error_msg}")
+            logger.error(f"Merge Error: {error_msg}")
             self.logger.error(error_msg)
             self.signals.error_occurred.emit(error_msg)
             self.signals.status_updated.emit(self.thread_index, "Error")
@@ -763,7 +767,7 @@ class VideoMergeTool(QMainWindow):
         )
         _migrated = migrate_legacy_configs(SCRIPT_DIR, self.USER_DATA_DIR)
         if _migrated:
-            print(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
+            logger.info(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
         self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_merge.json"
         if not FFMPEG_PATH.exists() or not FFPROBE_PATH.exists():
             QMessageBox.critical(
@@ -1337,7 +1341,7 @@ class VideoMergeTool(QMainWindow):
             core_config.save(Path(self.CONFIG_FILE), existing)
         except (OSError, TypeError) as e:
             error_msg = f"Cannot save configuration: {str(e)}\n{traceback.format_exc()}"
-            print(f"Config Error: {error_msg}")
+            logger.error(f"Config Error: {error_msg}")
             QMessageBox.warning(self, "Warning", f"Cannot save configuration: {str(e)}")
 
     def update_video_counts(self):
@@ -1827,7 +1831,7 @@ class VideoMergeTool(QMainWindow):
             for i, group in enumerate(video_groups, 1):
                 if not group:
                     error_msg = f"Please select at least one file for Group {i}."
-                    print(f"Validation Error: {error_msg}")
+                    logger.error(f"Validation Error: {error_msg}")
                     QMessageBox.warning(self, "Warning", error_msg)
                     return False
             if self.combo_audio.currentText() == "Custom Audio" and (
@@ -1836,18 +1840,18 @@ class VideoMergeTool(QMainWindow):
                 error_msg = (
                     "Please select at least one audio file when using Custom Audio."
                 )
-                print(f"Validation Error: {error_msg}")
+                logger.error(f"Validation Error: {error_msg}")
                 QMessageBox.warning(self, "Warning", error_msg)
                 return False
             if not self.output_directory:
                 error_msg = "Please select output directory."
-                print(f"Validation Error: {error_msg}")
+                logger.error(f"Validation Error: {error_msg}")
                 QMessageBox.warning(self, "Warning", error_msg)
                 return False
             return True
         except Exception as e:
             error_msg = f"Error validating inputs: {str(e)}\n{traceback.format_exc()}"
-            print(f"Validation Error: {error_msg}")
+            logger.error(f"Validation Error: {error_msg}")
             self.logger.error(error_msg)
             QMessageBox.critical(self, "Error", f"Error validating inputs: {str(e)}")
             return False
@@ -1892,7 +1896,7 @@ class VideoMergeTool(QMainWindow):
                 break
 
     def on_merge_error(self, error_message: str):
-        print(f"Merge Worker Error: {error_message}")
+        logger.error(f"Merge Worker Error: {error_message}")
         self.processed_output += 1
         self.progress_label.setText(
             f"Progress: {self.processed_output}/{len(self.progress_boxes)}"
@@ -1973,7 +1977,7 @@ class VideoMergeTool(QMainWindow):
                 error_msg = (
                     f"Error loading configuration: {str(e)}\n{traceback.format_exc()}"
                 )
-                print(f"Config Error: {error_msg}")
+                logger.error(f"Config Error: {error_msg}")
                 QMessageBox.warning(
                     self, "Warning", f"Error loading configuration: {str(e)}"
                 )

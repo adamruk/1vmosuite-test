@@ -57,6 +57,8 @@ from core.user_data import (
 )
 from help_dialog import HelpDialog
 
+logger = logging.getLogger(__name__)
+
 SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
 FFMPEG_PATH, FFPROBE_PATH = core_ffmpeg_runner.resolve_binaries(SCRIPT_DIR)
 ICON_PATH = SCRIPT_DIR / "assets" / "Cutter.ico"
@@ -89,7 +91,9 @@ def _setup_file_logging(install_dir, log_filename):
                 and handler.baseFilename == log_path
             ):
                 return log_path
-        file_handler = logging.FileHandler(log_path)
+        # utf-8 so non-ASCII filenames in log messages cannot raise a cp1252
+        # UnicodeEncodeError on Windows (FileHandler defaults to locale encoding).
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         )
@@ -451,7 +455,7 @@ class VideoCutterTool(QMainWindow):
         )
         _migrated = migrate_legacy_configs(SCRIPT_DIR, self.USER_DATA_DIR)
         if _migrated:
-            print(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
+            logger.info(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
         self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_cutter.json"
         if not FFMPEG_PATH.exists() or not FFPROBE_PATH.exists():
             QMessageBox.critical(

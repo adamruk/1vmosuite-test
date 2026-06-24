@@ -428,6 +428,14 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] **Logging — cp1252 crash on non-ASCII filenames:** All four
+  apps (auto_render, cutter, merge, mixer) now open their per-user log
+  `FileHandler` with `encoding="utf-8"`; it previously defaulted to the
+  Windows cp1252 locale codec and raised `UnicodeEncodeError` when a log
+  message contained a non-ASCII filename. Diagnostic `print()` calls are
+  routed through a module-level logger instead of the cp1252 console
+  (auto_render 26; cutter 1, merge 11, mixer 1).
+
 - [4efc879] **M-4 (pause traps):** Starting a batch while a stale pause
   flag persisted from a prior session no longer produces a silently dead
   queue with Cancel lit — start now clears the persisted pause first.

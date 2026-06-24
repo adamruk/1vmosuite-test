@@ -84,6 +84,8 @@ from core.user_data import (
 from help_dialog import HelpDialog
 from settings_dialog import SettingsDialog
 
+logger = logging.getLogger(__name__)
+
 SEQUENTIAL_SLOT_COUNT = 8
 
 
@@ -114,7 +116,9 @@ def _setup_file_logging(install_dir, log_filename):
                 and handler.baseFilename == log_path
             ):
                 return log_path
-        file_handler = logging.FileHandler(log_path)
+        # utf-8 so non-ASCII filenames in log messages cannot raise a cp1252
+        # UnicodeEncodeError on Windows (FileHandler defaults to locale encoding).
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setFormatter(
             logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         )
@@ -217,7 +221,7 @@ def _cleanup_image_sequence(path: str) -> int:
         except OSError:
             # Permission denied / file already gone / cross-thread race
             # against another worker — log and continue.
-            print(f"_cleanup_image_sequence: could not remove {full!r}")
+            logger.error(f"_cleanup_image_sequence: could not remove {full!r}")
     return removed
 
 
@@ -1147,7 +1151,7 @@ class VideoRendererTool(QMainWindow):
                         myappid
                     )
         except Exception as e:
-            print(f"Error setting icon: {str(e)}")
+            logger.error(f"Error setting icon: {str(e)}")
         self.videos = []
         self.output_directory = ""
         self.encoder_options = []
@@ -1174,7 +1178,7 @@ class VideoRendererTool(QMainWindow):
         )
         _migrated = migrate_legacy_configs(self.SCRIPT_DIR, self.USER_DATA_DIR)
         if _migrated:
-            print(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
+            logger.info(f"Migrated legacy configs to {self.USER_DATA_DIR}: {_migrated}")
         self.CONFIG_FILE = self.USER_DATA_DIR / "config_video_renderer.json"
         self.USER_PRESETS_FILE = self.USER_DATA_DIR / "encoder.user.json"
         # Phase 3.1 local persistent queue (no cloud / no remote queue).
@@ -1211,7 +1215,7 @@ class VideoRendererTool(QMainWindow):
             self.scoring_caps = _scoring_detect(self.FFMPEG_PATH)
             self.score_cache = _ScoreCache(self.USER_DATA_DIR)
         except Exception as exc:
-            print(f"scoring: init failed (continuing without scoring): {exc}")
+            logger.error(f"scoring: init failed (continuing without scoring): {exc}")
         # Phase 3.4 — pause/resume flag. Loaded from queue_state.json
         # at startup if present; persisted on toggle. Default False
         # so behavior matches pre-3.4 builds when no side file exists.
@@ -1223,7 +1227,7 @@ class VideoRendererTool(QMainWindow):
             if _qs is not None and _qs.paused:
                 self.is_paused = True
         except Exception as exc:
-            print(f"queue_state: load failed (continuing unpaused): {exc}")
+            logger.error(f"queue_state: load failed (continuing unpaused): {exc}")
         # Active ScoreWorker threads — separate from render_threads
         # so scoring NEVER contends for the render thread pool.
         # Tuple shape: (QThread, ScoreWorker, task_index).
@@ -1307,7 +1311,7 @@ class VideoRendererTool(QMainWindow):
             try:
                 saved = self.queue_store.load()
             except Exception as exc:
-                print(f"queue_store: load() failed at startup: {exc}")
+                logger.error(f"queue_store: load() failed at startup: {exc}")
                 saved = None
             if saved is not None and any(
                 t.status in UNFINISHED_STATUSES for t in saved.tasks
@@ -2715,7 +2719,7 @@ class VideoRendererTool(QMainWindow):
                     return
                 self.videos.extend(new_files)
                 self.update_video_list()
-                print(f"Added {len(new_files)} videos.")
+                logger.info(f"Added {len(new_files)} videos.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Cannot select videos: {str(e)}")
 
@@ -2746,7 +2750,7 @@ class VideoRendererTool(QMainWindow):
             except Exception as e:
                 item.setText(2, "—")
                 item.setText(3, "—")
-                print(f"Error getting video info for {video_path}: {str(e)}")
+                logger.error(f"Error getting video info for {video_path}: {str(e)}")
             # Yield to the event loop so this row paints before the
             # next ffprobe call blocks. Safe — we are between rows,
             # not mid-mutation of a single item.
@@ -2806,7 +2810,7 @@ class VideoRendererTool(QMainWindow):
             seconds = int(duration_seconds % 60)
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         except subprocess.TimeoutExpired:
-            print(f"ffprobe duration timed out (>10s) for: {video_path}")
+            logger.error(f"ffprobe duration timed out (>10s) for: {video_path}")
             return "—"
         except Exception:
             # Belt-and-suspenders: never crash the caller even on subprocess failure.
@@ -2844,10 +2848,10 @@ class VideoRendererTool(QMainWindow):
             )
             return result.stdout.strip() or "—"
         except subprocess.TimeoutExpired:
-            print(f"ffprobe resolution timed out (>10s) for: {video_path}")
+            logger.error(f"ffprobe resolution timed out (>10s) for: {video_path}")
             return "—"
         except Exception as e:
-            print(f"Failed to get video resolution: {str(e)}")
+            logger.error(f"Failed to get video resolution: {str(e)}")
             return "—"
 
     def delete_videos(self):
@@ -3378,7 +3382,7 @@ class VideoRendererTool(QMainWindow):
                 try:
                     persisted = self.queue_store.load()
                 except (OSError, ValueError) as exc:
-                    print(f"queue_store: cancel load failed: {exc}")
+                    logger.error(f"queue_store: cancel load failed: {exc}")
                     persisted = None
                 if persisted is not None:
                     now = time.time()
@@ -3568,7 +3572,7 @@ class VideoRendererTool(QMainWindow):
             item.setText(4, resolution)
             item.setText(5, "🟢 Completed")
         else:
-            print("Warning: tree item missing for completed task")
+            logger.error("Warning: tree item missing for completed task")
         box_index = getattr(worker, "task_index", self.completed_tasks)
         self.update_box_color(box_index, "green")
         self.completed_tasks += 1
@@ -3599,7 +3603,7 @@ class VideoRendererTool(QMainWindow):
                 tree_item=tree_item_for_score,
             )
         except Exception as exc:
-            print(f"scoring: auto-score wire failed (ignored): {exc}")
+            logger.error(f"scoring: auto-score wire failed (ignored): {exc}")
         self.progress_label.setText(
             f"Progress: {self.completed_tasks}/{self.total_tasks} renders\nETA: {self._compute_eta_string()}"
         )
@@ -3660,7 +3664,7 @@ class VideoRendererTool(QMainWindow):
                 item.setText(4, "—")
                 item.setText(5, "🔴 Error")
             else:
-                print("Warning: tree item missing for failed task")
+                logger.error("Warning: tree item missing for failed task")
         # H-2: an explicit task_index (direct-call path) wins; the
         # completed_tasks fallback only equals the dispatch slot when
         # nothing else has finished yet, so it mis-marked the wrong
@@ -3846,7 +3850,7 @@ class VideoRendererTool(QMainWindow):
                     try:
                         persisted = self.queue_store.load()
                     except (OSError, ValueError) as exc:
-                        print(f"queue_store: closeEvent load failed: {exc}")
+                        logger.error(f"queue_store: closeEvent load failed: {exc}")
                         persisted = None
                     if persisted is not None:
                         for task in persisted.tasks:
@@ -3869,7 +3873,7 @@ class VideoRendererTool(QMainWindow):
                 try:
                     self._cancel_all_score_workers()
                 except Exception as exc:
-                    print(f"scoring: cancel-on-close failed (ignored): {exc}")
+                    logger.error(f"scoring: cancel-on-close failed (ignored): {exc}")
                 self.save_config()
                 event.accept()
             else:
@@ -3881,7 +3885,7 @@ class VideoRendererTool(QMainWindow):
             try:
                 self._cancel_all_score_workers()
             except Exception as exc:
-                print(f"scoring: cancel-on-close failed (ignored): {exc}")
+                logger.error(f"scoring: cancel-on-close failed (ignored): {exc}")
             self.save_config()
             event.accept()
 
@@ -4097,7 +4101,9 @@ class VideoRendererTool(QMainWindow):
         # 2c-c-4: defense in depth — UI button is disabled for built-ins,
         # but reject at model layer too in case of future signal regression.
         if current_id.startswith("builtin:"):
-            print(f"edit_encoder: refused to edit built-in preset {current_id!r}")
+            logger.error(
+                f"edit_encoder: refused to edit built-in preset {current_id!r}"
+            )
             return
         current_group = item.text(1)
         current_name = item.text(2)
@@ -4146,7 +4152,7 @@ class VideoRendererTool(QMainWindow):
         for item in selection:
             preset_id = item.data(0, Qt.UserRole + 1) or ""
             if preset_id.startswith("builtin:"):
-                print(
+                logger.error(
                     f"delete_encoder: refused to delete built-in preset {preset_id!r}"
                 )
                 return
@@ -4367,7 +4373,7 @@ class VideoRendererTool(QMainWindow):
             batch = self._build_batch_from_state()
             self.queue_store.save(batch)
         except (OSError, ValueError) as exc:
-            print(f"queue_store: snapshot save failed: {exc}")
+            logger.error(f"queue_store: snapshot save failed: {exc}")
 
     def _update_queue_task_status(
         self,
@@ -4382,7 +4388,7 @@ class VideoRendererTool(QMainWindow):
         try:
             self.queue_store.update_task_status(task_uuid, status, **fields)
         except (OSError, ValueError) as exc:
-            print(f"queue_store: status update failed: {exc}")
+            logger.error(f"queue_store: status update failed: {exc}")
 
     def _task_uuid_for_index(self, index: int) -> Optional[str]:
         """Look up the task_uuid for a dispatched task index. Returns
@@ -4396,7 +4402,7 @@ class VideoRendererTool(QMainWindow):
         try:
             self.queue_store.clear()
         except (OSError, ValueError) as exc:
-            print(f"queue_store: clear failed: {exc}")
+            logger.error(f"queue_store: clear failed: {exc}")
         self._current_batch_uuid = None
         self._task_uuids = []
 
@@ -4654,7 +4660,7 @@ class VideoRendererTool(QMainWindow):
         # Drop stale finished entries before counting active slots.
         self._prune_finished_score_threads()
         if len(self._score_threads) >= self._scoring_max_parallel():
-            print(
+            logger.info(
                 f"scoring: max-parallel ({self._scoring_max_parallel()}) reached; "
                 f"task {task_index} request dropped"
             )
@@ -4720,7 +4726,7 @@ class VideoRendererTool(QMainWindow):
             try:
                 self.score_cache.put(result)
             except Exception as exc:
-                print(f"scoring: cache write failed: {exc}")
+                logger.error(f"scoring: cache write failed: {exc}")
         if tree_item is not None:
             try:
                 self._score_rows_by_tree_item[id(tree_item)] = result
@@ -4732,7 +4738,7 @@ class VideoRendererTool(QMainWindow):
 
     def _on_score_error(self, task_index: int, message: str, tree_item) -> None:
         """Slot — runs on the Qt main thread. Marks cells as ERR."""
-        print(f"scoring: task {task_index} error: {message}")
+        logger.error(f"scoring: task {task_index} error: {message}")
         if tree_item is not None:
             try:
                 self._render_score_cells(tree_item, None, running=False, error=message)
