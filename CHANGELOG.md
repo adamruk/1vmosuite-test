@@ -428,7 +428,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
-- [_pending_] **Logging — cp1252 crash on non-ASCII filenames:** All four
+- [d71da57] **Logging — cp1252 crash on non-ASCII filenames:** All four
   apps (auto_render, cutter, merge, mixer) now open their per-user log
   `FileHandler` with `encoding="utf-8"`; it previously defaulted to the
   Windows cp1252 locale codec and raised `UnicodeEncodeError` when a log
