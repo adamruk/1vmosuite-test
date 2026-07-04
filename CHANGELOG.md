@@ -468,7 +468,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
   reap-once-stopped; no QApplication/ffmpeg/GPU). [fca7dc0]
   [tests/smoke/test_join_render_thread_parking.py]
 
-- [_pending_] fix(ui): Polish batch (v3.9 UI hardening) — eight small
+- [dcc8df8] fix(ui): Polish batch (v3.9 UI hardening) — eight small
   independent fixes in auto_render.py, no layout restructuring. Tree
   column shares in on_resize now use viewport().width() (excludes the
   vertical scrollbar) and sum to 0.95 instead of 1.00/1.15 (tree_videos
@@ -506,7 +506,7 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
   longer push output_frame wider through the splitter (the Batch UI-3
   G-widen, +64px at 1280x800). Ratchet file untouched this batch.
 
-- [_pending_] fix(ui): Batch UI-3 (v3.9 UI hardening) — the floor-drop
+- [c5fcd9b] fix(ui): Batch UI-3 (v3.9 UI hardening) — the floor-drop
   batch. The five artificial frame minimums (4× setMinimumWidth(780) on
   input/config/progress/output frames + setMinimumHeight(450) on
   bottom_frame) are deleted, so the offscreen minimumSizeHint falls

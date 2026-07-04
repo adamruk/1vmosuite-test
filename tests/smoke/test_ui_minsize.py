@@ -4,9 +4,9 @@ Instantiates VideoRendererTool offscreen (never calls app.exec, mirroring
 the 2026-06-10 UI recon harness) and asserts the window's minimumSizeHint
 stays under a ceiling. The ceiling RATCHETS DOWN as UI batches land:
 
-    Batch UI-1 (QSS scoping + toolbar FlowLayout)   -> 1600 x 820   (current)
+    Batch UI-1 (QSS scoping + toolbar FlowLayout)   -> 1600 x 820
     Batch UI-2 (slot-row FlowLayout + combo policy) -> 1400 x 820
-    Batch UI-3 (splitters + frame floors lowered)   -> 1280 x 800
+    Batch UI-3 (splitters + frame floors lowered)   -> 1280 x 800   (current: interim 1100 x 720)
     Batch UI-4 (final polish)                       -> 1100 x 700
 
 Tighten CEILING_W / CEILING_H in the same commit as each batch.
@@ -46,8 +46,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 # Ratchet values — tighten with each landed UI batch (see module docstring).
-CEILING_W = 1280
-CEILING_H = 800
+CEILING_W = 1100
+CEILING_H = 720
 
 
 @pytest.fixture(scope="module")
