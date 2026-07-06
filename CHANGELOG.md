@@ -428,6 +428,8 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
+- [_pending_] fix(render): #1 surface queue-persistence write failures once per batch (latched _note_queue_persist_failure; disk-full/permission errors no longer silently lose resume capability)
+
 - [d71da57] **Logging — cp1252 crash on non-ASCII filenames:** All four
   apps (auto_render, cutter, merge, mixer) now open their per-user log
   `FileHandler` with `encoding="utf-8"`; it previously defaulted to the

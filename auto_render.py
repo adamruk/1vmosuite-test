@@ -1164,6 +1164,9 @@ class VideoRendererTool(QMainWindow):
         # per batch, or a still-running parked thread could be GC'd and abort
         # the process ("QThread: Destroyed while thread is still running").
         self._parked_threads: list = []
+        # #1: latches the one-time "couldn't save queue state" warning so a
+        # disk issue during a batch surfaces once, not on every snapshot.
+        self._queue_persist_warned = False
         self.num_threads = 3
         self.sequential_mode = False
         self.sequential_encoders = [None] * SEQUENTIAL_SLOT_COUNT
@@ -3055,6 +3058,9 @@ class VideoRendererTool(QMainWindow):
             # (bars/labels/_worker_state) is aligned with the
             # render_threads/render_workers created later in this method.
             self._rebuild_worker_rows(self.num_threads)
+            # #1: re-arm the one-time queue-persistence warning for this batch,
+            # so a disk issue that cleared between batches can warn again.
+            self._queue_persist_warned = False
 
             # Reset every worker label back to Ready before a new batch begins.
             if hasattr(self, "_worker_state"):
@@ -4373,7 +4379,7 @@ class VideoRendererTool(QMainWindow):
             batch = self._build_batch_from_state()
             self.queue_store.save(batch)
         except (OSError, ValueError) as exc:
-            logger.error(f"queue_store: snapshot save failed: {exc}")
+            self._note_queue_persist_failure("snapshot save", exc)
 
     def _update_queue_task_status(
         self,
@@ -4388,7 +4394,7 @@ class VideoRendererTool(QMainWindow):
         try:
             self.queue_store.update_task_status(task_uuid, status, **fields)
         except (OSError, ValueError) as exc:
-            logger.error(f"queue_store: status update failed: {exc}")
+            self._note_queue_persist_failure("status update", exc)
 
     def _task_uuid_for_index(self, index: int) -> Optional[str]:
         """Look up the task_uuid for a dispatched task index. Returns
@@ -4397,12 +4403,31 @@ class VideoRendererTool(QMainWindow):
             return self._task_uuids[index]
         return None
 
+    def _note_queue_persist_failure(self, what: str, exc: Exception) -> None:
+        """Log a queue-persistence write failure and surface it to the user ONCE.
+
+        queue_store.save() propagates OSError (atomic_write flushes+fsyncs then
+        re-raises), so a real disk-full / permissions failure reaches the three
+        write call sites. These intentionally never crash the render — but a
+        silently swallowed failure means resume capability is lost with no sign.
+        We keep never-crash and add a single visible warning per batch (latched),
+        re-armed at the start of each batch.
+        """
+        logger.error(f"queue_store: {what} failed: {exc}")
+        if not getattr(self, "_queue_persist_warned", False):
+            self._queue_persist_warned = True
+            if hasattr(self, "output_text"):
+                self.output_text.append(
+                    "[WARN] Couldn't save queue state to disk — resume may be "
+                    "unavailable for this batch. Check free space and permissions."
+                )
+
     def _clear_queue_snapshot(self) -> None:
         """Remove the on-disk queue file. Idempotent."""
         try:
             self.queue_store.clear()
         except (OSError, ValueError) as exc:
-            logger.error(f"queue_store: clear failed: {exc}")
+            self._note_queue_persist_failure("clear", exc)
         self._current_batch_uuid = None
         self._task_uuids = []
 
