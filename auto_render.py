@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -1119,18 +1120,12 @@ class VideoRendererTool(QMainWindow):
         self.setWindowTitle(
             f"{self.app_name} v{self.current_version} (Assets v{self.current_assets_version})"
         )
-        self.setGeometry(100, 100, 1600, 900)
-        # Allow resize and maximize — set a reasonable minimum so layouts don't
-        # collapse below their designed size, and use resize() for initial geometry.
-        # macOS stabilization (Step 1): minimum size reduced from
-        # 1600×900 to 1280×800 so the app fits on a 13" MacBook
-        # (1440×900 effective) and a 14" MacBook (1512×982 effective)
-        # without horizontal overflow. The initial resize() target
-        # stays at 1600×900 — Qt auto-shrinks to the available screen
-        # rect on smaller displays. Windows users with ≥1080p screens
-        # see the same launch size they had before.
-        self.setMinimumSize(1280, 800)
-        self.resize(1600, 900)
+        # Default size reduced from original 1600x900 for more compact launch.
+        # 1280x800 is a good balance (original min was 1280). Resizable.
+        # Backup has original if needed.
+        self.setGeometry(100, 100, 1280, 800)
+        self.setMinimumSize(960, 640)
+        self.resize(1280, 800)
         # The in-app update channel was removed (ADR-0017 / B-051): updates now
         # come from a source `git pull`, so there is no startup network call and
         # no "Updates" toolbar button. The version label above is read from
@@ -1337,12 +1332,16 @@ class VideoRendererTool(QMainWindow):
         input_frame = QFrame(objectName="input_frame")
         input_frame.setFrameStyle(QFrame.StyledPanel)
         input_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        # Functional: prevent top-left (buttons + tree) from becoming too narrow/compact
+        # on small windows, so Select/Add URL etc stay usable. Design unchanged.
+        input_frame.setMinimumWidth(280)
         input_layout = QVBoxLayout(input_frame)
         input_layout.setSpacing(2)
         input_layout.setContentsMargins(5, 2, 5, 2)
         config_frame = QFrame(objectName="config_frame")
         config_frame.setFrameStyle(QFrame.StyledPanel)
         config_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        config_frame.setMinimumWidth(280)
         config_layout = QVBoxLayout(config_frame)
         config_layout.setSpacing(2)
         config_layout.setContentsMargins(5, 2, 5, 2)
@@ -1385,7 +1384,9 @@ class VideoRendererTool(QMainWindow):
         main_split.setStretchFactor(0, 1)
         main_split.setStretchFactor(1, 1)
         main_layout.addWidget(main_split)
-        video_controls = FlowLayout(h_spacing=5, v_spacing=5)
+        video_controls = QGridLayout()
+        video_controls.setHorizontalSpacing(5)
+        video_controls.setVerticalSpacing(5)
         select_btn = self.create_video_button(
             "📥 Select (0)", self.select_videos, "#e3f2fd", "#1976d2", "#bbdefb"
         )
@@ -1404,9 +1405,6 @@ class VideoRendererTool(QMainWindow):
         delete_btn.setToolTip("Remove selected videos from queue (Del)")
         delete_btn.setEnabled(False)
         self.btn_delete = delete_btn
-        video_controls.addWidget(select_btn)
-        video_controls.addWidget(self.add_url_btn)
-        video_controls.addWidget(delete_btn)
         settings_btn = self.create_video_button(
             "Settings", self.open_settings, "#fff3e0", "#e65100", "#ffe0b2"
         )
@@ -1449,11 +1447,17 @@ class VideoRendererTool(QMainWindow):
         self.diagnostics_btn.setToolTip(
             "Export local diagnostic bundle (logs + queue + scores + sanitized config)"
         )
-        video_controls.addWidget(settings_btn)
-        video_controls.addWidget(help_btn)
-        video_controls.addWidget(self.health_btn)
-        video_controls.addWidget(self.pause_btn)
-        video_controls.addWidget(self.diagnostics_btn)
+        # Arrange in 2 rows x 4 columns for compact, consistent layout.
+        # Keeps exact same button designs, just better arrangement for top-left box.
+        # On small windows, buttons will still look the same but area is compact.
+        video_controls.addWidget(select_btn, 0, 0)
+        video_controls.addWidget(self.add_url_btn, 0, 1)
+        video_controls.addWidget(delete_btn, 0, 2)
+        video_controls.addWidget(settings_btn, 0, 3)
+        video_controls.addWidget(help_btn, 1, 0)
+        video_controls.addWidget(self.health_btn, 1, 1)
+        video_controls.addWidget(self.pause_btn, 1, 2)
+        video_controls.addWidget(self.diagnostics_btn, 1, 3)
         step1_label = QLabel("📥 Step 1: Add videos")
         step1_label.setStyleSheet(
             "font-size: 13px; color: #555; font-weight: bold; padding: 4px 2px 2px 2px;"
@@ -1517,8 +1521,10 @@ class VideoRendererTool(QMainWindow):
         )
         update_btn.setToolTip("Reload presets from Encoder.txt")
         self.group_combo = QComboBox()
-        self.group_combo.setFixedWidth(150)
-        self.group_combo.setFixedHeight(25)
+        # Relaxed fixed sizes for better responsiveness on small windows.
+        # Visual style unchanged.
+        self.group_combo.setMinimumWidth(110)
+        self.group_combo.setMinimumHeight(22)
         self.group_combo.addItem("🕹️ 1vmo Ultimate")
         self.group_combo.addItem("All Groups")
         self.group_combo.currentTextChanged.connect(self.on_group_changed)
@@ -1609,11 +1615,13 @@ class VideoRendererTool(QMainWindow):
             combo_layout.addWidget(label)
             combo = QComboBox()
             combo.setEnabled(False)
-            combo.setMinimumWidth(110)
-            combo.setMaximumWidth(210)
+            # Relaxed hard max/fixed for compactness on small windows.
+            # Keep minimums so they remain clickable and styled the same.
+            combo.setMinimumWidth(90)
+            combo.setMaximumWidth(180)
             combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
-            combo.setMinimumContentsLength(12)
-            combo.setFixedHeight(25)
+            combo.setMinimumContentsLength(10)
+            combo.setMinimumHeight(20)
             combo.setPlaceholderText("Select preset…")
             self.sequential_combos.append(combo)
             combo.currentTextChanged.connect(self._on_slot_text_changed)
@@ -1623,10 +1631,12 @@ class VideoRendererTool(QMainWindow):
             combo_row.setSpacing(2)
             combo_row.addWidget(combo)
             clear_btn = QPushButton("X")
-            clear_btn.setFixedSize(20, 25)
+            # Smaller min size for compactness.
+            # Visual style (colors, border, font) kept the same.
+            clear_btn.setMinimumSize(16, 20)
             clear_btn.setToolTip("Clear this slot")
             clear_btn.setStyleSheet(
-                "background-color: white; color: #666; border: 1px solid #ccc; border-radius: 3px; font-weight: bold; font-size: 11px; min-width: 20px; max-width: 20px;"
+                "background-color: white; color: #666; border: 1px solid #ccc; border-radius: 3px; font-weight: bold; font-size: 11px; min-width: 16px; max-width: 18px;"
             )
             clear_btn.hide()
             clear_btn.clicked.connect(lambda _checked, c=combo: c.setCurrentIndex(0))
@@ -1656,11 +1666,10 @@ class VideoRendererTool(QMainWindow):
         self.slot_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.slot_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.slot_scroll.setFrameShape(QFrame.NoFrame)
-        self.slot_scroll.setFixedHeight(
-            sequential_frame.sizeHint().height()
-            + self.slot_scroll.horizontalScrollBar().sizeHint().height()
-            + 4
-        )
+        # Made adaptive for responsiveness: no longer hard-fixed at init.
+        # On small windows it can shrink; on large it grows naturally.
+        # Minimum set so slots remain usable when visible.
+        self.slot_scroll.setMinimumHeight(60)
         mode_layout.addWidget(self.slot_scroll)
         # Render Once is the default mode (mode_all.setChecked(True) above),
         # so the slot strip starts hidden; on_mode_changed keeps it in sync.
@@ -1678,16 +1687,26 @@ class VideoRendererTool(QMainWindow):
         progress_info_layout.addWidget(self.current_label)
         progress_layout.addWidget(progress_info_frame)
         self.canvas = QFrame(objectName="canvas")
-        self.canvas.setFixedHeight(80)
-        progress_layout.addWidget(self.canvas)
+        # Wrapped in scroll area so the progress grid can scroll when window is small
+        # or there are many tasks. This makes the top-left box area usable/compact
+        # instead of overly squished. Visual design of the boxes and canvas bg unchanged.
+        self.boxes_scroll = QScrollArea()
+        self.boxes_scroll.setWidget(self.canvas)
+        self.boxes_scroll.setWidgetResizable(False)
+        self.boxes_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.boxes_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.boxes_scroll.setFrameShape(QFrame.NoFrame)
+        self.boxes_scroll.setMinimumHeight(60)
+        progress_layout.addWidget(self.boxes_scroll)
         self.box_size = 15
         self.padding = 2
-        # Initial value only — _layout_progress_boxes recomputes from the
-        # live canvas width at render start and on every resize (UI-02).
-        self.boxes_per_row = (780 - self.padding) // (self.box_size + self.padding)
+        # Initial value — recomputed in _layout_progress_boxes based on real size.
         self.progress_boxes = []
+        # Give canvas a reasonable starting size so first _layout has good viewport hint
+        self.canvas.resize(300, 80)
         thread_frame = QFrame()
-        thread_frame.setFixedHeight(120)
+        # Removed hard fixed height — now flexible. Minimum preserves worker row readability.
+        thread_frame.setMinimumHeight(80)
         self.thread_layout = QVBoxLayout(thread_frame)
         self.thread_layout.setSpacing(2)
         self.thread_layout.setContentsMargins(5, 2, 5, 2)
@@ -1697,7 +1716,9 @@ class VideoRendererTool(QMainWindow):
         progress_layout.addWidget(thread_frame)
         self.output_text = QTextEdit()
         self.output_text.document().setMaximumBlockCount(2000)
-        self.output_text.setFixedHeight(180)
+        # Removed hard fixed height for better responsiveness on small windows.
+        # Minimum keeps output visible but allows it to grow/shrink with splitter.
+        self.output_text.setMinimumHeight(80)
         self.output_text.setReadOnly(True)
         progress_layout.addWidget(self.output_text)
         controls_frame = QFrame(objectName="sub_frame")
@@ -1706,8 +1727,10 @@ class VideoRendererTool(QMainWindow):
         controls_layout.setSpacing(5)
         top_controls = QHBoxLayout(spacing=5)
         dir_btn = QPushButton("📍 Directory")
-        dir_btn.setFixedWidth(150)
-        dir_btn.setFixedHeight(35)
+        # Reduced hard fixed size for responsiveness. Minimum keeps button usable.
+        # Visual style (color, border, emoji) unchanged.
+        dir_btn.setMinimumWidth(100)
+        dir_btn.setMinimumHeight(28)
         dir_btn.setToolTip("Choose output folder")
         dir_btn.clicked.connect(self.select_output_directory)
         self.dir_label = QLabel()
@@ -1724,8 +1747,10 @@ class VideoRendererTool(QMainWindow):
         self.dir_label.setStyleSheet("padding-left: 10px; padding-right: 24px;")
         self._set_output_dir_label("")
         open_btn = QPushButton("📂 Open")
-        open_btn.setFixedWidth(150)
-        open_btn.setFixedHeight(35)
+        # Reduced hard fixed size — now adapts better on small windows.
+        # Look (colors, shape) kept identical.
+        open_btn.setMinimumWidth(100)
+        open_btn.setMinimumHeight(28)
         open_btn.setToolTip("Open output folder in Explorer")
         open_btn.clicked.connect(self.open_output_directory)
         top_controls.addWidget(dir_btn)
@@ -1734,13 +1759,15 @@ class VideoRendererTool(QMainWindow):
         bottom_controls = QHBoxLayout(spacing=5)
         bottom_controls.addStretch(1)
         self.btn_start = QPushButton("🚀 Start")
-        self.btn_start.setFixedWidth(150)
-        self.btn_start.setFixedHeight(30)
+        # Hard fixed sizes relaxed to minimums. Enables compact mode on small windows.
+        # Exact same visual design and emojis preserved.
+        self.btn_start.setMinimumWidth(110)
+        self.btn_start.setMinimumHeight(26)
         self.btn_start.setToolTip("Begin rendering (F5)")
         self.btn_start.clicked.connect(self.start_render)
         self.btn_cancel = QPushButton("🛑 Stop")
-        self.btn_cancel.setFixedWidth(150)
-        self.btn_cancel.setFixedHeight(30)
+        self.btn_cancel.setMinimumWidth(110)
+        self.btn_cancel.setMinimumHeight(26)
         self.btn_cancel.setToolTip("Cancel current renders (Esc)")
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.setProperty("delete", True)
@@ -1803,16 +1830,19 @@ class VideoRendererTool(QMainWindow):
         # vertical scrollbar) and shares sum to 0.95 so columns can never
         # outgrow the viewport — kills the always-on horizontal scrollbars.
         total_width = self.tree_videos.viewport().width()
-        self.tree_videos.setColumnWidth(0, int(total_width * 0.067))
-        self.tree_videos.setColumnWidth(1, int(total_width * 0.57))
-        self.tree_videos.setColumnWidth(2, int(total_width * 0.142))
-        self.tree_videos.setColumnWidth(3, int(total_width * 0.171))
+        # Improved for small windows: use proportional but enforce mins so columns stay usable.
+        # No visual change on normal sizes.
+        self.tree_videos.setColumnWidth(0, max(30, int(total_width * 0.067)))
+        self.tree_videos.setColumnWidth(1, max(180, int(total_width * 0.57)))
+        self.tree_videos.setColumnWidth(2, max(60, int(total_width * 0.142)))
+        self.tree_videos.setColumnWidth(3, max(70, int(total_width * 0.171)))
         total_width = self.tree_encoders.viewport().width()
-        self.tree_encoders.setColumnWidth(0, int(total_width * 0.083))
-        self.tree_encoders.setColumnWidth(1, int(total_width * 0.165))
-        self.tree_encoders.setColumnWidth(2, int(total_width * 0.165))
-        self.tree_encoders.setColumnWidth(3, int(total_width * 0.454))
-        self.tree_encoders.setColumnWidth(4, int(total_width * 0.083))
+        # Improved for small windows: mins to keep readable.
+        self.tree_encoders.setColumnWidth(0, max(30, int(total_width * 0.083)))
+        self.tree_encoders.setColumnWidth(1, max(80, int(total_width * 0.165)))
+        self.tree_encoders.setColumnWidth(2, max(80, int(total_width * 0.165)))
+        self.tree_encoders.setColumnWidth(3, max(120, int(total_width * 0.454)))
+        self.tree_encoders.setColumnWidth(4, max(40, int(total_width * 0.083)))
         if hasattr(self, "empty_videos_hint"):
             self.empty_videos_hint.setGeometry(self.tree_videos.viewport().rect())
         total_width = self.tree_output.viewport().width()
@@ -1821,26 +1851,33 @@ class VideoRendererTool(QMainWindow):
         # their share to make room. Polish batch (UI-01): viewport base
         # + shares sum to 0.95 (see tree_videos note above). The user
         # can still drag-resize at runtime; this just sets the split.
+        # Improved: added mins for small window usability (no design change).
         if self.tree_output.columnCount() >= 9:
-            self.tree_output.setColumnWidth(0, int(total_width * 0.048))
-            self.tree_output.setColumnWidth(1, int(total_width * 0.171))
-            self.tree_output.setColumnWidth(2, int(total_width * 0.237))
-            self.tree_output.setColumnWidth(3, int(total_width * 0.076))
-            self.tree_output.setColumnWidth(4, int(total_width * 0.085))
-            self.tree_output.setColumnWidth(5, int(total_width * 0.095))
-            self.tree_output.setColumnWidth(6, int(total_width * 0.095))  # VMAF
-            self.tree_output.setColumnWidth(7, int(total_width * 0.067))  # pHash
-            self.tree_output.setColumnWidth(8, int(total_width * 0.076))  # SSIM
+            self.tree_output.setColumnWidth(0, max(25, int(total_width * 0.048)))
+            self.tree_output.setColumnWidth(1, max(80, int(total_width * 0.171)))
+            self.tree_output.setColumnWidth(2, max(100, int(total_width * 0.237)))
+            self.tree_output.setColumnWidth(3, max(40, int(total_width * 0.076)))
+            self.tree_output.setColumnWidth(4, max(50, int(total_width * 0.085)))
+            self.tree_output.setColumnWidth(5, max(50, int(total_width * 0.095)))
+            self.tree_output.setColumnWidth(
+                6, max(50, int(total_width * 0.095))
+            )  # VMAF
+            self.tree_output.setColumnWidth(
+                7, max(40, int(total_width * 0.067))
+            )  # pHash
+            self.tree_output.setColumnWidth(
+                8, max(40, int(total_width * 0.076))
+            )  # SSIM
         else:
             # Fallback to the pre-3.2 layout if the tree was built
             # with only the legacy 6 columns (defensive — should not
             # happen at runtime, but covers test harnesses).
-            self.tree_output.setColumnWidth(0, int(total_width * 0.083))
-            self.tree_output.setColumnWidth(1, int(total_width * 0.207))
-            self.tree_output.setColumnWidth(2, int(total_width * 0.289))
-            self.tree_output.setColumnWidth(3, int(total_width * 0.124))
-            self.tree_output.setColumnWidth(4, int(total_width * 0.124))
-            self.tree_output.setColumnWidth(5, int(total_width * 0.124))
+            self.tree_output.setColumnWidth(0, max(30, int(total_width * 0.083)))
+            self.tree_output.setColumnWidth(1, max(80, int(total_width * 0.207)))
+            self.tree_output.setColumnWidth(2, max(100, int(total_width * 0.289)))
+            self.tree_output.setColumnWidth(3, max(50, int(total_width * 0.124)))
+            self.tree_output.setColumnWidth(4, max(50, int(total_width * 0.124)))
+            self.tree_output.setColumnWidth(5, max(50, int(total_width * 0.124)))
         # Batch UI-3 (UI-02/UI-09): reflow the progress grid to the live
         # canvas width and re-elide the output-directory label.
         if hasattr(self, "progress_boxes"):
@@ -1922,7 +1959,7 @@ class VideoRendererTool(QMainWindow):
                 font-weight: bold;
                 font-size: 12px;
             }
-            QPushButton[toolbar="true"] { min-width: 120px; }
+            QPushButton[toolbar="true"] { min-width: 100px; }
             QPushButton:hover { background-color: #0056b3; }
             QPushButton:disabled { background-color: #6c757d; }
             QPushButton[delete="true"] { background-color: #dc3545; }
@@ -2894,20 +2931,33 @@ class VideoRendererTool(QMainWindow):
             )
 
     def _layout_progress_boxes(self):
-        cell = self.box_size + self.padding
-        self.boxes_per_row = max(1, (self.canvas.width() - self.padding) // cell)
+        # The boxes grid is now inside a QScrollArea (see setup_ui).
+        # This prevents the top-left box area from becoming too compact/squished on small
+        # windows or with many tasks. Boxes stay at a comfortable size; scrollbar appears
+        # automatically. Design (colors, borders, rounded look) is identical to before.
+        target_box = self.box_size  # 15px base for normal look
+        # Use the scroll viewport width if available for deciding columns (responsive)
+        if hasattr(self, "boxes_scroll") and self.boxes_scroll:
+            avail_w = max(80, self.boxes_scroll.viewport().width())
+        else:
+            avail_w = max(80, self.canvas.width() or 300)
+        cell = target_box + self.padding
+        self.boxes_per_row = max(1, (avail_w - self.padding) // cell)
         rows_needed = (
             -(-len(self.progress_boxes) // self.boxes_per_row)
             if self.progress_boxes
             else 1
         )
-        self.canvas.setFixedHeight(min(rows_needed, 8) * cell + self.padding)
+        # Size canvas exactly to the grid content so scroll works correctly
+        full_w = self.boxes_per_row * cell + self.padding
+        full_h = rows_needed * cell + self.padding
+        self.canvas.resize(full_w, full_h)
         for i, box in enumerate(self.progress_boxes):
             box.setGeometry(
-                (i % self.boxes_per_row) * cell,
-                (i // self.boxes_per_row) * cell,
-                self.box_size,
-                self.box_size,
+                (i % self.boxes_per_row) * cell + self.padding // 2,
+                (i // self.boxes_per_row) * cell + self.padding // 2,
+                target_box,
+                target_box,
             )
 
     def create_progress_box(self, index: int) -> QFrame:
@@ -3058,6 +3108,7 @@ class VideoRendererTool(QMainWindow):
             # (bars/labels/_worker_state) is aligned with the
             # render_threads/render_workers created later in this method.
             self._rebuild_worker_rows(self.num_threads)
+
             # #1: re-arm the one-time queue-persistence warning for this batch,
             # so a disk issue that cleared between batches can warn again.
             self._queue_persist_warned = False
@@ -3360,10 +3411,12 @@ class VideoRendererTool(QMainWindow):
             thread_row = QHBoxLayout()
             thread_row.setSpacing(5)
             label = QLabel(f"#{i + 1}")
-            label.setFixedWidth(30)
+            # Relaxed fixed width for better narrow-window behavior.
+            label.setMinimumWidth(24)
             thread_row.addWidget(label)
             status = QLabel(f"\U0001f7e2 Worker {i + 1} \u2014 Ready")
-            status.setMinimumWidth(280)
+            # Further reduced for better compactness on small/resize. Eliding in render helps.
+            status.setMinimumWidth(120)
             status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             thread_row.addWidget(status)
             progress = QProgressBar()
@@ -3461,9 +3514,17 @@ class VideoRendererTool(QMainWindow):
         n = idx + 1
         s = st["state"]
         if s == "running":
-            text = f"\U0001f7e1 Worker {n} \u2014 Rendering {st['basename']} ({st['percent']}%)"
+            name = st["basename"]
+            # Functional improvement: elide long names for compactness on small windows.
+            # Visual format (emoji, structure) unchanged.
+            if len(name) > 28:
+                name = name[:25] + "..."
+            text = f"\U0001f7e1 Worker {n} \u2014 Rendering {name} ({st['percent']}%)"
         elif s == "completed":
-            text = f"\u2705 Worker {n} \u2014 Completed {st['basename']}"
+            name = st["basename"]
+            if len(name) > 28:
+                name = name[:25] + "..."
+            text = f"\u2705 Worker {n} \u2014 Completed {name}"
         elif s == "failed":
             err = st["error"] or "unknown error"
             if len(err) > 40:
@@ -4280,6 +4341,11 @@ class VideoRendererTool(QMainWindow):
         )
         if delete:
             button.setProperty("delete", True)
+        # For toolbar options (Select, Add URL etc): use stylesheet min (120px) for balance.
+        # Lower code min allows compact on small windows for responsiveness.
+        # Design unchanged.
+        button.setMinimumWidth(80)
+        button.setMinimumHeight(24)
         return button
 
     def on_mode_changed(self):
@@ -5303,6 +5369,9 @@ class VideoRendererTool(QMainWindow):
 
         dlg = QDialog(self)
         dlg.setWindowTitle("Render Health")
+        # Changed to min size for better behavior on small main windows / high DPI.
+        # Design and content inside unchanged.
+        dlg.setMinimumSize(700, 400)
         dlg.resize(900, 500)
         layout = QVBoxLayout(dlg)
 
@@ -5380,6 +5449,8 @@ class VideoRendererTool(QMainWindow):
         first = recs[0]
         dlg = QDialog(self)
         dlg.setWindowTitle("Suggested re-render")
+        # Min size for responsiveness on small screens.
+        dlg.setMinimumSize(400, 280)
         dlg.resize(520, 360)
         layout = QVBoxLayout(dlg)
         layout.addWidget(QLabel(f"File: {row.get('out_name') or row.get('in_name')}"))
@@ -5488,6 +5559,7 @@ class EncoderDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
+        self.setMinimumSize(400, 300)
         self.resize(500, 400)
         self.result = None
         self.initial_values = initial_values or {
