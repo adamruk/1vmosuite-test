@@ -428,9 +428,9 @@ First release of the revived codebase. Covers the decompile-and-restore effort a
 
 ### Fixed
 
-- [_pending_] fix(ui): auto_render compaction — 1280x800 default / 960x640 min, 2x4 QGridLayout button block, relaxed combo sizing, scroll-wrapped slot + progress areas
+- [66e9da7] fix(ui): auto_render compaction — 1280x800 default / 960x640 min, 2x4 QGridLayout button block, relaxed combo sizing, scroll-wrapped slot + progress areas
 
-- [_pending_] fix(render): #1 surface queue-persistence write failures once per batch (latched _note_queue_persist_failure; disk-full/permission errors no longer silently lose resume capability)
+- [4434130] fix(render): #1 surface queue-persistence write failures once per batch (latched _note_queue_persist_failure; disk-full/permission errors no longer silently lose resume capability)
 
 - [d71da57] **Logging — cp1252 crash on non-ASCII filenames:** All four
   apps (auto_render, cutter, merge, mixer) now open their per-user log
